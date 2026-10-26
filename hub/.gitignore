@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.env
+*.env
+*.db
+*.sqlite*
+.codex-hub-state/
+.codex-hub-inputs/
+output/
+build/
+dist/
+*.egg-info/

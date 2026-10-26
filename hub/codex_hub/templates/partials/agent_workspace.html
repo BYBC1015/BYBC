@@ -1,0 +1,61 @@
+<dialog class="agent-workspace" data-agent-workspace aria-labelledby="agent-workspace-title">
+  <header class="agent-workspace-head">
+    <div><small>TEAM WORKSPACE <span> / {{ project.name }}</span></small><h2 id="agent-workspace-title">我的智能体团队<span class="agent-title-dot">.</span></h2><p>各有职责，持续积累，一起完成工作。</p></div>
+    <button type="button" class="icon-button" data-agents-close aria-label="关闭智能体工作区">×</button>
+  </header>
+  <div class="agent-roster" data-agent-roster>
+    <div class="agent-workspace-controls">
+      <label class="agent-search"><span class="sr-only">搜索智能体或职责</span><input type="search" data-agent-search placeholder="搜索名称、职业或职责" aria-label="搜索智能体或职责"></label>
+      <div class="agent-filters" role="group" aria-label="筛选智能体">
+        <button type="button" data-agent-filter="all" aria-pressed="true">全部</button>
+        <button type="button" data-agent-filter="ready" aria-pressed="false">可分配</button>
+        <button type="button" data-agent-filter="active" aria-pressed="false">有任务</button>
+        <button type="button" data-agent-filter="learned" aria-pressed="false">有经验</button>
+      </div>
+      <div class="agent-view-toggle" role="group" aria-label="团队展示方式"><button type="button" data-agent-view="grid" aria-pressed="true" aria-label="卡片视图">▦</button><button type="button" data-agent-view="list" aria-pressed="false" aria-label="列表视图">☰</button></div>
+      <button class="primary agent-create-trigger" type="button" data-agent-create-open>＋ 创建智能体</button>
+    </div>
+    <div class="agent-workspace-scroll">
+      <div data-auto-refresh="agents">{% include "partials/agent_workspace_content.html" %}</div>
+      <p class="agent-no-match" data-agent-no-match hidden>没有匹配的智能体，试试其他名称或筛选条件。</p>
+    </div>
+    <footer class="agent-workspace-footer">
+      <span data-agent-selection-status role="status" aria-live="polite">勾选执行者，开启一场协作</span>
+      <div><button type="button" data-agent-use-selection class="primary" disabled>开始协作</button><a href="#members" data-agent-panel-link>管理执行连接</a></div>
+      <small>每个智能体保留自己的身份和经验，可以参与多个对话。</small>
+    </footer>
+  </div>
+  <form class="agent-assignment-form" data-agent-create method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/agents') }}" hidden>
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <div class="agent-assignment-body">
+      <h3>创建一个长期执行者</h3><p>设定它是谁、擅长什么。每次工作留下的经验会延续到下一次任务。</p>
+      <div class="agent-form-columns"><label><span>名称</span><input name="name" maxlength="60" required placeholder="例如：林墨"></label><label><span>身份类型</span><select name="kind"><option value="worker">智能体 · 执行工作</option><option value="controller">总控 · 分工与验收</option></select></label></div>
+      <label><span>职业与职责</span><input name="job" maxlength="200" required placeholder="例如：视觉设计师，负责界面与交互设计"></label>
+      <label><span>工作方式</span><textarea name="instructions" rows="4" maxlength="8000" placeholder="告诉它工作标准、擅长的方向和交付要求"></textarea></label>
+      <label><span>执行连接</span><select name="device_id"><option value="">稍后绑定，先建立身份</option>{% for member in memberships if member.permission in ['write','admin'] and not member.server_ai_provider %}<option value="{{ member.device_id }}">{{ member.device_label }}</option>{% endfor %}</select><small>连接负责运行任务，同一个连接可以承载多个智能体。</small></label>
+      <div class="agent-policy-note"><strong>决策首选 Codex CLI，备用 DeepSeek</strong><span>完成工作后自动记录结果与复盘，积累可追溯的经验。</span></div>
+    </div>
+    <footer class="agent-workspace-footer"><div><button type="button" data-agent-back>返回团队</button><button type="submit" class="primary">创建智能体</button></div></footer>
+  </form>
+  <form class="agent-assignment-form" data-agent-assignment method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/tasks') }}" hidden>
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <div class="agent-assignment-body">
+      <h3>分配一项新任务</h3><p>执行者会带着职责与经验接手，并判断沿用已有对话还是开启新对话。</p>
+      <label><span>负责的智能体</span><select name="assigned_agent_id" required>{% for agent in durable_agents if agent.active and agent.device_id %}<option value="{{ agent.id }}">{{ agent.name }} · {{ agent.job }}</option>{% endfor %}</select></label>
+      <label><span>任务标题</span><input name="title" required maxlength="200" placeholder="例如：完成下一版界面并交付预览"></label>
+      <label><span>说明与验收要求</span><textarea name="description" rows="5" placeholder="需要做什么、参考哪些资料、怎样算完成"></textarea></label>
+      <label><span>优先级</span><select name="priority"><option value="normal">普通</option><option value="high">优先处理</option><option value="low">不紧急</option></select></label>
+    </div>
+    <footer class="agent-workspace-footer"><div><button type="button" data-agent-back data-agent-assignment-back>返回团队</button><button type="submit" class="primary">创建并分配</button></div></footer>
+  </form>
+  <form class="agent-assignment-form" data-agent-discussion method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/agent-discussions') }}" hidden>
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="request_key" value="{{ dispatch_key }}">
+    <div class="agent-assignment-body">
+      <h3>让团队一起处理</h3><p>在同一对话中安排工作，每位参与者保留独立身份、任务和经验。</p>
+      <div class="agent-discussion-members" data-agent-discussion-members aria-label="本次协作参与者"></div>
+      <label><span>协作主题</span><input name="title" required maxlength="200" placeholder="例如：共同评审新版首页"></label>
+      <label><span>需要一起完成什么</span><textarea name="description" rows="6" required placeholder="说明目标、各自关注点和希望得到的结果"></textarea></label>
+    </div>
+    <footer class="agent-workspace-footer"><div><button type="button" data-agent-back>返回团队</button><button type="submit" class="primary">创建对话并分配</button></div></footer>
+  </form>
+</dialog>

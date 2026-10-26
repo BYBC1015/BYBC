@@ -1,0 +1,23 @@
+[Unit]
+Description=Codex Hub weekly engineering maintenance queue
+After=network-online.target codex-hub.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=codex-hub
+Group=codex-hub
+SupplementaryGroups=systemd-journal
+WorkingDirectory=/opt/codex-hub
+Environment=CODEX_HUB_DATA_DIR=/var/lib/codex-hub
+EnvironmentFile=-/etc/codex-hub.env
+ExecStartPre=/opt/codex-hub/.venv/bin/python -m codex_hub.maintenance_diagnostics --output /var/lib/codex-hub/maintenance-diagnostics.json
+ExecStart=/opt/codex-hub/.venv/bin/python -m codex_hub.maintenance --once --project private-server-buildout --diagnostics-json /var/lib/codex-hub/maintenance-diagnostics.json
+TimeoutStartSec=90
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/codex-hub
+UMask=0077
+

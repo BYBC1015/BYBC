@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}下载应用 - Codex Hub{% endblock %}
+{% block content %}
+<section class="page-head downloads-head">
+  <div>
+    <h1>下载应用</h1>
+    <p>从这里为不同设备安装同一套最新客户端。版本更新后，本页下载入口会自动指向最新安装包。</p>
+  </div>
+  <a class="button" href="{{ app_path('/api/releases') }}">版本信息</a>
+</section>
+
+<section class="download-grid">
+  {% for release in releases %}
+  <article class="download-card platform-{{ release.platform }}">
+    <div class="download-platform">
+      <span class="download-platform-icon">{{ {"windows": "▣", "android": "◆", "bybc-video": "▶"}.get(release.platform, "◇") }}</span>
+      <div>
+        <strong>{{ release.platform_label }}</strong>
+        <small>当前版本 v{{ release.version }}</small>
+      </div>
+    </div>
+    {% if release.platform == "windows" and release.filename.startswith("CodexHub-Setup-") %}
+    <p>一次安装 Codex Bridge，默认开机自动连接；从主页面“打开工具箱”使用视频末帧延长、可灵批处理和音乐制作。音乐工具节拍工坊需已安装达芬奇 Studio 21.1。</p>
+    <p>升级时自动检测旧软件，继承已有 Token 和配置；新版校验成功后清理已识别的旧程序，保留方案、历史和作品。</p>
+    {% endif %}
+    <dl class="release-meta">
+      <div><dt>文件</dt><dd>{{ release.filename }}</dd></div>
+      <div><dt>大小</dt><dd>{{ "%.1f"|format(release.byte_size / 1024 / 1024) }} MB</dd></div>
+      <div><dt>校验</dt><dd><code>{{ release.sha256[:12] }}…</code></dd></div>
+    </dl>
+    <a class="button primary download-button" href="{{ release.download_url }}" download="{{ release.filename }}">
+      下载 {{ release.platform_label }}{% if release.platform != "bybc-video" %} 版{% endif %}
+    </a>
+  </article>
+  {% endfor %}
+
+  <article class="download-card platform-apple is-planned">
+    <div class="download-platform">
+      <span class="download-platform-icon">◇</span>
+      <div>
+        <strong>Apple</strong>
+        <small>后续版本</small>
+      </div>
+    </div>
+    <p>iPhone、iPad 与 macOS 客户端将在后续阶段加入。</p>
+    <button class="button" type="button" disabled>敬请期待</button>
+  </article>
+</section>
+
+{% if not releases %}
+<section class="empty-state">
+  <strong>安装包正在准备</strong>
+  <p>发布目录中暂时没有可下载版本。</p>
+</section>
+{% endif %}
+
+<section class="download-note panel">
+  <strong>客户端与生产工具统一下载</strong>
+  <p>Windows 设备安装同一版本的 Codex Bridge，Android 设备从本页更新 Codex Hub；BYBC 视频工具用于批量延长视频末帧，并按时长规则自动命名。</p>
+</section>
+{% endblock %}

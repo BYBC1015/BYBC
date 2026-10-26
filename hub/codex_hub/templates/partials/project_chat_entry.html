@@ -1,0 +1,72 @@
+<article id="entry-{{ entry.id }}" class="chat-message {% if entry.author_type == 'user' %}from-user{% else %}from-device{% endif %}" data-entry-id="{{ entry.id }}" data-entry-author-type="{{ entry.author_type }}" data-entry-source="{{ entry.source_label }}" tabindex="-1">
+  <div class="avatar">{{ entry.source_label[:1]|upper }}</div>
+  <div class="chat-body">
+    <div class="chat-author">
+      <strong>{{ entry.source_label }}</strong>
+      {% if entry.author_type == 'user' %}<span>You</span>{% endif %}
+      {% if entry.server_ai_peak_call %}<span class="server-ai-peak-badge">高峰调用</span>{% endif %}
+      <small>{{ entry.created_at[11:16] if entry.created_at else "" }}</small>
+    </div>
+    <div class="message-card">
+      <div class="message-content-column">
+        <div class="message-markdown" data-reading-document="{{ entry.id }}" data-markdown-source>{{ entry.body_markdown }}</div>
+      </div>
+
+      {% if entry.images %}
+      <section class="message-media-section" aria-label="图片">
+        <div class="message-image-grid" data-image-count="{{ entry.images|length }}">
+          {% for file in entry.images %}
+          <a class="message-image-link"
+            href="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}"
+            data-media-image
+            data-media-id="{{ file.id }}"
+            data-media-entry-id="{{ entry.id }}"
+            data-media-scope="entry-{{ entry.id }}"
+            data-media-src="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}?inline=1"
+            data-media-preview="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}?inline=1&amp;size=preview"
+            data-media-thumb="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}?inline=1&amp;size=thumb"
+            data-media-download="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}"
+            data-media-filename="{{ file.original_filename }}"
+            data-media-source="{{ entry.source_label }} · 消息 #{{ entry.id }}"
+            aria-label="查看图片 {{ file.original_filename }}">
+            <span class="media-image-frame" style="aspect-ratio: {{ file.aspect_ratio_css }}">
+              <img class="message-image" data-media-image-preview src="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}?inline=1&amp;size=preview" alt="{{ file.original_filename }}"{% if file.width and file.height %} width="{{ file.width }}" height="{{ file.height }}"{% endif %} loading="lazy" decoding="async">
+            </span>
+          </a>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+      {% if entry.videos %}
+      <section class="message-media-section message-video-list" aria-label="视频">
+        {% for file in entry.videos %}
+        <a class="message-file" data-video-attachment
+          href="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}"
+          data-video-id="{{ project.slug }}-{{ file.id }}"
+          data-file-name="{{ file.original_filename }}"
+          data-content-type="{{ file.content_type }}"
+          data-byte-size="{{ file.byte_size }}">
+          <span aria-hidden="true">▶</span>
+          <span><strong>{{ file.original_filename }}</strong><small>{{ file.byte_size_display }} · 点击后才加载视频</small></span>
+        </a>
+        {% endfor %}
+      </section>
+      {% endif %}
+
+      {% if entry.files %}
+      <section class="message-media-section message-file-list" aria-label="文件">
+        {% for file in entry.files %}
+        <a class="message-file" href="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}">
+          <span aria-hidden="true">↧</span>
+          <span>
+            <strong>{{ file.original_filename }}</strong>
+            <small>{{ file.byte_size_display }} · {{ file.content_type }}</small>
+          </span>
+        </a>
+        {% endfor %}
+      </section>
+      {% endif %}
+    </div>
+  </div>
+</article>

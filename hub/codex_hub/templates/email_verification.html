@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}确认收件邮箱 - Codex Hub{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ app_path('/static/email-notifications.css') }}?v=20261004-1">{% endblock %}
+{% block content %}
+<section class="email-card email-confirm">
+  <p class="email-eyebrow">邮件通知</p><h1>确认收件邮箱</h1>
+  {% if login_required %}<p>请先登录 Hub 管理员账号，然后重新打开邮件中的验证链接。</p><a class="button" href="{{ app_path('/login') }}">登录 Hub</a>
+  {% elif verification %}<p>确认将 <strong>{{ verification.address }}</strong> 设为当前管理员的通知收件邮箱。</p><p class="muted">打开本页不会自动验证。只有你点击下方按钮后，邮箱才会被标记为已验证。验证后仍需手动开启自动提醒。</p><form method="post" action="{{ app_path('/notifications/email/verify') }}"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="token" value="{{ token }}"><button type="submit">确认验证此邮箱</button></form>
+  {% else %}<p>验证链接已失效、已使用，或不属于当前管理员。请在通知设置中重新发送验证邮件。</p><a class="button" href="{{ app_path('/settings/notifications/email') }}">返回邮件通知</a>{% endif %}
+</section>
+{% endblock %}

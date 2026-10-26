@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}{{ conversation.title }} - {{ project.name }}{% endblock %}
+{% block body_class %}agent-profile-screen{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ app_path('/static/hub-workspace.css') }}?v=20261027-agents2">{% endblock %}
+{% block content %}
+{% set status_names = {'open':'待领取','claimed':'已领取','in_progress':'进行中','blocked':'遇到阻碍','review':'待复核','done':'已完成','cancelled':'已取消'} %}
+<div class="agent-profile-shell">
+  <a class="agent-back-link" href="{{ app_path('/projects/' ~ project.slug) }}">← {{ project.name }}</a>
+  <header class="agent-profile-hero agent-conversation-hero"><div><small>WORK CONVERSATION · #{{ conversation.id }}</small><h1>{{ conversation.title }}</h1><p>{{ conversation.purpose }}</p></div><span class="agent-profile-status">{{ participants|length }} 位参与者</span></header>
+  <div class="agent-profile-layout">
+    <div class="agent-profile-main">
+      <section class="agent-profile-panel"><div class="agent-section-title"><h2>共同的工作记录</h2><span>{{ entries|length }} 条消息</span></div><div class="agent-conversation-messages">{% for entry in entries %}<article class="agent-conversation-message"><header><strong>{{ entry.agent_name if entry.author_type != 'user' and entry.agent_name else entry.source_label }}</strong><small>{{ entry.created_at[:16]|replace('T',' ') }}</small></header><a href="{{ app_path('/projects/' ~ project.slug ~ '/tasks/' ~ entry.task_id) }}">{{ entry.task_title }}</a><pre>{{ entry.body_markdown }}</pre></article>{% else %}<div class="agent-profile-empty"><strong>工作已经安排</strong><p>执行者会在各自任务中处理工作，进展与结果将在这里汇集。</p></div>{% endfor %}</div></section>
+      <section class="agent-profile-panel"><div class="agent-section-title"><h2>继续安排工作</h2></div><form class="agent-conversation-dispatch" data-agent-conversation-dispatch method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/conversations/' ~ conversation.id ~ '/dispatch') }}"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><input type="hidden" name="request_key" value="{{ dispatch_key }}"><fieldset><legend>交给谁处理</legend><div class="agent-participant-choices">{% for participant in participants %}<label><input type="checkbox" name="agent_ids" value="{{ participant.id }}" {% if participant.active and participant.device_id %}checked{% else %}disabled{% endif %}><span>{{ participant.name }}</span>{% if not participant.active or not participant.device_id %}<small>暂不可分配</small>{% endif %}</label>{% endfor %}</div></fieldset><label><span>本次任务</span><input name="title" required maxlength="200" placeholder="例如：根据评审意见完成下一版"></label><label><span>工作说明</span><textarea name="description" required rows="5" placeholder="补充目标、反馈和需要继续完成的事"></textarea></label><button type="submit" class="primary">分配给选中的执行者</button></form></section>
+    </div>
+    <aside class="agent-profile-panel"><div class="agent-section-title"><h2>参与者</h2></div><div class="agent-record-list">{% for participant in participants %}<a href="{{ app_path('/projects/' ~ project.slug ~ '/agents/' ~ participant.id) }}"><span><strong>{{ participant.name }}</strong><small>{{ participant.job }}</small></span><span class="agent-record-status">{{ '总控' if participant.kind == 'controller' else '智能体' }}</span></a>{% endfor %}</div><h3>这场对话的任务</h3><div class="agent-record-list">{% for task in tasks %}<a href="{{ app_path('/projects/' ~ project.slug ~ '/tasks/' ~ task.id) }}"><span><strong>{{ task.title }}</strong><small>{{ task.result_summary or '等待工作进展' }}</small></span><span class="agent-record-status">{{ status_names.get(task.status, task.status) }}</span></a>{% endfor %}</div></aside>
+  </div>
+</div>
+{% endblock %}

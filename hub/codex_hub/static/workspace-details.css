@@ -1,0 +1,94 @@
+/* Keep supporting identity and task pages in the same quiet workspace. */
+html body:is(.agent-profile-screen,.task-profile-screen) {
+  color-scheme:dark; background:#101312; color:#e9ece5;
+  --hub-ink:#e9ece5; --hub-muted:#acb5ac;
+  font-family:Inter,"Segoe UI","Microsoft YaHei",sans-serif;
+}
+html body:is(.agent-profile-screen,.task-profile-screen) .topbar {
+  background:#181d19; border-bottom:1px solid #303a31; box-shadow:none;
+}
+html body:is(.agent-profile-screen,.task-profile-screen) .topbar :is(.brand,.nav a) {color:#c1cbbd;}
+html body:is(.agent-profile-screen,.task-profile-screen) .brand-logo {filter:grayscale(1);}
+html body:is(.agent-profile-screen,.task-profile-screen) .nav a[aria-current=page] {background:#39372e;color:#e6ddcd;border-color:#5c5548;}
+html body:is(.agent-profile-screen,.task-profile-screen) .shell {max-width:1280px;padding:28px 32px 64px;}
+html body:is(.agent-profile-screen,.task-profile-screen) :is(h1,h2,h3,strong) {color:#eef0e7;}
+html body:is(.agent-profile-screen,.task-profile-screen) :is(a,.back-link,.agent-back-link) {color:#d5c1a1;}
+html body:is(.agent-profile-screen,.task-profile-screen) :is(button,.button) {
+  background:#2b332c; color:#dce4d7; border:1px solid #465346; border-radius:12px; box-shadow:none;
+  font-size:13px; line-height:1.5;
+}
+html body:is(.agent-profile-screen,.task-profile-screen) :is(button,.button):hover {background:#374238;}
+html body:is(.agent-profile-screen,.task-profile-screen) button.primary {background:#d4c1a2;color:#2d2b22;border-color:#d4c1a2;}
+html body:is(.agent-profile-screen,.task-profile-screen) :is(input:not([type=checkbox]),select,textarea) {
+  color:#e0e7d9; background:#141a15; border:1px solid #435042; border-radius:12px; box-shadow:none;
+  font-family:inherit; font-size:14px; line-height:1.7;
+}
+html body:is(.agent-profile-screen,.task-profile-screen) :is(a,button,input,select,textarea,summary):focus-visible {
+  outline:2px solid #dcc9a9;outline-offset:3px;
+}
+html body:is(.agent-profile-screen,.task-profile-screen) :is(p,.muted,small,dt,label>span) {color:#b3bfad;}
+html body:is(.agent-profile-screen,.task-profile-screen) :is(.panel,.agent-profile-panel) {
+  background:#1c241e; border:1px solid #344235; border-radius:20px; box-shadow:none;
+}
+html body.agent-profile-screen .agent-profile-hero {background:#1d251f;border:1px solid #39463a;border-radius:24px;padding:30px;}
+html body.agent-profile-screen .agent-profile-avatar {border-radius:50%;background:#c9bba3;color:#373226;}
+html body.agent-profile-screen .agent-profile-tabs {border-color:#303540;}
+html body.agent-profile-screen .agent-profile-tabs a {color:#c0bed0;font-size:14px;}
+html body.agent-profile-screen .agent-section-title :is(span,small),
+html body.agent-profile-screen .agent-section-intro {color:#aeb2c0;}
+html body.agent-profile-screen .agent-section-title small {font-size:11px;letter-spacing:.06em;}
+html body.agent-profile-screen .agent-experience {background:#222b23;border-color:#3d4b3d;border-radius:16px;margin-top:12px;}
+html body.agent-profile-screen .agent-experience :is(p,dd) {color:#d2ddc9;}
+html body.agent-profile-screen .agent-experience dt {color:#acb1c2;}
+html body.agent-profile-screen .agent-experience-meta {color:#b3b6c3;}
+html body.agent-profile-screen .agent-verification {background:#403725;color:#e5c990;}
+html body.agent-profile-screen .agent-verification.is-accepted {background:#263d35;color:#b5ddc9;}
+html body.agent-profile-screen .agent-history {border-color:#3a3e49;}
+html body.agent-profile-screen .agent-history summary {color:#cad8c1;}
+html body.agent-profile-screen .agent-record-list>a {border-color:#353944;}
+html body.agent-profile-screen .agent-record-list strong {color:#dce5d4;font-size:14px;}
+html body.agent-profile-screen .agent-record-list small {font-size:12px;color:#adbda6;}
+html body.agent-profile-screen .agent-record-status {background:#303c30;color:#bfceb8;font-size:12px;border-radius:8px;}
+html body.agent-profile-screen .agent-policy-note {background:#283227;border-color:#3e4c3c;border-radius:14px;}
+html body.agent-profile-screen .agent-policy-note span {color:#afc2a9;}
+html body.agent-profile-screen .agent-profile-panel label>small {font-size:12px;color:#aeb3c3;}
+html body.task-profile-screen .page-head {padding:10px 0 26px;gap:20px;}
+html body.task-profile-screen .page-head h1 {font-size:26px;line-height:1.5;font-weight:600;overflow-wrap:anywhere;}
+html body.task-profile-screen .task-detail-layout {display:grid;grid-template-columns:320px minmax(0,1fr);gap:20px;align-items:start;}
+html body.task-profile-screen .task-detail-layout>.panel {min-width:0;padding:24px;}
+html body.task-profile-screen .hub-main {display:block;min-height:0;}
+html body.task-profile-screen .empty-state {background:#242e24;border:1px solid #3b4a38;color:#bdccb4;border-radius:16px;}
+html body.task-profile-screen .task-facts .facts {font-size:13px;line-height:1.8;}
+html body.task-profile-screen .task-facts dd {color:#d2d4dd;overflow-wrap:anywhere;}
+html body.task-profile-screen .copy-box {background:#141b15;border:1px solid #394735;border-radius:14px;}
+html body.task-profile-screen .copy-box :is(p,pre) {color:#c1c5d1;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;}
+html body.task-profile-screen .section-head {border-color:#343944;}
+html body.task-profile-screen .section-head h2 {font-size:17px;font-weight:600;}
+html body.task-profile-screen .chat-stream {max-height:62vh;overflow:auto;padding:12px 0;scrollbar-color:#4e5361 transparent;}
+html body.task-profile-screen .chat-message {gap:12px;}
+html body.task-profile-screen .avatar {border-radius:50%;background:#c9b99b;color:#352e24;box-shadow:none;}
+html body.task-profile-screen .chat-bubble {min-width:0;background:#273026;border:0;border-radius:16px;color:#dde5d6;box-shadow:none;}
+html body.task-profile-screen .chat-meta {color:#adb3c4;font-size:12px;}
+html body.task-profile-screen .chat-bubble pre {background:#121913;color:#d7e2ce;overflow:auto;max-width:100%;border-radius:10px;}
+html body.task-profile-screen .task-record-markdown {font-size:14px;line-height:1.8;overflow-wrap:anywhere;}
+html body.task-profile-screen .task-record-markdown table {display:block;overflow:auto;}
+html body.task-profile-screen .chat-composer {background:#181f18;border-color:#41503c;border-radius:18px;margin-top:20px;}
+html body.task-profile-screen .chat-composer textarea {min-height:110px;}
+html body.task-profile-screen .prompt-panel {grid-column:1/-1;}
+html body.task-profile-screen .prompt-panel>summary {color:#b9bdca;cursor:pointer;font-size:13px;}
+html body.task-profile-screen .prompt-panel>summary span {color:#929baa;margin-left:14px;}
+html body.task-profile-screen .prompt-panel[open] .section-head {margin-top:20px;}
+html body.task-profile-screen .prompt-textarea {min-height:280px;}
+@media(max-width:800px) {
+  html body:is(.agent-profile-screen,.task-profile-screen) .shell {padding:18px 16px 40px;}
+  html body.task-profile-screen .task-detail-layout {grid-template-columns:minmax(0,1fr);}
+  html body.task-profile-screen .page-head {align-items:flex-start;flex-direction:column;}
+  html body.task-profile-screen .task-detail-layout>.panel {padding:18px;}
+}
+
+html body.agent-profile-screen .agent-section-title small { font-size:12px; letter-spacing:0; }
+html body.task-profile-screen .task-record-markdown { font-size:15px; }
+html body.agent-profile-screen #agent-model-settings { margin-top:26px; padding-top:22px; border-top:1px solid #3d493d; scroll-margin-top:24px; }
+html body.agent-profile-screen #agent-model-settings h3 { margin:0 0 18px; font-size:17px; }
+html body.agent-profile-screen #agent-model-settings select:disabled { color:#9da698; background:#1c251d; opacity:.7; cursor:not-allowed; }
+html body.agent-profile-screen .agent-model-error { background:#3c2824; border:1px solid #725046; color:#f0c8ba; padding:12px 14px; border-radius:12px; font-size:13px; line-height:1.7; }

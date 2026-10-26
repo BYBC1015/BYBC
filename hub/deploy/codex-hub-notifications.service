@@ -1,0 +1,24 @@
+[Unit]
+Description=Codex Hub outbound email notifications
+After=network-online.target codex-hub.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=codex-hub
+Group=codex-hub
+WorkingDirectory=/opt/codex-hub
+Environment=CODEX_HUB_DATA_DIR=/var/lib/codex-hub
+EnvironmentFile=-/etc/codex-hub.env
+ExecStart=/opt/codex-hub/.venv/bin/python -m codex_hub.notifications.worker
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/codex-hub
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

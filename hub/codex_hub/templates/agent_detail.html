@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ agent.name }} · 身份与经验 - {{ project.name }}{% endblock %}
+{% block body_class %}agent-profile-screen{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ app_path('/static/hub-workspace.css') }}?v=20261027-agents2"><link rel="stylesheet" href="{{ app_path('/static/workspace-details.css') }}?v=20261027-shell2"><script src="{{ app_path('/static/agent-model.js') }}?v=20261027-model1" defer></script>{% endblock %}
+{% block content %}
+{% set status_names = {'open':'待领取','claimed':'已领取','in_progress':'进行中','blocked':'遇到阻碍','review':'待复核','done':'已完成','cancelled':'已取消'} %}
+<div class="agent-profile-shell">
+  <a class="agent-back-link" href="{{ app_path('/projects/' ~ project.slug) }}">← {{ project.name }}</a>
+  <header class="agent-profile-hero">
+    <span class="agent-profile-avatar" aria-hidden="true">{{ agent.name[:1] }}</span>
+    <div><small>{{ '总控' if agent.kind == 'controller' else '智能体' }} · 身份 v{{ agent.revision }}</small><h1>{{ agent.name }}</h1><p>{{ agent.job }}</p></div>
+    <span class="agent-profile-status">{{ '已启用' if agent.active else '已暂停' }}</span>
+  </header>
+  <nav class="agent-profile-tabs" aria-label="智能体资料"><a href="#experience">经验积累</a><a href="#agent-work">工作记录</a><a href="#agent-settings">身份设置</a></nav>
+  <div class="agent-profile-layout">
+    <div class="agent-profile-main">
+      <section class="agent-profile-panel" id="experience">
+        <div class="agent-section-title"><div><small>LEARNING JOURNAL</small><h2>经验积累</h2></div><span>{{ experiences|selectattr('active')|list|length }} 条当前经验</span></div>
+        <p class="agent-section-intro">每次任务留下结果与复盘，下次工作时自动带入。经验可追溯，也可以恢复到先前版本。</p>
+        {% for experience in experiences if experience.active %}
+        <article class="agent-experience" data-agent-experience="{{ experience.id }}">
+          <div class="agent-experience-meta"><span class="agent-verification {{ 'is-accepted' if experience.verification == 'accepted' else '' }}">{{ '源任务已完成' if experience.verification == 'accepted' else '待复核经验' }}</span><span>版本 {{ experience.revision }} · {{ experience.created_at[:10] }}</span>{% if experience.task_id %}<a href="{{ app_path('/projects/' ~ project.slug ~ '/tasks/' ~ experience.task_id) }}">源任务 #{{ experience.task_id }} ↗</a>{% endif %}</div>
+          <p class="agent-experience-summary">{{ experience.summary }}</p>
+          <dl>{% if experience.worked %}<dt>有效做法</dt><dd>{{ experience.worked }}</dd>{% endif %}{% if experience.failed %}<dt>问题与不确定性</dt><dd>{{ experience.failed }}</dd>{% endif %}{% if experience.next_time %}<dt>下次改进</dt><dd>{{ experience.next_time }}</dd>{% endif %}</dl>
+        </article>
+        {% else %}<div class="agent-profile-empty"><strong>经验会从第一次工作开始</strong><p>任务完成、遇阻或进入复核后，自动留下结果记录与执行复盘。</p></div>{% endfor %}
+        {% set history = experiences|rejectattr('active')|list %}
+        {% if history %}<details class="agent-history" data-agent-experience-history><summary>历史版本 <span>{{ history|length }}</span></summary>{% for experience in history %}<article class="agent-experience is-history"><div class="agent-experience-meta"><span>任务 #{{ experience.task_id }} · 版本 {{ experience.revision }}</span><span>{{ experience.created_at[:10] }}</span></div><p>{{ experience.summary }}</p>{% if experience.next_time %}<p class="agent-history-next">下次改进 · {{ experience.next_time }}</p>{% endif %}{% if experience.task_id %}<form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/agents/' ~ agent.id ~ '/experiences/' ~ experience.id ~ '/restore') }}"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><button type="submit">恢复这个版本</button></form>{% endif %}</article>{% endfor %}</details>{% endif %}
+      </section>
+      <section class="agent-profile-panel" id="agent-work"><div class="agent-section-title"><h2>工作记录</h2><span>{{ tasks|length }} 项任务 · {{ conversations|length }} 场对话</span></div><div class="agent-record-list">{% for task in tasks %}<a href="{{ app_path('/projects/' ~ project.slug ~ '/tasks/' ~ task.id) }}"><span><strong>{{ task.title }}</strong><small>{{ task.result_summary or task.description or '等待执行者接手' }}</small></span><span class="agent-record-status">{{ status_names.get(task.status, task.status) }}</span></a>{% else %}<p class="agent-section-intro">还没有分配任务。回到团队，为它安排第一项工作。</p>{% endfor %}</div>{% if conversations %}<h3>参与过的对话</h3><div class="agent-record-list">{% for conversation in conversations %}<a href="{{ app_path('/projects/' ~ project.slug ~ '/conversations/' ~ conversation.id) }}"><span><strong>{{ conversation.title }}</strong><small>{{ conversation.participants }}</small></span><span aria-hidden="true">↗</span></a>{% endfor %}</div>{% endif %}</section>
+    </div>
+    <aside class="agent-profile-panel agent-settings" id="agent-settings">
+      <div class="agent-section-title"><h2>身份设置</h2></div>
+      <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/agents/' ~ agent.id) }}" data-agent-settings>
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <label><span>职业与职责</span><input name="job" value="{{ agent.job }}" maxlength="200" required></label>
+        <label><span>工作方式</span><textarea name="instructions" rows="7" maxlength="8000">{{ agent.instructions }}</textarea></label>
+        <label><span>执行连接</span><select name="device_id"><option value="">暂不绑定</option>{% for member in memberships if member.permission in ['write','admin'] and not member.server_ai_provider %}<option value="{{ member.device_id }}" {% if agent.device_id == member.device_id %}selected{% endif %}>{{ member.device_label }}</option>{% endfor %}</select><small>调整连接后，已经派出的任务仍由原连接执行。</small></label>
+        <label class="agent-toggle-label"><input type="checkbox" name="active" value="1" {% if agent.active %}checked{% endif %}><span>启用这个执行者</span></label>
+        <button type="submit" class="primary">保存身份设置</button>
+      </form>
+      <div class="agent-policy-note"><strong>决策引擎</strong><span>首选 Codex CLI<br>备用 DeepSeek</span></div>
+      <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/agents/' ~ agent.id ~ '/model-policy') }}" id="agent-model-settings" data-model-catalog="{{ model_options|tojson|forceescape }}" data-has-error="{{ 'true' if model_error else 'false' }}">
+        <h3>模型分配</h3>
+        {% if model_error %}<p class="agent-model-error" role="alert">{{ model_error }}</p>{% endif %}
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <label><span>分配方式</span><select name="mode"><option value="controller" {% if model_policy.mode == 'controller' %}selected{% endif %}>由总控按工作分配</option><option value="manual" {% if model_policy.mode == 'manual' %}selected{% endif %}>我手动指定</option></select></label>
+        <label><span>手动模型</span><select name="model"><option value="">选择已上报的模型</option>{% for item in model_options %}<option value="{{ item.model }}" {% if model_policy.model == item.model %}selected{% endif %}>{{ item.displayName }}</option>{% endfor %}{% if model_policy.model and model_policy.model not in model_options|map(attribute='model')|list %}<option value="{{ model_policy.model }}" selected>{{ model_policy.model }} · 等待设备核验</option>{% endif %}</select></label>
+        <label><span>思考档位</span><select name="reasoning_effort">{% for key,label in [('none','无'),('minimal','极低'),('low','低'),('medium','中'),('high','高'),('xhigh','更高'),('max','最大'),('ultra','极高')] %}<option value="{{ key }}" {% if (model_policy.reasoning_effort or 'medium') == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><small data-model-help>手动选择时，仅提供执行连接支持的档位。</small></label>
+        <p class="agent-section-intro">优先考虑 GPT-5.6 高、GPT-6 中或高。总控可以根据任务调整；手动指定后，总控会遵循你的选择。已开始的任务保留原模型。</p>
+        {% if not model_options %}<p class="agent-section-intro">执行连接尚未上报模型目录。连接恢复后可选择；当前保持总控分配或本机设置。</p>{% endif %}
+        {% if model_policy.model %}<p class="agent-section-intro">{{ '本次选择（尚未保存）' if model_error else '当前设置' }}：{{ model_policy.model }} · {{ {'none':'无','minimal':'极低','low':'低','medium':'中','high':'高','xhigh':'更高','max':'最大','ultra':'极高'}.get(model_policy.reasoning_effort, model_policy.reasoning_effort) }}档{% if model_policy.reason and not model_error %}<br>{{ model_policy.reason }}{% endif %}</p>{% endif %}
+        <button type="submit">保存模型设置</button>
+      </form>
+      <p class="agent-section-intro">暂停后保留身份、对话和经验，可随时恢复工作。</p>
+    </aside>
+  </div>
+</div>
+{% endblock %}

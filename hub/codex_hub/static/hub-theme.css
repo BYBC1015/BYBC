@@ -1,0 +1,474 @@
+/*
+ * Codex Hub signature theme
+ * Keeps the conversation-first v2 layout while restoring the original
+ * warm pixel-editorial identity: ink outlines, signal yellow, cyan/magenta
+ * accents, compact hard shadows, and a quiet grid texture.
+ */
+
+body.hub-detail-screen {
+  --hub-canvas: #fffdf4;
+  --hub-surface: #fffefa;
+  --hub-sidebar: #f4efd9;
+  --hub-sidebar-hover: #fff3a6;
+  --hub-sidebar-active: #ffd94a;
+  --hub-ink: #18202d;
+  --hub-muted: #625f56;
+  --hub-faint: #8c8678;
+  --hub-line: #cfc8ad;
+  --hub-line-strong: #18202d;
+  --hub-accent: #128a78;
+  --hub-accent-soft: #dff6ee;
+  --hub-warning: #875000;
+  --hub-warning-soft: #fff0ad;
+  --hub-signal: #ffd51d;
+  --hub-cyan: #1ec6d4;
+  --hub-magenta: #ef4d8f;
+  --hub-shadow: 6px 6px 0 rgba(24, 32, 45, 0.2);
+  background-color: var(--hub-canvas);
+  background-image:
+    radial-gradient(circle at 84% 12%, rgba(30, 198, 212, 0.08), transparent 22rem),
+    radial-gradient(circle at 16% 86%, rgba(239, 77, 143, 0.06), transparent 24rem);
+}
+
+body.hub-detail-screen .workbench-shell {
+  background: transparent;
+}
+
+body.hub-detail-screen .workbench-shell::before {
+  width: 100%;
+  height: 4px;
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 240;
+  display: block;
+  background: linear-gradient(
+    90deg,
+    var(--hub-signal) 0 22%,
+    var(--hub-cyan) 22% 46%,
+    var(--hub-magenta) 46% 69%,
+    var(--hub-ink) 69% 74%,
+    var(--hub-signal) 74% 100%
+  );
+  content: "";
+}
+
+body.hub-detail-screen .workbench-topbar {
+  border-bottom: 2px solid var(--hub-ink);
+  background: rgba(255, 253, 244, 0.96);
+  box-shadow: 0 3px 0 rgba(24, 32, 45, 0.06);
+}
+
+body.hub-detail-screen .brand-mark img {
+  image-rendering: pixelated;
+}
+
+body.hub-detail-screen .workbench-title h1,
+body.hub-detail-screen .workbench-brand strong {
+  color: var(--hub-ink);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+body.hub-detail-screen .status-pill,
+body.hub-detail-screen .sync-dot,
+body.hub-detail-screen .memory-state {
+  border: 1px solid var(--hub-ink);
+  background: var(--hub-accent-soft);
+  color: #175f53;
+  box-shadow: 1px 1px 0 rgba(24, 32, 45, 0.18);
+}
+
+body.hub-detail-screen .status-pill {
+  background: var(--hub-cyan);
+  color: var(--hub-ink);
+}
+
+body.hub-detail-screen .memory-state-diff,
+body.hub-detail-screen .memory-state.diff {
+  background: var(--hub-warning-soft);
+  color: var(--hub-warning);
+}
+
+body.hub-detail-screen .memory-state.empty {
+  background: #f2ead0;
+  color: var(--hub-muted);
+}
+
+body.hub-detail-screen .memory-open-button,
+body.hub-detail-screen .workbench-topbar .export-button,
+body.hub-detail-screen .workbench-topbar .connect-button,
+body.hub-detail-screen .workbench-topbar > .icon-button,
+body.hub-detail-screen .device-switch select {
+  border-color: transparent;
+  color: var(--hub-muted);
+}
+
+body.hub-detail-screen .workbench-topbar > .icon-button:first-of-type,
+body.hub-detail-screen .workbench-topbar .connect-button {
+  border: 1px solid var(--hub-ink);
+  background: var(--hub-surface);
+  color: var(--hub-ink);
+  box-shadow: 2px 2px 0 rgba(24, 32, 45, 0.12);
+}
+
+body.hub-detail-screen .workbench-topbar .connect-button {
+  background: var(--hub-signal);
+}
+
+body.hub-detail-screen .memory-open-button:hover,
+body.hub-detail-screen .workbench-topbar .export-button:hover,
+body.hub-detail-screen .workbench-topbar .connect-button:hover {
+  border-color: var(--hub-ink);
+  background: var(--hub-signal);
+  color: var(--hub-ink);
+  box-shadow: 2px 2px 0 rgba(24, 32, 45, 0.15);
+  transform: translate(-1px, -1px);
+}
+
+body.hub-detail-screen .workbench-sidebar {
+  border-right: 2px solid var(--hub-ink);
+  background-color: var(--hub-sidebar);
+  background-image:
+    linear-gradient(rgba(24, 32, 45, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(24, 32, 45, 0.035) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+body.hub-detail-screen .rail-head {
+  color: #6e6241;
+  font-weight: 900;
+}
+
+body.hub-detail-screen .rail-add {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--hub-ink);
+  border-radius: 5px;
+  background: var(--hub-cyan);
+  color: var(--hub-ink);
+  box-shadow: 1px 1px 0 rgba(24, 32, 45, 0.18);
+  font-weight: 900;
+}
+
+body.hub-detail-screen .rail-project,
+body.hub-detail-screen .device-row {
+  border: 1px solid transparent;
+}
+
+body.hub-detail-screen .rail-project:hover,
+body.hub-detail-screen .device-row:hover {
+  border-color: rgba(24, 32, 45, 0.35);
+  background: var(--hub-sidebar-hover);
+}
+
+body.hub-detail-screen .rail-project.is-active {
+  border: 2px solid var(--hub-ink);
+  background: var(--hub-sidebar-active);
+  box-shadow: 3px 3px 0 rgba(24, 32, 45, 0.18);
+}
+
+body.hub-detail-screen .presence.online {
+  background: #19a974;
+  box-shadow: 0 0 0 2px #d9f8e8;
+}
+
+body.hub-detail-screen .presence.web-only {
+  background: var(--hub-signal);
+  box-shadow: 0 0 0 2px #fff4b8;
+}
+
+body.hub-detail-screen .conversation-pane,
+body.hub-detail-screen .chat-panel {
+  background: transparent;
+}
+
+body.hub-detail-screen .project-tabs {
+  border-bottom: 2px solid var(--hub-ink);
+  background: rgba(255, 253, 244, 0.93);
+}
+
+body.hub-detail-screen .project-tabs a,
+body.hub-detail-screen .project-tabs button {
+  position: relative;
+  border-radius: 6px;
+  color: var(--hub-muted);
+  font-weight: 750;
+}
+
+body.hub-detail-screen .project-tabs a:hover,
+body.hub-detail-screen .project-tabs button:hover,
+body.hub-detail-screen .project-tabs a.is-active {
+  background: #fff3aa;
+  color: var(--hub-ink);
+}
+
+body.hub-detail-screen .project-tabs a.is-active::after {
+  height: 3px;
+  position: absolute;
+  inset: auto 8px -7px;
+  background: var(--hub-signal);
+  content: "";
+}
+
+body.hub-detail-screen .chat-context-label {
+  padding: 4px 10px;
+  border: 1px solid #b8aa75;
+  border-radius: 999px;
+  background: #fff8d1;
+  color: #6e5710;
+  font-weight: 800;
+}
+
+body.hub-detail-screen .day-divider {
+  color: var(--hub-faint);
+  font-weight: 700;
+}
+
+body.hub-detail-screen .workbench-chat {
+  scrollbar-color: #b9a946 transparent;
+}
+
+body.hub-detail-screen .workbench-chat .avatar {
+  border: 2px solid var(--hub-ink);
+  border-radius: 8px;
+  background: var(--hub-cyan);
+  color: var(--hub-ink);
+  box-shadow: 2px 2px 0 rgba(24, 32, 45, 0.18);
+}
+
+body.hub-detail-screen .chat-author strong {
+  font-weight: 850;
+}
+
+body.hub-detail-screen .workbench-chat .chat-message.from-device .message-card {
+  padding-left: 14px;
+  border-left: 3px solid var(--hub-cyan);
+  color: #252b34;
+}
+
+body.hub-detail-screen .workbench-chat .chat-message.from-user .message-card {
+  border: 2px solid var(--hub-ink);
+  border-radius: 16px 16px 4px 16px;
+  background: #fff2ad;
+  box-shadow: 3px 3px 0 rgba(24, 32, 45, 0.16);
+  color: var(--hub-ink);
+}
+
+body.hub-detail-screen .message-file,
+body.hub-detail-screen .message-image-link {
+  border: 1px solid var(--hub-ink);
+  background: var(--hub-surface);
+  box-shadow: 2px 2px 0 rgba(24, 32, 45, 0.12);
+}
+
+body.hub-detail-screen .empty-chat {
+  border: 2px solid var(--hub-ink);
+  border-radius: 12px;
+  background: #fff8ce;
+  box-shadow: 5px 5px 0 rgba(24, 32, 45, 0.15);
+}
+
+body.hub-detail-screen .workbench-composer {
+  border: 2px solid var(--hub-ink);
+  border-radius: 15px;
+  background: rgba(255, 254, 250, 0.98);
+  box-shadow: 5px 5px 0 rgba(24, 32, 45, 0.18);
+}
+
+body.hub-detail-screen .workbench-composer:focus-within {
+  border-color: var(--hub-ink);
+  box-shadow:
+    5px 5px 0 rgba(24, 32, 45, 0.18),
+    0 0 0 4px rgba(255, 213, 29, 0.36);
+}
+
+body.hub-detail-screen .workbench-composer textarea {
+  border-radius: 13px 13px 0 0;
+}
+
+body.hub-detail-screen .composer-action,
+body.hub-detail-screen .composer-target {
+  border: 1px solid var(--hub-ink);
+  border-radius: 7px;
+  background: #fffdf4;
+  color: var(--hub-ink);
+  box-shadow: 1px 1px 0 rgba(24, 32, 45, 0.14);
+}
+
+body.hub-detail-screen .composer-action:hover,
+body.hub-detail-screen .composer-action.is-active,
+body.hub-detail-screen .composer-action.is-listening {
+  border-color: var(--hub-ink);
+  background: var(--hub-cyan);
+  color: var(--hub-ink);
+}
+
+body.hub-detail-screen .send-button {
+  border: 2px solid var(--hub-ink);
+  border-radius: 8px;
+  background: var(--hub-signal);
+  box-shadow: 2px 2px 0 rgba(24, 32, 45, 0.3);
+}
+
+body.hub-detail-screen .send-button::before {
+  color: var(--hub-ink);
+  font-weight: 900;
+}
+
+body.hub-detail-screen .send-button[aria-busy="true"]::before {
+  content: "…";
+}
+
+body.hub-detail-screen .send-button:disabled {
+  opacity: 0.68;
+  transform: translate(1px, 1px);
+  box-shadow: none;
+}
+
+body.hub-detail-screen .composer-status {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--hub-canvas);
+  color: #746b51;
+}
+
+body.hub-detail-screen .project-memory-drawer {
+  border: 2px solid var(--hub-ink);
+  border-top: 5px solid var(--hub-magenta);
+  border-radius: 13px;
+  background: rgba(255, 253, 244, 0.995);
+  box-shadow: var(--hub-shadow);
+}
+
+body.hub-detail-screen .memory-drawer-head {
+  border-bottom: 2px solid var(--hub-ink);
+  background: rgba(255, 248, 205, 0.98);
+}
+
+body.hub-detail-screen .project-memory-drawer .control-card,
+body.hub-detail-screen .project-memory-drawer .members-card {
+  border-bottom-color: #bfb28b;
+}
+
+body.hub-detail-screen .control-list div,
+body.hub-detail-screen .memory-sync-summary,
+body.hub-detail-screen .handoff-item,
+body.hub-detail-screen .codex-workspace-card,
+body.hub-detail-screen .task-card,
+body.hub-detail-screen .member-chip {
+  border-color: var(--hub-ink);
+  background: var(--hub-surface);
+  box-shadow: 2px 2px 0 rgba(24, 32, 45, 0.1);
+}
+
+body.hub-detail-screen .large-transfer-warning {
+  border: 1px solid var(--hub-ink);
+  background: var(--hub-warning-soft);
+}
+
+body.hub-detail-screen .rail-backdrop {
+  background: rgba(24, 32, 45, 0.28);
+  backdrop-filter: blur(1px);
+}
+
+body.hub-detail-screen :where(
+  a,
+  button,
+  input,
+  textarea,
+  select,
+  summary
+):focus-visible {
+  outline: 3px solid var(--hub-cyan);
+  outline-offset: 2px;
+}
+
+@media (max-width: 860px) {
+  body.hub-detail-screen .workbench-topbar {
+    border-bottom-width: 2px;
+    background: rgba(255, 253, 244, 0.98);
+  }
+
+  body.hub-detail-screen .mobile-rail-toggle {
+    width: 38px;
+    min-width: 38px;
+    min-height: 38px;
+    border: 2px solid var(--hub-ink);
+    border-radius: 8px;
+    background: var(--hub-signal);
+    color: var(--hub-ink);
+    box-shadow: 2px 2px 0 rgba(24, 32, 45, 0.18);
+  }
+
+  body.hub-detail-screen .workbench-title h1 {
+    font-size: 15px;
+  }
+
+  body.hub-detail-screen .memory-open-button {
+    min-height: 38px;
+    border: 1px solid var(--hub-ink);
+    background: var(--hub-surface);
+    color: var(--hub-ink);
+  }
+
+  body.hub-detail-screen .workbench-sidebar {
+    border-right: 2px solid var(--hub-ink);
+  }
+
+  body.hub-detail-screen .workbench-chat .chat-message.from-device .message-card {
+    padding-left: 10px;
+    border-left-width: 3px;
+  }
+
+  body.hub-detail-screen .workbench-composer {
+    margin-bottom: 12px;
+    border-radius: 14px;
+    box-shadow: 3px 3px 0 rgba(24, 32, 45, 0.16);
+  }
+
+  body.hub-detail-screen .composer-action,
+  body.hub-detail-screen .send-button {
+    width: 42px;
+    min-width: 42px;
+    min-height: 42px;
+  }
+
+  body.hub-detail-screen .composer-target {
+    min-height: 42px;
+    flex: 1 1 auto;
+  }
+
+  body.hub-detail-screen .project-memory-drawer {
+    border-width: 2px;
+    border-top-width: 5px;
+    box-shadow: 4px 4px 0 rgba(24, 32, 45, 0.2);
+  }
+}
+
+@media (max-width: 430px) {
+  body.hub-detail-screen .memory-open-button .memory-state {
+    display: none;
+  }
+
+  body.hub-detail-screen .workbench-chat .chat-message {
+    padding-inline: 12px;
+  }
+
+  body.hub-detail-screen .composer-target > span {
+    display: none;
+  }
+
+  body.hub-detail-screen .composer-target select {
+    max-width: 96px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.hub-detail-screen .memory-open-button:hover,
+  body.hub-detail-screen .workbench-topbar .export-button:hover,
+  body.hub-detail-screen .workbench-topbar .connect-button:hover {
+    transform: none;
+  }
+}

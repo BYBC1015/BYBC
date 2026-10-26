@@ -1,0 +1,38 @@
+[project]
+name = "codex-hub"
+version = "2.4.0"
+description = "Private Codex multi-device collaboration relay"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.115.0",
+  "httpx>=0.27.0",
+  "jinja2>=3.1.0",
+  "Pillow>=10.4.0",
+  "python-multipart>=0.0.9",
+  "uvicorn>=0.30.0",
+  "pywinauto>=0.6.9; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27.0",
+  "pytest>=8.0.0",
+  "playwright>=1.45.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.setuptools.packages.find]
+include = ["codex_hub*", "codex_bridge*"]
+
+[tool.setuptools.package-data]
+codex_bridge = ["assets/*"]
+codex_hub = ["templates/**/*.html", "static/**/*"]
+
+[project.scripts]
+codex-bridge = "codex_bridge.cli:main"
+codex-hub-reply = "codex_bridge.hub_reply:main"
+codex-hub-migrate = "codex_hub.migration:main"

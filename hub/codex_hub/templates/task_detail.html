@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}{{ task.title }} - {{ project.name }}{% endblock %}
+{% block body_class %}task-profile-screen{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ app_path('/static/workspace-details.css') }}?v=20261027-shell2"><script src="{{ app_path('/static/codex-markdown.js') }}?v=20260807-reading4" defer></script>{% endblock %}
+{% block content %}
+{% set status_names = {'open':'待领取','claimed':'已领取','in_progress':'进行中','blocked':'遇到阻碍','review':'待复核','done':'已完成','cancelled':'已取消'} %}
+<section class="page-head project-head">
+  <div>
+    <a class="back-link" href="{{ app_path('/projects/' ~ project.slug) }}">返回项目</a>
+    <h1>{{ task.title }}</h1>
+    <p>{{ project.name }} · {{ status_names.get(task.status, task.status) }} · {{ {'high':'优先处理','normal':'普通优先级','low':'不紧急'}.get(task.priority, task.priority) }}</p>
+  </div>
+  <div class="page-actions">
+    <a class="button" href="{{ app_path('/projects/' ~ project.slug ~ '/conversations/' ~ task.conversation_id) if task.conversation_id else app_path('/projects/' ~ project.slug) }}">回到工作区 ↗</a>
+  </div>
+</section>
+
+<section class="task-detail-layout">
+  <aside class="panel task-facts">
+    <div class="section-head">
+      <h2>任务信息</h2>
+      <span>{{ status_names.get(task.status, task.status) }}</span>
+    </div>
+    <dl class="facts">
+      <dt>负责人</dt>
+      <dd>{% if assigned_agent %}<a href="{{ app_path('/projects/' ~ project.slug ~ '/agents/' ~ assigned_agent.id) }}">{{ assigned_agent.name }} · {{ assigned_agent.job }}</a>{% else %}{{ task.claimed_device_label or task.assigned_device_label or "未领取" }}{% endif %}</dd>
+      {% if assigned_agent %}<dt>执行连接</dt><dd>{{ task.claimed_device_label or task.assigned_device_label }}</dd>
+      <dt>工作对话</dt><dd>{% if task.conversation_id %}<a href="{{ app_path('/projects/' ~ project.slug ~ '/conversations/' ~ task.conversation_id) }}">查看对话 #{{ task.conversation_id }}</a><p>{{ task.route_reason }}</p>{% else %}执行前由智能体选择{% endif %}</dd>{% endif %}
+      <dt>指定群组</dt>
+      <dd>{{ task.requested_group_name or "未指定" }}</dd>
+      <dt>创建时间</dt>
+      <dd>{{ task.created_at }}</dd>
+      <dt>更新时间</dt>
+      <dd>{{ task.updated_at }}</dd>
+    </dl>
+    <div class="copy-box">
+      <h3>任务说明</h3>
+      <p>{{ task.description or "无说明" }}</p>
+      <h3>上下文包</h3>
+      <pre>{{ task.context_pack_markdown or "无独立上下文包" }}</pre>
+    </div>
+    <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/tasks/' ~ task.id ~ '/status') }}" class="stack">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <label>
+        <span>任务状态</span>
+        <select name="status">
+          {% for status in statuses %}
+          <option value="{{ status }}" {% if status == task.status %}selected{% endif %}>{{ status_names.get(status, status) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>结果摘要</span>
+        <textarea name="result_summary" rows="3">{{ task.result_summary }}</textarea>
+      </label>
+      <button type="submit">更新状态</button>
+    </form>
+  </aside>
+
+  <section class="hub-main panel">
+    <div class="section-head">
+      <div>
+        <h2>任务记录</h2>
+        <p class="muted">只讨论这个任务，完成后写结果摘要。</p>
+      </div>
+      <span>{{ entries|length }} 条</span>
+    </div>
+    <div class="chat-stream">
+      {% for entry in entries %}
+      <article class="chat-message {% if entry.author_type == 'user' %}from-user{% else %}from-device{% endif %}">
+        <div class="avatar">{{ entry.source_label[:1]|upper }}</div>
+        <div class="chat-bubble">
+          <div class="chat-meta">
+            <strong>{{ entry.source_label }}</strong>
+            <span>{{ entry.kind }} / {{ entry.created_at }}</span>
+          </div>
+          <div class="task-record-markdown"><div data-markdown-source>{{ entry.body_markdown }}</div></div>
+        </div>
+      </article>
+      {% else %}
+      <div class="empty-state">
+        <strong>这个任务还没有对话</strong>
+        <p>设备领取后，可以把进展、问题和结论写在这里。</p>
+      </div>
+      {% endfor %}
+    </div>
+    <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/tasks/' ~ task.id ~ '/entries') }}" class="composer chat-composer">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <div class="composer-row">
+        <select name="kind" aria-label="记录类型">
+          <option value="message">消息</option>
+          <option value="markdown">Markdown</option>
+          <option value="link">链接</option>
+        </select>
+        <button class="primary" type="submit">发送</button>
+      </div>
+      <textarea name="body_markdown" rows="6" required placeholder="写入这项任务的进展、阻塞、结论或交接内容。"></textarea>
+    </form>
+  </section>
+
+  <details class="panel prompt-panel">
+    <summary>运行上下文 <span>查看执行提示词</span></summary>
+    <div class="section-head">
+      <h2>执行提示词</h2>
+      <span>精简上下文</span>
+    </div>
+    <button class="primary full" type="button" data-copy-target="task-prompt">复制执行提示词</button>
+    <textarea id="task-prompt" class="prompt-textarea" readonly>{{ prompt_markdown }}</textarea>
+  </details>
+</section>
+
+<script>
+  document.querySelectorAll("[data-copy-target]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const target = document.getElementById(button.dataset.copyTarget);
+      if (!target) return;
+      target.select();
+      await navigator.clipboard.writeText(target.value);
+      button.textContent = "已复制";
+      setTimeout(() => { button.textContent = "复制执行提示词"; }, 1400);
+    });
+  });
+</script>
+{% endblock %}

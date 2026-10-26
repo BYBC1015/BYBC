@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}设备 - Codex Hub{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>设备</h1>
+    <p>先分组，再给项目做最终白名单确认。</p>
+  </div>
+</section>
+
+{% if created_token %}
+<section class="token-box">
+  <strong>Token 只显示一次</strong>
+  <code>{{ created_token }}</code>
+</section>
+{% endif %}
+
+<section class="admin-grid">
+  <div class="panel">
+    <div class="section-head">
+      <h2>设备分组</h2>
+      <span>{{ groups|length }} 个</span>
+    </div>
+    <form class="stack" method="post" action="{{ app_path('/admin/groups') }}">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <label>
+        <span>分组名</span>
+        <input name="name" required>
+      </label>
+      <label>
+        <span>说明</span>
+        <textarea name="description" rows="3"></textarea>
+      </label>
+      <button class="primary" type="submit">创建分组</button>
+    </form>
+    <div class="list compact">
+      {% for group in groups %}
+      <div class="row flat">
+        <strong>{{ group.name }}</strong>
+        <small>{{ group.description or "无说明" }}</small>
+      </div>
+      {% else %}
+      <p class="muted">暂无分组</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="section-head">
+      <h2>设备</h2>
+      <span>{{ devices|length }} 台</span>
+    </div>
+    <form class="stack" method="post" action="{{ app_path('/admin/devices') }}">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <label>
+        <span>设备名</span>
+        <input name="label" placeholder="device-a" required>
+      </label>
+      <label>
+        <span>分组</span>
+        <select name="group_id">
+          <option value="">无</option>
+          {% for group in groups %}
+          <option value="{{ group.id }}">{{ group.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>备注</span>
+        <textarea name="note" rows="3"></textarea>
+      </label>
+      <button class="primary" type="submit">创建设备</button>
+    </form>
+    <div class="list compact">
+      {% for device in devices %}
+      <div class="row flat">
+        <strong>{{ device.label }}</strong>
+        <small>{{ device.group_name or "未分组" }}</small>
+      </div>
+      {% else %}
+      <p class="muted">暂无设备</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="section-head">
+      <h2>API Token</h2>
+      <span>{{ tokens|length }} 个</span>
+    </div>
+    <form class="stack" method="post" action="{{ app_path('/admin/tokens') }}">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <label>
+        <span>设备</span>
+        <select name="device_id" required>
+          <option value="">选择设备</option>
+          {% for device in devices %}
+          <option value="{{ device.id }}">{{ device.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Token 名称</span>
+        <input name="name" placeholder="codex-local" required>
+      </label>
+      <button class="primary" type="submit">生成 token</button>
+    </form>
+    <div class="list compact">
+      {% for token in tokens %}
+      <div class="row flat">
+        <strong>{{ token.device_label }}</strong>
+        <small>{{ token.name }} / {{ token.token_prefix }}...</small>
+      </div>
+      {% else %}
+      <p class="muted">暂无 token</p>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endblock %}

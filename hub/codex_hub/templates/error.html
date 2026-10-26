@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ status_code }} - Codex Hub{% endblock %}
+{% block content %}
+<section class="error-panel">
+  <span class="error-code">{{ status_code }}</span>
+  <h1>{{ status_label }}</h1>
+  <p>{{ detail }}</p>
+  <a class="button primary" href="{{ app_path('/projects') }}">返回项目</a>
+</section>
+{% endblock %}

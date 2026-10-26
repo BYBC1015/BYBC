@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}登录 - Codex Hub{% endblock %}
+{% block body_class %}pixel-auth-screen codex-hub-auth{% endblock %}
+{% block content %}
+<section class="pixel-auth" data-pixel-auth>
+  <div class="pixel-auth-glow" aria-hidden="true"></div>
+  <div class="pixel-auth-stage">
+    <form method="post" action="{{ app_path('/login') }}" class="pixel-login-card stack" data-tilt-card>
+      <div class="login-copy">
+        <img class="login-logo" src="{{ app_path('/static/assets/codex-owl-logo-lite-20260708.png') }}" width="192" height="191" alt="">
+        <div>
+          <h1>Codex Hub</h1>
+          <p>多设备协同中转站</p>
+        </div>
+      </div>
+      <label>
+        <span>账号</span>
+        <input name="username" autocomplete="username" required autofocus placeholder="BYBC">
+      </label>
+      <label>
+        <span>密码</span>
+        <input name="password" type="password" autocomplete="current-password" required placeholder="输入访问密码">
+      </label>
+      {% if error %}<p class="error" role="alert">{{ '账号或密码不正确，请重试。' if error == 'Invalid username or password' else error }}</p>{% endif %}
+      <button class="primary pixel-login-button" type="submit">登录 Hub <span aria-hidden="true">↗</span></button>
+    </form>
+    <aside class="pixel-character" data-pixel-character aria-hidden="true">
+      <div class="pixel-girl">
+        <img class="girl-open" src="{{ app_path('/static/assets/pixel-girl-character-cutout-legs-20260708.png') }}" width="269" height="507" alt="">
+        <img class="girl-closed" src="{{ app_path('/static/assets/pixel-girl-character-closed-user-20260708.png') }}" width="269" height="507" alt="">
+      </div>
+      <span class="character-shadow"></span>
+    </aside>
+  </div>
+</section>
+{% endblock %}
+{% block extra_scripts %}
+<script src="{{ app_path('/static/pixel-auth.js') }}?v=20260812-page-features1" defer></script>
+{% endblock %}

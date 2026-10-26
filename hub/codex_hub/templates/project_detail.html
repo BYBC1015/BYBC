@@ -1,0 +1,1903 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} - Codex Hub{% endblock %}
+{% block body_class %}hub-detail-screen{% endblock %}
+{% block shared_navigation_script %}{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{{ app_path('/static/reading-experience.css') }}?v=20260811-scroll-stability1">
+<link rel="stylesheet" href="{{ app_path('/static/codex-reading.css') }}?v=20260807-reading3">
+<link rel="stylesheet" href="{{ app_path('/static/hub-theme.css') }}?v=20260811-ui-controls1">
+<link rel="stylesheet" href="{{ app_path('/static/composer-routing.css') }}?v=20260911-routing1">
+<link rel="stylesheet" href="{{ app_path('/static/agent-workspace.css') }}?v=20261027-agents2">
+<link rel="stylesheet" href="{{ app_path('/static/hub-workspace.css') }}?v=20261027-agents2">
+{% endblock %}
+{% block content %}
+<section class="workbench-shell">
+  <header class="workbench-topbar">
+    <div class="workbench-brand">
+      <a class="brand-mark" href="{{ app_path('/projects?list=1') }}" aria-label="Codex Hub">
+        <img src="{{ app_path('/static/assets/codex-owl-logo-lite-20260708.png') }}" width="192" height="191" alt="">
+      </a>
+      <strong>Codex Hub</strong>
+    </div>
+    <button class="icon-button mobile-rail-toggle" type="button" data-sidebar-open aria-label="打开项目导航" aria-controls="project-sidebar" aria-expanded="false">☰</button>
+    <button class="icon-button" type="button" onclick="history.length > 1 ? history.back() : location.assign('{{ app_path('/projects?list=1') }}')">返回</button>
+    <div class="workbench-title">
+      <p>项目工作区</p>
+      <div class="workbench-title-line">
+        <h1>{{ project.name }}</h1>
+        <button class="reader-focus-toggle" type="button" data-focus-reading-toggle aria-pressed="false" aria-label="进入专注阅读" title="专注阅读">
+          <span aria-hidden="true">▣</span><span class="reader-focus-label">专注</span>
+        </button>
+      </div>
+    </div>
+    <div class="workbench-spacer"></div>
+    <span class="sync-dot" data-auto-refresh="sync">已同步</span>
+    <button class="button memory-open-button" type="button" data-memory-open aria-controls="project-memory" aria-expanded="false">
+      项目记忆 <span class="memory-state memory-state-{{ 'ok' if memory_sync_state == '已同步' else 'diff' if memory_sync_state == '有差异' else 'empty' }}">{{ memory_sync_state }}</span>
+    </button>
+    <details class="hub-more">
+      <summary aria-label="更多项目操作" title="更多项目操作">•••</summary>
+      <div class="hub-more-menu">
+    <button type="button" data-agents-open>智能体团队</button>
+    <a class="button export-button" href="{{ app_path('/projects?list=1') }}">所有项目</a>
+    <a class="button export-button" href="{{ inbox_url }}">邮箱</a>
+    <a class="button export-button" href="{{ app_path('/downloads') }}">下载应用</a>
+    <a class="button export-button" href="{{ app_path('/projects/' ~ project.slug ~ '/export.md') }}">导出 Markdown</a>
+    <button class="button primary connect-button" type="button" data-connect-toggle aria-expanded="false" aria-controls="codex-connect-panel">接入 Codex</button>
+    <div class="device-switch">
+      <span class="device-icon"></span>
+      <span>
+        <strong>本机身份</strong>
+        <select aria-label="本机设备身份" data-web-presence-device data-heartbeat-base="{{ app_path('/devices') }}">
+          {% for member in memberships %}
+          <option value="{{ member.device_id }}">{{ member.device_label }}</option>
+          {% else %}
+          <option value="">未加入设备</option>
+          {% endfor %}
+        </select>
+      </span>
+    </div>
+        <small>Codex Hub · v2.3.0</small>
+      </div>
+    </details>
+  </header>
+
+  <section id="codex-connect-panel" class="connect-panel" data-connect-panel data-connect-base-path="{{ app_path('/') }}" role="region" aria-label="接入 Codex" hidden>
+    <button class="icon-button connect-close" type="button" data-connect-close aria-label="关闭接入面板">×</button>
+    <div class="connect-panel-main">
+      <div class="connect-copy">
+        <strong>接入 Codex</strong>
+        <p>网页登录只表示浏览器在线；要让设备自动接收 @ 和任务，需要在对应设备本机运行代理。项目成员状态显示 <strong>Codex已接入</strong> 后再分配任务。</p>
+      </div>
+      <div class="connect-status-list">
+        <span><i class="presence"></i> 未连接</span>
+        <span><i class="presence web-only"></i> 网页登录在线，Codex未接入</span>
+        <span><i class="presence online"></i> Codex已接入</span>
+      </div>
+    </div>
+    <div class="connect-command-box">
+      <label for="codex-connect-command">在目标设备 PowerShell 运行</label>
+      <textarea id="codex-connect-command" rows="5" readonly data-connect-command data-command-template="$env:CODEX_HUB_TOKEN = &quot;&lt;粘贴该设备 API token&gt;&quot;&#10;$ProjectMapPath = &quot;.\codex-hub\tools\codex-project-map.json&quot;&#10;powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\codex-hub\tools\codex-device-agent.ps1 -Hub &quot;__CODEX_HUB_BASE__&quot; -Token $env:CODEX_HUB_TOKEN -IntervalSeconds 20 -ProjectMapPath $ProjectMapPath -OpenCodex"></textarea>
+      <div class="connect-actions">
+        <button class="button primary compact" type="button" data-copy-connect-command>复制启动命令</button>
+        <a class="button compact" href="{{ app_path('/devices') }}">管理设备 Token</a>
+      </div>
+    </div>
+  </section>
+
+  <div class="workbench-grid">
+    <button class="rail-backdrop" type="button" data-sidebar-close aria-label="关闭项目导航" aria-hidden="true" tabindex="-1"></button>
+    <aside id="project-sidebar" class="workbench-sidebar" data-project-sidebar aria-label="项目与设备导航">
+      <div class="mobile-rail-head">
+        <strong>项目与设备</strong>
+        <button class="icon-button" type="button" data-sidebar-close aria-label="关闭项目导航">×</button>
+      </div>
+      <section class="rail-section">
+        <div class="rail-head">
+          <span>项目</span>
+          <a class="rail-add" href="{{ app_path('/projects?list=1') }}">+</a>
+        </div>
+        <div class="project-rail-list">
+          {% for item in projects %}
+          <a class="rail-project {% if item.slug == project.slug %}is-active{% endif %}" href="{{ app_path('/projects/' ~ item.slug) }}">
+            <strong>{{ item.name }}</strong>
+            <small>更新 {{ item.updated_at[:10] if item.updated_at else "" }}</small>
+          </a>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="rail-section">
+        <div class="rail-head">
+          <strong>执行连接</strong>
+          <a class="rail-add" href="{{ app_path('/devices') }}">+</a>
+        </div>
+        <div class="device-list" data-auto-refresh="devices">
+          {% for member in memberships %}
+          <a class="device-row" data-presence="{{ member.presence_mode }}" data-agent-presence="{{ 'online' if member.is_agent_online else 'offline' }}" href="{{ app_path('/devices/' ~ member.device_id ~ '/inbox') }}">
+            <span class="presence {% if member.is_agent_online %}online{% elif member.is_web_online %}web-only{% endif %}"></span>
+            <span>
+              <strong>{{ member.device_label }}</strong>
+              <small>{{ member.permission }}{% if member.group_name %} / {{ member.group_name }}{% endif %} · {{ member.presence_label }}</small>
+            </span>
+          </a>
+          {% else %}
+          <p class="muted">还没有加入项目白名单的设备。</p>
+          {% endfor %}
+        </div>
+      </section>
+    </aside>
+
+    <section class="conversation-pane" aria-label="项目对话">
+      <nav class="project-tabs" aria-label="项目工作区">
+        <a class="is-active" href="#conversation">对话</a>
+        <button type="button" data-agents-open>智能体 <span>{{ durable_agents|length }}</span></button>
+        <button type="button" data-memory-open>项目记忆 <span>{{ memory_version }}</span></button>
+        <a href="#files">文件</a>
+        <a href="#codex-workspaces">Codex 项目</a>
+        <a href="#members">群聊 <span>{{ memberships|length + chat_roles|length }}</span></a>
+        <a href="#tasks">任务</a>
+      </nav>
+
+      <section id="conversation" class="chat-panel">
+        <div class="chat-context-label">
+          项目对话 · 每条消息可选择指定成员或全组协作
+        </div>
+        <div class="day-divider">今天</div>
+        <div class="chat-stream workbench-chat" data-auto-refresh="chat" data-project-slug="{{ project.slug }}" data-chat-updates-url="{{ app_path('/projects/' ~ project.slug ~ '/chat-updates') }}">
+          {% for entry in entries %}
+          {% include "partials/project_chat_entry.html" %}
+          {% else %}
+          <div class="empty-chat">
+            <span class="empty-chat-eyebrow">YOUR TEAM, ONE WORKSPACE</span>
+            <strong>把目标交给团队。</strong>
+            <p>选择合适的智能体，写下你想完成的事。<br>分工、讨论和交付，都在这里继续。</p>
+            <button type="button" data-agents-open>选择智能体 <span aria-hidden="true">↗</span></button>
+          </div>
+          {% endfor %}
+        </div>
+
+        <form id="project-message-form" method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/entries') }}" enctype="multipart/form-data" class="composer workbench-composer" data-mention-composer data-model-catalog-url="{{ app_path('/api/projects/' ~ project.slug ~ '/models') }}">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <div class="composer-tabs">
+            <label><input type="radio" name="kind" value="message" checked> 消息</label>
+            <label><input type="radio" name="kind" value="markdown"> Markdown</label>
+          </div>
+          <textarea name="body_markdown" rows="4" placeholder="输入任务，由下方选中的成员直接执行…" data-mention-input role="combobox" aria-autocomplete="list" aria-controls="mention-menu" aria-expanded="false"></textarea>
+          <section class="composer-attachments" data-composer-attachments aria-label="待发送附件" hidden></section>
+          <div id="mention-menu" class="mention-menu" data-mention-menu role="listbox" aria-label="提醒对象" hidden>
+            <div class="mention-menu-title">选择提醒对象</div>
+            {% for member in memberships %}
+            <button type="button" role="option" aria-selected="false" data-mention-value="@{{ member.device_label }}" data-mention-label="{{ member.device_label }}">
+              <span class="presence {% if member.is_agent_online %}online{% elif member.is_web_online %}web-only{% endif %}"></span>
+              <span>
+                <strong>{{ member.device_label }}</strong>
+                <small>{{ member.permission }} · {{ member.presence_label }}</small>
+              </span>
+            </button>
+            {% endfor %}
+            {% for group in groups %}
+            <button type="button" role="option" aria-selected="false" data-mention-value="@{{ group.name }}" data-mention-label="{{ group.name }}">
+              <span class="presence"></span>
+              <span>
+                <strong>{{ group.name }}</strong>
+                <small>群组</small>
+              </span>
+            </button>
+            {% endfor %}
+            {% for role in chat_roles %}
+            <button type="button" role="option" aria-selected="false" data-mention-value="@{{ role.name }}" data-mention-label="{{ role.name }}">
+              <span class="role-avatar" aria-hidden="true">角</span>
+              <span>
+                <strong>{{ role.name }}</strong>
+                <small>角色 · {{ role.device_label }}</small>
+              </span>
+            </button>
+            {% endfor %}
+          </div>
+          <div class="composer-tools">
+            <details class="composer-runtime-settings" data-runtime-settings>
+              <summary aria-label="选择执行模型与推理强度">
+                <span>模型</span>
+                <small data-runtime-summary>自动</small>
+              </summary>
+              <div class="composer-runtime-panel">
+                <label>
+                  <span>Codex 模型</span>
+                  <select name="codex_model" data-codex-model>
+                    <option value="">设备默认</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Codex 推理</span>
+                  <select name="codex_reasoning_effort" data-codex-reasoning>
+                    <option value="">设备默认</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Hermes 模型</span>
+                  <input name="hermes_model" data-hermes-model maxlength="100" placeholder="设备默认或输入模型 ID" autocomplete="off">
+                </label>
+                <label>
+                  <span>Hermes 推理</span>
+                  <select name="hermes_reasoning_effort" data-hermes-reasoning>
+                    <option value="">设备默认</option>
+                    <option value="low">轻度</option>
+                    <option value="medium">中</option>
+                    <option value="high">高</option>
+                    <option value="xhigh">极高</option>
+                    <option value="max">最大</option>
+                    <option value="ultra">超强</option>
+                  </select>
+                </label>
+                <p data-model-catalog-status role="status">正在同步所选设备的模型目录…</p>
+                <button type="button" class="button compact" data-model-catalog-refresh>刷新模型</button>
+                <p>模型与推理选项来自所选设备；多台 Codex 设备显示共同支持的选项。留空使用各设备默认值。</p>
+              </div>
+            </details>
+            <details class="composer-target composer-delivery-settings" data-delivery-settings>
+              <summary aria-label="选择执行成员与协作方式"><span>发送至</span> <small data-delivery-summary>指定成员</small></summary>
+              <div class="composer-delivery-panel">
+                <label class="delivery-mode-label"><span>执行方式</span>
+                  <select name="delivery_mode" data-delivery-mode aria-label="执行方式">
+                    <option value="selected" selected>指定成员 · 直接执行</option>
+                    <option value="group">全组协作 · 共同研讨</option>
+                  </select>
+                </label>
+                <fieldset data-delivery-members>
+                  <legend>执行成员（可多选）</legend>
+                  {% set default_target = namespace(chosen=false) %}
+                  {% for member in memberships if member.permission in ["write", "admin"] and not member.agent_tasks_only %}
+                  {% set checked = member.is_primary_device or (not primary_device and not default_target.chosen) %}
+                  {% if checked %}{% set default_target.chosen = true %}{% endif %}
+                  <label class="delivery-member">
+                    <input type="checkbox" name="target_device_ids" value="{{ member.device_id }}" data-delivery-member data-device-label="{{ member.device_label }}" data-execution-backend="{{ member.server_ai_provider or '' }}" {% if checked %}checked{% endif %}>
+                    <span><strong>{{ member.device_label }}</strong><small>{{ member.presence_label }}{% if member.is_primary_device %} · 主设备{% endif %}</small></span>
+                  </label>
+                  {% else %}
+                  <p>请先添加有执行权限的项目成员。</p>
+                  {% endfor %}
+                </fieldset>
+                <p data-delivery-note>只由勾选成员直接执行；可选一个或多个成员。</p>
+              </div>
+            </details>
+            <button class="composer-action voice-session-action" type="button" data-voice-session data-speech-contract="voice-v1" title="开始语音对话" aria-label="开始语音对话" aria-pressed="false">
+              <span class="voice-session-glyph" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+            </button>
+            <button class="composer-action attachment-action" type="button" data-attachment-button title="添加照片或文件" aria-label="添加照片或文件">+</button>
+            <input id="project-attachment-input" class="composer-attachment-input" type="file" name="files" multiple data-attachment-input>
+            <button class="primary send-button" type="submit" aria-label="发送消息">发送</button>
+          </div>
+          <p class="composer-status" data-message-status role="status" aria-live="polite"></p>
+        </form>
+      </section>
+    </section>
+
+    <aside id="project-memory" class="control-pane project-memory-drawer" data-memory-drawer aria-label="项目记忆" aria-hidden="true" inert>
+      <header class="memory-drawer-head">
+        <span>
+          <strong>项目记忆</strong>
+          <small>v{{ memory_version }} · {{ memory_sync_state }}</small>
+        </span>
+        <button class="icon-button" type="button" data-memory-close aria-label="关闭项目记忆">×</button>
+      </header>
+      <section id="control" class="control-card">
+        <details class="side-disclosure" open>
+          <summary class="side-disclosure-summary">
+            <span class="side-disclosure-title">
+              <span>长期项目记忆</span>
+              {% if control %}<span class="version-pill">v{{ control.version }}</span>{% else %}<span class="muted">未设置</span>{% endif %}
+            </span>
+          </summary>
+          <div class="side-disclosure-body">
+        <div class="collaboration-bar {% if project.collaboration_enabled %}is-enabled{% endif %}">
+          <div class="collaboration-copy">
+            <span class="collaboration-status-dot"></span>
+            <span>
+              <strong>群聊模式{% if project.collaboration_enabled %}已开启{% else %}未开启{% endif %}</strong>
+              {% if project.collaboration_enabled %}
+              <small>
+                选择“全组协作”时，消息会同步交给
+                <b>{{ primary_device.label if primary_device else "主设备" }}</b>
+                {% set advisor_labels = [] %}
+                {% for member in memberships if member.permission in ["write", "admin"] and not member.agent_tasks_only and (not primary_device or member.device_id != primary_device.id) %}
+                  {% set _ = advisor_labels.append(member.device_label) %}
+                {% endfor %}
+                {% if advisor_labels %}与协作者 {{ advisor_labels|join("、") }}{% endif %}
+                {% if chat_roles %}；角色 {{ chat_roles|map(attribute="name")|join("、") }} 由绑定设备执行{% endif %}。主设备最终决策。
+              </small>
+              {% else %}
+              <small>每条消息仍可选择“指定成员”直接执行；选择“全组协作”时才由主设备与协作者共同研讨。</small>
+              {% endif %}
+            </span>
+          </div>
+          <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/collaboration-mode') }}">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <input type="hidden" name="enabled" value="{{ '0' if project.collaboration_enabled else '1' }}">
+            <button class="button compact {% if not project.collaboration_enabled %}primary{% endif %}" type="submit" {% if not project.collaboration_enabled and not primary_device %}disabled title="请先设置主设备"{% endif %}>
+              {{ "关闭模式" if project.collaboration_enabled else "开启模式" }}
+            </button>
+          </form>
+        </div>
+        <div class="control-list">
+          <div>
+            <strong>共同目标</strong>
+            <p>{{ control.goal if control and control.goal else "尚未填写共同目标。" }}</p>
+          </div>
+          <div>
+            <strong>当前重点</strong>
+            <p>{{ control.current_phase if control and control.current_phase else "请写明当前阶段和下一步。" }}</p>
+          </div>
+          <div>
+            <strong>关键决定</strong>
+            <p>{{ control.decisions if control and control.decisions else "尚未记录关键决定。" }}</p>
+          </div>
+        </div>
+        <div class="control-actions">
+          <a class="button" href="{{ app_path('/projects/' ~ project.slug ~ '/export.md') }}">查看完整文档</a>
+          {% if tasks %}
+          <a class="button primary" href="{{ app_path('/projects/' ~ project.slug ~ '/tasks/' ~ tasks[0].id ~ '/prompt.md') }}">复制 Codex 提示</a>
+          {% else %}
+          <a class="button primary" href="{{ app_path('/projects/' ~ project.slug ~ '/export.md') }}">复制项目上下文</a>
+          {% endif %}
+        </div>
+        <details class="edit-panel compact-editor">
+          <summary>编辑正式项目记忆</summary>
+          <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/control') }}" class="stack">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <label>
+              <span>共同目标</span>
+              <textarea name="goal" rows="3">{{ control.goal if control else "" }}</textarea>
+            </label>
+            <label>
+              <span>不做什么</span>
+              <textarea name="non_goals" rows="2">{{ control.non_goals if control else "" }}</textarea>
+            </label>
+            <label>
+              <span>关键约束</span>
+              <textarea name="constraints_text" rows="3">{{ control.constraints_text if control else "" }}</textarea>
+            </label>
+            <label>
+              <span>当前阶段</span>
+              <input name="current_phase" value="{{ control.current_phase if control else "" }}">
+            </label>
+            <label>
+              <span>验收标准</span>
+              <textarea name="acceptance" rows="2">{{ control.acceptance if control else "" }}</textarea>
+            </label>
+            <label>
+              <span>角色分工</span>
+              <textarea name="roles" rows="2">{{ control.roles if control else "" }}</textarea>
+            </label>
+            <label>
+              <span>当前架构</span>
+              <textarea name="architecture" rows="3">{{ control.architecture if control else "" }}</textarea>
+            </label>
+            <label>
+              <span>决策记录</span>
+              <textarea name="decisions" rows="2">{{ control.decisions if control else "" }}</textarea>
+            </label>
+            <label>
+              <span>已知问题</span>
+              <textarea name="known_issues" rows="3">{{ control.known_issues if control else "" }}</textarea>
+            </label>
+            <label>
+              <span>风险</span>
+              <textarea name="risks" rows="2">{{ control.risks if control else "" }}</textarea>
+            </label>
+            <label>
+              <span>用户偏好</span>
+              <textarea name="user_preferences" rows="3">{{ control.user_preferences if control else "" }}</textarea>
+            </label>
+            <label>
+              <span>关键文件</span>
+              <textarea name="key_files" rows="3">{{ control.key_files if control else "" }}</textarea>
+            </label>
+            <label>
+              <span>下一步</span>
+              <textarea name="next_steps" rows="3">{{ control.next_steps if control else "" }}</textarea>
+            </label>
+            <label>
+              <span>交接摘要</span>
+              <textarea name="handoff_summary" rows="2">{{ control.handoff_summary if control else "" }}</textarea>
+            </label>
+            <button type="submit">发布新的记忆版本</button>
+          </form>
+        </details>
+          </div>
+        </details>
+      </section>
+
+      <section class="control-card memory-handoff-card">
+        <details class="side-disclosure" open>
+          <summary class="side-disclosure-summary">
+            <span class="side-disclosure-title">
+              <span>设备交接</span>
+              <span class="muted">{{ handoffs|length }}</span>
+            </span>
+          </summary>
+          <div class="side-disclosure-body">
+            <div class="memory-sync-summary">
+              <strong>{{ memory_sync_state }}</strong>
+              <small>正式记忆 v{{ memory_version }}{% if sync_snapshots %} · {{ sync_snapshots|length }} 台设备提交过差异清单{% else %} · 尚无设备差异清单{% endif %}</small>
+            </div>
+            {% if sync_snapshots %}
+            <div class="sync-device-list">
+              {% for snapshot in sync_snapshots %}
+              <div class="sync-device-row">
+                <span>
+                  <strong>{{ snapshot.device_label }}</strong>
+                  <small>清单 r{{ snapshot.revision }} · 记忆 v{{ snapshot.memory_version }}{% if snapshot.git_commit %} · {{ snapshot.git_commit[:9] }}{% endif %}</small>
+                </span>
+                <span class="memory-state {{ 'memory-state-ok' if snapshot.memory_version == memory_version else 'memory-state-diff' }}">{{ '一致' if snapshot.memory_version == memory_version else '有差异' }}</span>
+              </div>
+              {% endfor %}
+            </div>
+            {% endif %}
+
+            <details class="edit-panel handoff-editor">
+              <summary>生成交接文档</summary>
+              <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/handoffs') }}" class="stack">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <input name="title" placeholder="交接标题，例如：主设备切换前交接">
+                <div class="handoff-device-pair">
+                  <select name="source_device_id" aria-label="来源设备">
+                    <option value="">来源：用户整理</option>
+                    {% for member in memberships if not member.server_ai_provider %}<option value="{{ member.device_id }}" {% if primary_device and member.device_id == primary_device.id %}selected{% endif %}>来源：{{ member.device_label }}</option>{% endfor %}
+                  </select>
+                  <select name="target_device_id" aria-label="目标设备">
+                    <option value="">目标：任意设备</option>
+                    {% for member in memberships if not member.server_ai_provider %}<option value="{{ member.device_id }}">目标：{{ member.device_label }}</option>{% endfor %}
+                  </select>
+                </div>
+                <textarea name="summary_markdown" rows="6" required placeholder="已完成事项、未完成事项、验证结果、风险、相关文件和建议下一步"></textarea>
+                <textarea name="manifest_json" rows="3" placeholder='可选：Bridge 生成的差异清单 JSON；留空只创建 Markdown 交接'></textarea>
+                <p class="form-hint">大文件不会自动传输。清单包含大文件时，接管设备会先看到大小、缺失项和确认提醒。</p>
+                <button class="primary" type="submit">保存交接版本</button>
+              </form>
+            </details>
+
+            <div class="handoff-list">
+              {% for handoff in handoffs %}
+              <article class="handoff-item handoff-status-{{ handoff.status }}">
+                <div class="handoff-item-head">
+                  <span>
+                    <strong>v{{ handoff.version }} · {{ handoff.title }}</strong>
+                    <small>{{ handoff.source_device_label or '用户' }} → {{ handoff.target_device_label or '任意设备' }} · 记忆 v{{ handoff.base_memory_version }}</small>
+                  </span>
+                  <span class="memory-state">{{ handoff.status }}</span>
+                </div>
+                <p>{{ handoff.summary_markdown or '未填写交接摘要。' }}</p>
+                {% if handoff.large_file_count %}
+                <div class="large-transfer-warning">包含 {{ handoff.large_file_count }} 个大文件；传输前需用户确认。</div>
+                {% endif %}
+                {% if handoff.status != 'accepted' %}
+                <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/handoffs/' ~ handoff.id ~ '/accept') }}">
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                  <button class="compact" type="submit">由主设备确认采纳</button>
+                </form>
+                {% endif %}
+              </article>
+              {% else %}
+              <p class="muted">还没有交接记录。日常使用无需生成；在用户主动选择、主设备切换或长时间暂停前创建即可。</p>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <section id="codex-workspaces" class="members-card codex-workspaces-card">
+        <details class="side-disclosure" open>
+          <summary class="side-disclosure-summary">
+            <span class="side-disclosure-title">
+              <span>Codex 项目</span>
+              <span class="muted">{{ codex_workspaces|length }}</span>
+            </span>
+          </summary>
+          <div class="side-disclosure-body">
+            <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/codex-workspaces') }}" class="stack codex-workspace-create">
+              <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+              <label>
+                <span>新建项目分类</span>
+                <input name="workspace_slug" required placeholder="例如：zbcs">
+              </label>
+              <input name="name" placeholder="显示名称，可留空">
+              <textarea name="description" rows="2" placeholder="用途说明，可留空"></textarea>
+              <button class="primary compact" type="submit">创建 Codex 项目</button>
+            </form>
+
+            <div class="codex-workspace-list">
+              {% for workspace in codex_workspaces %}
+              <article class="codex-workspace-card">
+                <div class="codex-workspace-head">
+                  <div>
+                    <strong>{{ workspace.name }}</strong>
+                    <small>{{ workspace.slug }} · {{ workspace.conversation_count }} 个对话</small>
+                  </div>
+                  <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/codex-workspaces/' ~ workspace.id ~ '/delete') }}" onsubmit="return confirm('确认删除这个 Codex 项目分类？不会删除本地文件夹。')">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <button class="danger compact" type="submit">删除</button>
+                  </form>
+                </div>
+                {% if workspace.description %}
+                <p class="codex-workspace-note">{{ workspace.description }}</p>
+                {% endif %}
+                <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/codex-workspaces/' ~ workspace.id ~ '/conversations') }}" class="codex-conversation-form">
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                  <input name="title" required placeholder="对话标题">
+                  <textarea name="initial_prompt" rows="3" required placeholder="要交给这个 Codex 项目的任务内容"></textarea>
+                  <div class="codex-conversation-row">
+                    <select name="target_device_id" aria-label="目标设备">
+                    {% for member in memberships if member.permission in ["write", "admin"] and not member.server_ai_provider and not member.agent_tasks_only %}
+                      <option value="{{ member.device_id }}" {% if member.device_id == default_codex_device_id %}selected{% endif %}>{{ member.device_label }} · {{ member.presence_label }}</option>
+                      {% endfor %}
+                    </select>
+                    <button class="primary compact" type="submit">新建对话</button>
+                  </div>
+                </form>
+                <div class="codex-conversation-list">
+                  {% for conversation in workspace.conversations %}
+                  <a class="codex-conversation-item" href="{{ app_path('/projects/' ~ project.slug ~ '/tasks/' ~ conversation.task_id) if conversation.task_id else '#' }}">
+                    <strong>{{ conversation.title }}</strong>
+                    <small>{{ conversation.target_device_label or "未指定设备" }} · {{ conversation.task_status or conversation.status }}</small>
+                  </a>
+                  {% else %}
+                  <p class="muted">暂无对话请求</p>
+                  {% endfor %}
+                </div>
+              </article>
+              {% else %}
+              <p class="muted">先创建一个 Codex 项目分类，例如 zbcs。之后这里的新对话会在对应终端项目中运行。</p>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <section id="tasks" class="control-card">
+        <details class="side-disclosure" open>
+          <summary class="side-disclosure-summary">
+            <span class="side-disclosure-title">任务</span>
+          </summary>
+          <div class="side-disclosure-body">
+          <div class="side-action-row">
+          <details class="new-task-details">
+            <summary>+ 新建任务</summary>
+            <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/tasks') }}" class="stack task-create">
+              <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+              <label>
+                <span>任务标题</span>
+                <input name="title" required placeholder="例如：设备 B 检查部署">
+              </label>
+              <label>
+                <span>说明</span>
+                <textarea name="description" rows="3"></textarea>
+              </label>
+              <label>
+                <span>上下文包</span>
+                <textarea name="context_pack_markdown" rows="3" placeholder="只放这个任务需要的资料"></textarea>
+              </label>
+              <div class="form-grid">
+                <label>
+                  <span>优先级</span>
+                  <select name="priority">
+                    <option value="normal">Normal</option>
+                    <option value="high">High</option>
+                    <option value="low">Low</option>
+                  </select>
+                </label>
+                <label>
+                  <span>指定设备</span>
+                  <select name="assigned_device_id">
+                    <option value="">不指定</option>
+                    {% for member in memberships if not member.server_ai_provider and not member.agent_tasks_only %}
+                    <option value="{{ member.device_id }}">{{ member.device_label }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+              </div>
+              <label>
+                <span>指定群组</span>
+                <select name="requested_group_id">
+                  <option value="">不指定</option>
+                  {% for group in groups %}
+                  <option value="{{ group.id }}">{{ group.name }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <button class="primary" type="submit">创建任务</button>
+            </form>
+          </details>
+          </div>
+        <div class="kanban-board" data-auto-refresh="tasks">
+          {% for status_label, status_values in [
+            ("待处理", ["open", "claimed"]),
+            ("进行中", ["in_progress"]),
+            ("遇到阻碍", ["blocked"]),
+            ("待复核", ["review"]),
+            ("已完成", ["done"]),
+            ("已取消", ["cancelled"])
+          ] %}
+          <div class="kanban-column" data-task-statuses="{{ status_values|join(' ') }}">
+            <h3>{{ status_label }}</h3>
+            {% for task in tasks if task.status in status_values %}
+            <article class="task-card priority-{{ task.priority }}">
+              <a href="{{ app_path('/projects/' ~ project.slug ~ '/tasks/' ~ task.id) }}">
+                <strong>{{ task.title }}</strong>
+                <small>{{ {'open':'待领取','claimed':'已领取','in_progress':'进行中','blocked':'遇到阻碍','review':'待复核','done':'已完成','cancelled':'已取消'}.get(task.status, task.status) }} / {{ {'high':'优先处理','normal':'普通','low':'不紧急'}.get(task.priority, task.priority) }}</small>
+                {% if task.assigned_device_label or task.requested_group_name %}
+                <small>
+                  {% if task.assigned_device_label %}{{ task.assigned_device_label }}{% endif %}
+                  {% if task.requested_group_name %}群组：{{ task.requested_group_name }}{% endif %}
+                </small>
+                {% endif %}
+              </a>
+              <a class="mini-link" href="{{ app_path('/projects/' ~ project.slug ~ '/tasks/' ~ task.id ~ '/prompt.md') }}">复制 Codex 提示</a>
+            </article>
+            {% else %}
+            <div class="kanban-empty">+</div>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+          </div>
+        </details>
+      </section>
+
+      <section id="members" class="members-card">
+        <details class="side-disclosure">
+          <summary class="side-disclosure-summary">
+            <span class="side-disclosure-title">群聊成员</span>
+          </summary>
+          <div class="side-disclosure-body">
+        <div class="side-action-row">
+          <a class="button compact" href="{{ app_path('/devices') }}">管理设备</a>
+        </div>
+        <h4 class="member-section-title">服务器 AI 直连</h4>
+        <div class="server-ai-grid">
+          {% for provider in server_ai_statuses %}
+          <article class="server-ai-card" data-server-ai-state="{{ provider.state }}">
+            <div>
+              <strong>{{ provider.label }}</strong>
+              <small>{{ provider.model or '未设置模型' }} · {{ provider.endpoint_host or '端点未设置' }}</small>
+            </div>
+            <p>
+              {% if provider.state == 'ready' %}密钥已就绪，服务器可以直接调用。
+              {% elif provider.state == 'quota_exhausted' %}今日调用上限已用完，UTC 次日自动恢复。
+              {% elif provider.state == 'awaiting_key' %}接入已准备，等待 API Key。
+              {% elif provider.state == 'configuration_error' %}配置错误：{{ provider.configuration_error }}
+              {% else %}服务器直连功能尚未启用。{% endif %}
+            </p>
+            <small>今日 {{ provider.requests_today }} / {{ provider.daily_request_limit }} 次</small>
+            <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/server-ai/' ~ provider.provider) }}">
+              <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+              <input type="hidden" name="enabled" value="{{ '0' if provider.project_enabled else '1' }}">
+              <button type="submit" class="compact{% if provider.project_enabled %} danger{% endif %}" {% if provider.state == 'disabled' %}disabled{% endif %}>
+                {{ '移出本项目' if provider.project_enabled else '加入本项目' }}
+              </button>
+            </form>
+          </article>
+          {% endfor %}
+        </div>
+        {% if server_ai_jobs %}
+        <details class="server-ai-jobs">
+          <summary>最近服务器 AI 任务</summary>
+          <div>
+            {% for job in server_ai_jobs %}
+            <p><strong>#{{ job.id }} · {{ job.target_device_label }}</strong> · {{ job.status }}{% if job.last_error %} · {{ job.last_error }}{% endif %}</p>
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+        <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/primary-device') }}" class="member-add-form primary-device-form" onsubmit="return confirm('切换项目主设备前，建议先生成或确认交接文档。确认继续切换？')">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <select name="primary_device_id" aria-label="主设备">
+            <option value="">未设置主设备</option>
+            {% for member in memberships if not member.server_ai_provider and not member.agent_tasks_only %}
+            <option value="{{ member.device_id }}" {% if primary_device and primary_device.id == member.device_id %}selected{% endif %}>{{ member.device_label }} / {{ member.permission }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" {% if not memberships %}disabled{% endif %}>设为主设备</button>
+        </form>
+        <h4 class="member-section-title">添加设备</h4>
+        <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/members') }}" class="member-add-form">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <select name="device_id" required aria-label="加入设备">
+            {% for device in devices %}
+            <option value="{{ device.id }}">{{ device.label }}{% if device.server_ai_provider %} / 服务器 AI{% elif device.group_name %} / {{ device.group_name }}{% endif %}</option>
+            {% endfor %}
+          </select>
+          <select name="permission" aria-label="设备权限">
+            <option value="write" selected>write</option>
+            <option value="read">read</option>
+            <option value="admin">admin</option>
+          </select>
+          <button type="submit" {% if not devices %}disabled{% endif %}>加入群聊</button>
+        </form>
+
+        <h4 class="member-section-title">添加角色</h4>
+        <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/chat-roles') }}" class="member-add-form role-add-form">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <input name="role_name" maxlength="40" required placeholder="角色名称，如 安全审查" aria-label="角色名称">
+          <select name="role_device_id" required aria-label="角色执行设备">
+            {% for member in memberships if member.permission in ["write", "admin"] and not member.agent_tasks_only %}
+            <option value="{{ member.device_id }}">由 {{ member.device_label }} 执行</option>
+            {% endfor %}
+          </select>
+          <input name="role_instructions" maxlength="500" placeholder="职责说明（可选）" aria-label="角色职责说明">
+          <button type="submit" {% if not memberships|selectattr('permission', 'in', ['write', 'admin'])|list %}disabled{% endif %}>添加角色</button>
+        </form>
+
+        <div class="group-chat-member-list" data-auto-refresh="members">
+          <h4 class="member-section-title">设备成员</h4>
+          <div class="member-grid">
+          {% for member in memberships %}
+          <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/members/' ~ member.device_id ~ '/remove') }}" class="member-chip" data-presence="{{ member.presence_mode }}" data-agent-presence="{{ 'online' if member.is_agent_online else 'offline' }}" onsubmit="return confirm('确认移除这个设备？')">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <span class="device-icon {% if member.is_agent_online %}online-device{% endif %}"></span>
+            <span>
+              <strong>{{ member.device_label }}</strong>
+              <small>{{ member.permission }} · {{ member.presence_label }}{% if member.is_primary_device %} · 主设备{% endif %}</small>
+            </span>
+            <button class="danger compact" type="submit">移除</button>
+          </form>
+          {% endfor %}
+          </div>
+
+          <h4 class="member-section-title">角色成员</h4>
+          <div class="member-grid role-member-grid">
+          {% for role in chat_roles %}
+          <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/chat-roles/' ~ role.id ~ '/remove') }}" class="member-chip role-member-chip" onsubmit="return confirm('确认移除这个角色？')">
+            <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+            <span class="role-avatar" aria-hidden="true">角</span>
+            <span>
+              <strong>{{ role.name }}</strong>
+              <small>{{ role.device_label }}{% if role.instructions %} · {{ role.instructions }}{% endif %}</small>
+            </span>
+            <button class="danger compact" type="submit">移除</button>
+          </form>
+          {% else %}
+          <p class="muted empty-role-message">尚未添加角色；角色会由选定设备执行。</p>
+          {% endfor %}
+          </div>
+        </div>
+          </div>
+        </details>
+      </section>
+
+      <section id="files" class="members-card">
+        <details class="side-disclosure">
+          <summary class="side-disclosure-summary">
+            <span class="side-disclosure-title">
+              <span>项目媒体库</span>
+              <span class="muted">{{ attachments|length }}</span>
+            </span>
+          </summary>
+          <div class="side-disclosure-body">
+        <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/attachments') }}" enctype="multipart/form-data" class="member-add-form">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <input type="file" name="file" required>
+          <button type="submit">上传附件</button>
+        </form>
+        <div class="media-library" data-media-library data-auto-refresh="media">
+          <div class="media-library-tabs" aria-label="媒体类型">
+            <button type="button" data-media-category="all" aria-pressed="true">全部</button>
+            <button type="button" data-media-category="image" aria-pressed="false">图片</button>
+            <button type="button" data-media-category="video" aria-pressed="false">视频</button>
+            <button type="button" data-media-category="document" aria-pressed="false">文档</button>
+          </div>
+          <div class="media-library-filters">
+            <input type="search" inputmode="numeric" data-media-message placeholder="消息编号，如 144" aria-label="按消息筛选">
+            <select data-media-time aria-label="按时间筛选">
+              <option value="all">全部时间</option>
+              <option value="1">最近 24 小时</option>
+              <option value="7">最近 7 天</option>
+              <option value="30">最近 30 天</option>
+            </select>
+            <select data-media-device aria-label="按设备筛选">
+              <option value="">全部设备</option>
+              {% for label in media_devices %}<option value="{{ label }}">{{ label }}</option>{% endfor %}
+            </select>
+            <input type="search" data-media-batch placeholder="生成批次" aria-label="按生成批次筛选">
+          </div>
+          <div class="media-library-summary">
+            <span data-media-filter-count>{{ media_library|length }} 项</span>
+            <span>Office / PDF 使用下载后外部工具打开</span>
+          </div>
+          <div class="media-library-grid">
+          {% for file in media_library %}
+            <article class="media-library-item" data-media-library-item
+              data-media-type="{{ file.media_type }}"
+              data-entry-id="{{ file.entry_id or '' }}"
+              data-created-at="{{ file.created_at }}"
+              data-device="{{ file.source_label }}"
+              data-batch="{{ file.generation_batch }}">
+              {% if file.media_type == "image" %}
+              <a class="message-image-link"
+                href="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}"
+                data-media-image
+                data-media-id="{{ file.id }}"
+                data-media-entry-id="{{ file.entry_id or '' }}"
+                data-media-scope="library"
+                data-media-src="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}?inline=1"
+                data-media-preview="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}?inline=1&amp;size=preview"
+                data-media-thumb="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}?inline=1&amp;size=thumb"
+                data-media-download="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}"
+                data-media-filename="{{ file.original_filename }}"
+                data-media-source="{{ file.source_label }}{% if file.entry_id %} · 消息 #{{ file.entry_id }}{% endif %}"
+                aria-label="查看图片 {{ file.original_filename }}">
+                <span class="media-image-frame" style="aspect-ratio: {{ file.aspect_ratio_css }}">
+                  <img class="message-image" data-media-image-preview src="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}?inline=1&amp;size=thumb" alt="{{ file.original_filename }}"{% if file.width and file.height %} width="{{ file.width }}" height="{{ file.height }}"{% endif %} loading="lazy" decoding="async">
+                </span>
+              </a>
+              {% elif file.media_type == "video" %}
+              <a class="message-file" data-video-attachment
+                href="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}"
+                data-video-id="{{ project.slug }}-{{ file.id }}"
+                data-file-name="{{ file.original_filename }}"
+                data-content-type="{{ file.content_type }}"
+                data-byte-size="{{ file.byte_size }}">
+                <span aria-hidden="true">▶</span><span><strong>{{ file.original_filename }}</strong><small>点击后才加载视频</small></span>
+              </a>
+              {% endif %}
+              <div class="media-library-meta">
+                {% if file.media_type == "document" %}
+                <a href="{{ app_path('/projects/' ~ project.slug ~ '/attachments/' ~ file.id) }}"><strong>{{ file.original_filename }}</strong></a>
+                {% else %}
+                <strong>{{ file.original_filename }}</strong>
+                {% endif %}
+                <small>{{ file.source_label }}{% if file.entry_id %} · 消息 #{{ file.entry_id }}{% endif %} · {{ file.byte_size_display }}</small>
+                {% if file.width and file.height %}<small>{{ file.width }} × {{ file.height }}</small>{% endif %}
+                {% if file.generation_model or file.generation_prompt or file.generation_params %}
+                <details class="generation-details">
+                  <summary>生成信息{% if file.generation_model %} · {{ file.generation_model }}{% endif %}</summary>
+                  {% if file.generation_prompt %}<p>{{ file.generation_prompt }}</p>{% endif %}
+                  {% if file.generation_params %}<p>{{ file.generation_params }}</p>{% endif %}
+                </details>
+                {% endif %}
+              </div>
+            </article>
+          {% else %}
+            <p class="muted">暂无媒体或附件</p>
+          {% endfor %}
+          </div>
+        </div>
+          </div>
+        </details>
+      </section>
+    </aside>
+  </div>
+</section>
+{% include "partials/agent_workspace.html" %}
+<script>
+(() => {
+  const drawer = document.querySelector("[data-memory-drawer]");
+  const openers = Array.from(document.querySelectorAll("[data-memory-open]"));
+  const closers = Array.from(document.querySelectorAll("[data-memory-close]"));
+  if (!drawer) return;
+  const overlayEvent = "codexhub:overlay-open";
+  let lastOpener = null;
+
+  function fragmentTarget() {
+    const fragment = window.location.hash.slice(1);
+    if (!fragment) return null;
+    try {
+      return document.getElementById(decodeURIComponent(fragment));
+    } catch {
+      return document.getElementById(fragment);
+    }
+  }
+
+  function fragmentTargetsDrawer() {
+    const target = fragmentTarget();
+    return Boolean(target && (target === drawer || drawer.contains(target)));
+  }
+
+  function setOpen(open, { restoreFocus = true, updateHash = true } = {}) {
+    if (open) {
+      document.dispatchEvent(new CustomEvent(overlayEvent, { detail: { name: "memory" } }));
+    }
+    document.body.classList.toggle("memory-drawer-open", open);
+    drawer.classList.toggle("is-open", open);
+    drawer.inert = !open;
+    drawer.setAttribute("aria-hidden", String(!open));
+    openers.forEach((button) => button.setAttribute("aria-expanded", String(open)));
+    if (!open && updateHash && fragmentTargetsDrawer()) {
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}${window.location.search}`,
+      );
+    }
+    if (!open && restoreFocus && lastOpener?.isConnected) {
+      try {
+        lastOpener.focus({ preventScroll: true });
+      } catch {
+        lastOpener.focus();
+      }
+    }
+  }
+
+  openers.forEach((button) => button.addEventListener("click", () => {
+    const open = !drawer.classList.contains("is-open");
+    if (open) lastOpener = button;
+    setOpen(open);
+  }));
+  closers.forEach((button) => button.addEventListener("click", () => setOpen(false)));
+  document.addEventListener("click", (event) => {
+    if (!drawer.classList.contains("is-open")) return;
+    const target = event.target;
+    if (drawer.contains(target) || target.closest?.("[data-memory-open]")) return;
+    setOpen(false, { restoreFocus: false });
+  });
+  document.addEventListener(overlayEvent, (event) => {
+    if (event.detail?.name !== "memory" && drawer.classList.contains("is-open")) {
+      setOpen(false, { restoreFocus: false });
+    }
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && drawer.classList.contains("is-open")) setOpen(false);
+  });
+  window.addEventListener("hashchange", () => {
+    if (fragmentTargetsDrawer()) setOpen(true, { updateHash: false });
+  });
+  setOpen(fragmentTargetsDrawer(), { restoreFocus: false, updateHash: false });
+})();
+</script>
+<script>
+(() => {
+  const sidebar = document.querySelector("[data-project-sidebar]");
+  const openers = Array.from(document.querySelectorAll("[data-sidebar-open]"));
+  const closers = Array.from(document.querySelectorAll("[data-sidebar-close]"));
+  if (!sidebar) return;
+  const overlayEvent = "codexhub:overlay-open";
+  const mobileQuery = window.matchMedia("(max-width: 860px)");
+  let lastOpener = null;
+
+  const syncAccessibility = (open) => {
+    const hidden = mobileQuery.matches && !open;
+    sidebar.inert = hidden;
+    sidebar.setAttribute("aria-hidden", String(hidden));
+  };
+
+  const setOpen = (open, { restoreFocus = true } = {}) => {
+    if (open) {
+      document.dispatchEvent(new CustomEvent(overlayEvent, { detail: { name: "sidebar" } }));
+    }
+    document.body.classList.toggle("project-sidebar-open", open);
+    sidebar.classList.toggle("is-open", open);
+    openers.forEach((button) => button.setAttribute("aria-expanded", String(open)));
+    syncAccessibility(open);
+    if (!open && restoreFocus && lastOpener?.isConnected) {
+      try {
+        lastOpener.focus({ preventScroll: true });
+      } catch {
+        lastOpener.focus();
+      }
+    }
+  };
+  openers.forEach((button) => button.addEventListener("click", () => {
+    lastOpener = button;
+    setOpen(true);
+  }));
+  closers.forEach((button) => button.addEventListener("click", () => setOpen(false)));
+  sidebar.querySelectorAll("a").forEach((link) =>
+    link.addEventListener("click", () => setOpen(false, { restoreFocus: false })),
+  );
+  document.addEventListener(overlayEvent, (event) => {
+    if (event.detail?.name !== "sidebar" && sidebar.classList.contains("is-open")) {
+      setOpen(false, { restoreFocus: false });
+    }
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && sidebar.classList.contains("is-open")) setOpen(false);
+  });
+  mobileQuery.addEventListener?.("change", () => setOpen(false, { restoreFocus: false }));
+  setOpen(false, { restoreFocus: false });
+})();
+</script>
+<script>
+(() => {
+  const composer = document.querySelector("[data-mention-composer]");
+  if (!composer) return;
+  const input = composer.querySelector("[data-mention-input]");
+  const menu = composer.querySelector("[data-mention-menu]");
+  const runtimeSettings = composer.querySelector("[data-runtime-settings]");
+  const runtimeSummary = composer.querySelector("[data-runtime-summary]");
+  const codexModel = composer.querySelector("[data-codex-model]");
+  const codexReasoning = composer.querySelector("[data-codex-reasoning]");
+  const hermesModel = composer.querySelector("[data-hermes-model]");
+  const hermesReasoning = composer.querySelector("[data-hermes-reasoning]");
+  const buttons = Array.from(menu.querySelectorAll("[data-mention-value]"));
+  buttons.forEach((button, index) => {
+    if (!button.id) button.id = `mention-option-${index + 1}`;
+  });
+  let activeIndex = 0;
+  let mentionStart = -1;
+
+  function syncRuntimeSummary() {
+    if (!runtimeSummary) return;
+    const selectedModel = codexModel?.selectedOptions?.[0]?.textContent || "";
+    const selectedEffort = codexReasoning?.selectedOptions?.[0]?.textContent || "";
+    const hermes = hermesModel?.value?.trim();
+    const parts = [];
+    if (codexModel?.value) parts.push(selectedModel.replace(/^GPT-/, ""));
+    if (codexReasoning?.value) parts.push(selectedEffort);
+    if (hermes) parts.push("Hermes");
+    if (!hermes && hermesReasoning?.value) parts.push("Hermes 推理");
+    runtimeSummary.textContent = parts.length ? parts.join(" · ") : "自动";
+  }
+
+  [codexModel, codexReasoning, hermesModel, hermesReasoning].forEach((control) => {
+    control?.addEventListener("change", syncRuntimeSummary);
+    control?.addEventListener("input", syncRuntimeSummary);
+  });
+  document.addEventListener("click", (event) => {
+    if (runtimeSettings?.open && !runtimeSettings.contains(event.target)) {
+      runtimeSettings.open = false;
+    }
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && runtimeSettings?.open) runtimeSettings.open = false;
+  });
+  syncRuntimeSummary();
+
+  function activeButtons() {
+    return buttons.filter((button) => !button.hidden);
+  }
+
+  function setActive(index) {
+    const visible = activeButtons();
+    if (!visible.length) return;
+    activeIndex = (index + visible.length) % visible.length;
+    const active = visible[activeIndex];
+    buttons.forEach((button) => {
+      const selected = button === active;
+      button.classList.toggle("is-active", selected);
+      button.setAttribute("aria-selected", String(selected));
+    });
+    input.setAttribute("aria-activedescendant", active.id);
+  }
+
+  function queryAtCursor() {
+    const cursor = input.selectionStart || 0;
+    const before = input.value.slice(0, cursor);
+    const match = before.match(/(^|\s)@([A-Za-z0-9_.-]*)$/);
+    if (!match) return null;
+    return {
+      query: match[2].toLowerCase(),
+      start: before.length - match[2].length - 1,
+      end: cursor,
+    };
+  }
+
+  function showMenu() {
+    const current = queryAtCursor();
+    if (!current) {
+      hideMenu();
+      return;
+    }
+    mentionStart = current.start;
+    let shown = 0;
+    buttons.forEach((button) => {
+      const label = (button.dataset.mentionLabel || "").toLowerCase();
+      const value = (button.dataset.mentionValue || "").toLowerCase();
+      const match = !current.query || label.includes(current.query) || value.includes(current.query);
+      button.hidden = !match;
+      if (match) shown += 1;
+    });
+    menu.hidden = shown === 0;
+    input.setAttribute("aria-expanded", String(shown > 0));
+    if (shown) setActive(0);
+    else input.removeAttribute("aria-activedescendant");
+  }
+
+  function hideMenu() {
+    menu.hidden = true;
+    mentionStart = -1;
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+  }
+
+  function insertMention(value) {
+    const cursor = input.selectionStart || 0;
+    const start = mentionStart >= 0 ? mentionStart : cursor;
+    const before = input.value.slice(0, start);
+    const after = input.value.slice(cursor);
+    const spacer = after.startsWith(" ") || after.startsWith("\n") || after === "" ? "" : " ";
+    input.value = `${before}${value} ${spacer}${after}`;
+    const nextCursor = before.length + value.length + 1;
+    input.focus();
+    input.setSelectionRange(nextCursor, nextCursor);
+    hideMenu();
+  }
+
+  input.addEventListener("input", showMenu);
+  input.addEventListener("click", showMenu);
+  input.addEventListener("blur", () => window.setTimeout(hideMenu, 120));
+  input.addEventListener("keydown", (event) => {
+    if (menu.hidden) return;
+    const visible = activeButtons();
+    if (!visible.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActive(activeIndex + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActive(activeIndex - 1);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      insertMention(visible[activeIndex].dataset.mentionValue);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      hideMenu();
+    }
+  });
+
+  buttons.forEach((button) => {
+    button.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      insertMention(button.dataset.mentionValue);
+    });
+  });
+
+  const attachmentInput = document.querySelector("[data-attachment-input]");
+  const attachmentButton = document.querySelector("[data-attachment-button]");
+  const attachmentTray = document.querySelector("[data-composer-attachments]");
+  let pendingFiles = [];
+  let previewUrls = [];
+
+  attachmentButton?.addEventListener("click", () => attachmentInput?.click());
+
+  function fileIdentity(file) {
+    return [file.name, file.size, file.type, file.lastModified].join(":");
+  }
+
+  function nativeFileKey(file) {
+    return [file.name, file.size].join(":");
+  }
+
+  function replaceInputFiles(files) {
+    if (!attachmentInput || typeof window.DataTransfer !== "function") return false;
+    try {
+      const transfer = new DataTransfer();
+      files.forEach((file) => transfer.items.add(file));
+      attachmentInput.files = transfer.files;
+      return attachmentInput.files.length === files.length;
+    } catch {
+      return false;
+    }
+  }
+
+  function formatFileSize(size) {
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} KB`;
+    return `${(size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+  }
+
+  function clearPreviewUrls() {
+    previewUrls.forEach((url) => URL.revokeObjectURL(url));
+    previewUrls = [];
+  }
+
+  function isImageFile(file) {
+    if (String(file.type || "").toLowerCase().startsWith("image/")) return true;
+    return /\.(?:avif|bmp|gif|heic|heif|jpe?g|png|webp)$/i.test(file.name || "");
+  }
+
+  function loadImagePreview(image, file) {
+    const item = image.closest(".composer-attachment");
+    item?.classList.add("preview-loading");
+    image.addEventListener("load", () => {
+      item?.classList.remove("preview-loading", "preview-unavailable");
+    }, { once: true });
+    const localPreview = window.CodexHubAndroidFiles?.previewFor?.(file);
+    if (localPreview) {
+      image.src = localPreview;
+      return;
+    }
+    const useFileReader = () => {
+      if (typeof FileReader !== "function" || file.size > 24 * 1024 * 1024) {
+        item?.classList.remove("preview-loading");
+        item?.classList.add("preview-unavailable");
+        return;
+      }
+      const reader = new FileReader();
+      reader.addEventListener("load", () => {
+        if (typeof reader.result === "string") image.src = reader.result;
+      }, { once: true });
+      reader.addEventListener("error", () => {
+        item?.classList.remove("preview-loading");
+        item?.classList.add("preview-unavailable");
+      }, { once: true });
+      reader.readAsDataURL(file);
+    };
+    image.addEventListener("error", useFileReader, { once: true });
+    try {
+      const previewUrl = URL.createObjectURL(file);
+      previewUrls.push(previewUrl);
+      image.src = previewUrl;
+    } catch {
+      useFileReader();
+    }
+  }
+
+  function renderAttachments() {
+    if (!attachmentTray) return;
+    clearPreviewUrls();
+    attachmentTray.replaceChildren();
+    attachmentTray.hidden = pendingFiles.length === 0;
+    pendingFiles.forEach((file, index) => {
+      const item = document.createElement("article");
+      const imageFile = isImageFile(file);
+      item.className = `composer-attachment ${imageFile ? "is-image" : "is-file"}`;
+      item.dataset.fileKey = nativeFileKey(file);
+
+      if (imageFile) {
+        const image = document.createElement("img");
+        image.alt = "";
+        item.appendChild(image);
+        loadImagePreview(image, file);
+      } else {
+        const fileIcon = document.createElement("span");
+        fileIcon.className = "composer-file-icon";
+        fileIcon.textContent = "文";
+        item.appendChild(fileIcon);
+      }
+
+      const copy = document.createElement("span");
+      copy.className = "composer-attachment-copy";
+      const name = document.createElement("strong");
+      name.textContent = file.name;
+      const size = document.createElement("small");
+      size.textContent = formatFileSize(file.size);
+      copy.append(name, size);
+      item.appendChild(copy);
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "composer-attachment-remove";
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", `移除 ${file.name}`);
+      remove.addEventListener("click", () => {
+        pendingFiles = pendingFiles.filter((_, fileIndex) => fileIndex !== index);
+        if (!replaceInputFiles(pendingFiles) && attachmentInput) attachmentInput.value = "";
+        renderAttachments();
+      });
+      item.appendChild(remove);
+      attachmentTray.appendChild(item);
+    });
+    attachmentButton?.classList.toggle("has-attachments", pendingFiles.length > 0);
+    attachmentButton?.setAttribute(
+      "aria-label",
+      pendingFiles.length ? `已添加 ${pendingFiles.length} 个附件，继续添加` : "添加照片或文件",
+    );
+  }
+
+  attachmentInput?.addEventListener("change", () => {
+    if (!attachmentInput.files?.length) return;
+    const known = new Set(pendingFiles.map(fileIdentity));
+    const incoming = Array.from(attachmentInput.files).filter((file) => !known.has(fileIdentity(file)));
+    pendingFiles = [...pendingFiles, ...incoming];
+    replaceInputFiles(pendingFiles);
+    input.setCustomValidity("");
+    renderAttachments();
+  });
+
+  window.addEventListener("codexhub:native-file-previews", renderAttachments);
+
+  window.CodexHubComposerAttachments = {
+    hasFiles() {
+      return pendingFiles.length > 0;
+    },
+    formData(form) {
+      const data = new FormData(form);
+      data.delete("files");
+      pendingFiles.forEach((file) => data.append("files", file, file.name));
+      return data;
+    },
+    clear() {
+      pendingFiles = [];
+      if (attachmentInput) attachmentInput.value = "";
+      window.CodexHubAndroidFiles?.clear?.();
+      renderAttachments();
+    },
+  };
+})();
+</script>
+<script>
+(() => {
+  function fragmentTarget() {
+    const fragment = window.location.hash.slice(1);
+    if (!fragment) return null;
+    try {
+      return document.getElementById(decodeURIComponent(fragment));
+    } catch {
+      return document.getElementById(fragment);
+    }
+  }
+
+  function openHashPanel() {
+    const target = fragmentTarget();
+    if (!target || target.id === "project-memory") return;
+    const disclosure = target.matches(".side-disclosure")
+      ? target
+      : target.querySelector(":scope > .side-disclosure");
+    if (disclosure) {
+      disclosure.open = true;
+      target.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  window.addEventListener("hashchange", openHashPanel);
+  openHashPanel();
+})();
+</script>
+<script>
+(() => {
+  const toggle = document.querySelector("[data-connect-toggle]");
+  const panel = document.querySelector("[data-connect-panel]");
+  if (!toggle || !panel) return;
+  const command = panel.querySelector("[data-connect-command]");
+  const copyButton = panel.querySelector("[data-copy-connect-command]");
+  const basePath = panel.dataset.connectBasePath || "/";
+
+  function normalizedHubBase() {
+    const path = basePath.endsWith("/") ? basePath.slice(0, -1) : basePath;
+    return `${window.location.origin}${path}`;
+  }
+
+  function renderCommand() {
+    if (!command) return;
+    const template = command.dataset.commandTemplate || "";
+    command.value = template.replace("__CODEX_HUB_BASE__", normalizedHubBase());
+  }
+
+  function setOpen(open, restoreFocus = false) {
+    if (open) {
+      document.dispatchEvent(new CustomEvent("codexhub:overlay-open", { detail: { name: "connect" } }));
+    }
+    panel.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+    if (open) {
+      renderCommand();
+      command?.focus();
+      command?.select();
+    } else if (restoreFocus) {
+      const menu = toggle.closest("details");
+      const returnTarget = menu && !menu.open ? menu.querySelector("summary") : toggle;
+      returnTarget?.focus({ preventScroll: true });
+    }
+  }
+
+  toggle.addEventListener("click", () => setOpen(panel.hidden));
+  panel.querySelector("[data-connect-close]")?.addEventListener("click", () => setOpen(false, true));
+  document.addEventListener("click", (event) => {
+    if (!panel.hidden && !panel.contains(event.target) && !toggle.contains(event.target)) setOpen(false);
+  });
+  document.addEventListener("codexhub:overlay-open", (event) => {
+    if (event.detail?.name !== "connect" && !panel.hidden) setOpen(false);
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !panel.hidden) setOpen(false, true);
+  });
+
+  copyButton?.addEventListener("click", async () => {
+    renderCommand();
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(command?.value || "");
+      copied = true;
+    } catch {
+      command?.focus();
+      command?.select();
+      try {
+        copied = document.execCommand("copy");
+      } catch {
+        copied = false;
+      }
+    }
+    copyButton.textContent = copied ? "已复制" : "请手动复制";
+    window.setTimeout(() => {
+      copyButton.textContent = "复制启动命令";
+    }, 1800);
+  });
+})();
+</script>
+<script>
+(() => {
+  const refreshNames = ["chat", "tasks", "devices", "members", "media", "agents"];
+  const sections = refreshNames
+    .map((name) => [name, document.querySelector(`[data-auto-refresh="${name}"]`)])
+    .filter(([, element]) => element);
+  if (!sections.length) return;
+  const input = document.querySelector("[data-mention-input]");
+  const messageForm = document.querySelector("#project-message-form");
+  const sendButton = messageForm?.querySelector(".send-button");
+  const messageStatus = messageForm?.querySelector("[data-message-status]");
+  const sync = document.querySelector('[data-auto-refresh="sync"]');
+  const webDevice = document.querySelector("[data-web-presence-device]");
+  const csrf = document.querySelector('input[name="_csrf"]')?.value || "";
+  const loginUrl = {{ app_path('/login') | tojson }};
+  const webDeviceStorageKey = "codexHub.webDeviceId";
+  let refreshPromise = null;
+  let chatUpdatePromise = null;
+  let chatUpdateTimer = 0;
+  let chatUpdateFailures = 0;
+  let messageSending = false;
+  let sessionRedirecting = false;
+  let chatInteractionActive = false;
+  let chatInteractionUntil = 0;
+
+  const chatSection = sections.find(([name]) => name === "chat")?.[1] || null;
+  const chatUpdateUrl = chatSection?.dataset.chatUpdatesUrl || "";
+  const isAndroidApp = document.documentElement.classList.contains("codex-hub-android")
+    || navigator.userAgent.includes("CodexHubAndroid/");
+
+  function redirectIfSessionExpired(response) {
+    if (sessionRedirecting || (response.status !== 401 && !response.redirected)) return false;
+    sessionRedirecting = true;
+    window.location.assign(loginUrl);
+    return true;
+  }
+
+  function readWebDeviceId() {
+    try {
+      return window.localStorage.getItem(webDeviceStorageKey) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function writeWebDeviceId(value) {
+    try {
+      window.localStorage.setItem(webDeviceStorageKey, value);
+    } catch {
+      // Presence and chat refresh remain usable when storage is unavailable.
+    }
+  }
+
+  function noteChatInteraction(duration = 900) {
+    chatInteractionUntil = Math.max(chatInteractionUntil, Date.now() + duration);
+  }
+
+  function beginChatInteraction() {
+    chatInteractionActive = true;
+    noteChatInteraction(2000);
+  }
+
+  function endChatInteraction() {
+    if (!chatInteractionActive) return;
+    chatInteractionActive = false;
+    noteChatInteraction(1500);
+  }
+
+  chatSection?.addEventListener("touchstart", beginChatInteraction, {
+    passive: true,
+  });
+  chatSection?.addEventListener("touchend", endChatInteraction, {
+    passive: true,
+  });
+  chatSection?.addEventListener("touchcancel", endChatInteraction, {
+    passive: true,
+  });
+  chatSection?.addEventListener("pointerdown", beginChatInteraction, {
+    passive: true,
+  });
+  window.addEventListener("pointerup", endChatInteraction, { passive: true });
+  window.addEventListener("pointercancel", endChatInteraction, { passive: true });
+  chatSection?.addEventListener("wheel", () => noteChatInteraction(1500), {
+    passive: true,
+  });
+  chatSection?.addEventListener("scroll", () => noteChatInteraction(1200), {
+    passive: true,
+  });
+  chatSection?.addEventListener("scrollend", () => noteChatInteraction(1000), {
+    passive: true,
+  });
+
+  function shouldPauseRefresh() {
+    const isComposing = Boolean(input && document.activeElement === input && input.value.trim());
+    const isPlayingVideo = Array.from(document.querySelectorAll("video")).some(
+      (video) => !video.paused && !video.ended,
+    );
+    const isFilteringMedia = Boolean(
+      document.activeElement?.closest?.("[data-media-library]"),
+    );
+    const isViewingMedia = Boolean(window.CodexHubMediaViewer?.isOpen?.());
+    const isMovingChat = chatInteractionActive || Date.now() < chatInteractionUntil;
+    return messageSending || isComposing || isPlayingVideo || isFilteringMedia || isViewingMedia
+      || isMovingChat;
+  }
+
+  function stampSync(text) {
+    if (!sync) return;
+    const now = new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    sync.textContent = `${text} ${now}`;
+  }
+
+  function sectionFingerprint(name, element) {
+    if (name === "chat") {
+      return Array.from(element.querySelectorAll(".chat-message[data-entry-id]"))
+        .map((entry) => {
+          const media = Array.from(entry.querySelectorAll("[data-media-id], .message-file[href]"))
+            .map((item) => item.dataset.mediaId || item.getAttribute("href") || "")
+            .join(",");
+          return `${entry.dataset.entryId || ""}:${media}`;
+        })
+        .join("|");
+    }
+    const text = (element.textContent || "").replace(/\s+/g, " ").trim();
+    const identity = Array.from(element.querySelectorAll("[href], [data-presence], [data-agent-presence]"))
+      .map((item) => [
+        item.getAttribute("href") || "",
+        item.dataset.presence || "",
+        item.dataset.agentPresence || "",
+      ].join(":"))
+      .join("|");
+    return `${text}::${identity}`;
+  }
+
+  function captureChatViewport(element) {
+    const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 120;
+    const streamRect = element.getBoundingClientRect();
+    const anchor = Array.from(element.querySelectorAll(".chat-message[data-entry-id]"))
+      .find((entry) => entry.getBoundingClientRect().bottom > streamRect.top + 8);
+    return {
+      nearBottom,
+      scrollTop: element.scrollTop,
+      anchorId: anchor?.dataset.entryId || "",
+      anchorOffset: anchor ? anchor.getBoundingClientRect().top - streamRect.top : 0,
+    };
+  }
+
+  function restoreChatViewport(element, viewport) {
+    const apply = () => {
+      if (viewport.nearBottom) {
+        if (window.CodexHubReadingExperience?.pinToBottom) {
+          window.CodexHubReadingExperience.pinToBottom(true);
+        } else {
+          element.scrollTop = element.scrollHeight;
+        }
+        return;
+      }
+      const anchor = viewport.anchorId
+        ? element.querySelector(`[data-entry-id="${viewport.anchorId}"]`)
+        : null;
+      if (!anchor) {
+        element.scrollTop = viewport.scrollTop;
+        return;
+      }
+      const streamRect = element.getBoundingClientRect();
+      element.scrollTop += anchor.getBoundingClientRect().top - streamRect.top - viewport.anchorOffset;
+    };
+    apply();
+    window.requestAnimationFrame(() => {
+      apply();
+      window.requestAnimationFrame(apply);
+    });
+  }
+
+  function refreshProject(options = {}) {
+    const force = Boolean(options.force);
+    const pinChatToBottom = Boolean(options.pinChatToBottom);
+    if (refreshPromise) {
+      if (!pinChatToBottom) return refreshPromise;
+      return refreshPromise.then(() => refreshProject(options));
+    }
+    if ((!force && document.visibilityState === "hidden") || (!force && shouldPauseRefresh())) {
+      return Promise.resolve(false);
+    }
+    refreshPromise = (async () => {
+      try {
+        const refreshUrl = `${window.location.pathname}${window.location.search}`;
+        const response = await fetch(refreshUrl, {
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "X-Requested-With": "codex-hub-refresh" },
+      });
+        if (redirectIfSessionExpired(response)) return false;
+        if (!response.ok) return false;
+        const html = await response.text();
+        const documentCopy = new DOMParser().parseFromString(html, "text/html");
+        if (!force && shouldPauseRefresh()) return false;
+        sections.forEach(([name, element]) => {
+          const replacement = documentCopy.querySelector(`[data-auto-refresh="${name}"]`);
+          if (!replacement) return;
+          if (sectionFingerprint(name, element) === sectionFingerprint(name, replacement)) return;
+          const viewport = name === "chat" ? captureChatViewport(element) : null;
+          if (viewport && pinChatToBottom) viewport.nearBottom = true;
+          element.innerHTML = replacement.innerHTML;
+          if (name === "agents") document.dispatchEvent(new Event("codexhub:agents-refreshed"));
+          if (viewport) restoreChatViewport(element, viewport);
+        });
+        stampSync("已同步");
+        return true;
+      } catch {
+        if (sync) sync.textContent = "同步暂停";
+        return false;
+      } finally {
+        refreshPromise = null;
+      }
+    })();
+    return refreshPromise;
+  }
+
+  function setMessageStatus(text, isError = false) {
+    if (!messageStatus) return;
+    messageStatus.textContent = text;
+    messageStatus.classList.toggle("is-error", isError);
+  }
+
+  function appendSentEntry(payload) {
+    const entryId = String(payload?.entry?.id || "");
+    const entryHtml = String(payload?.entry_html || "").trim();
+    if (!chatSection || !entryId || !entryHtml) return false;
+    if (chatSection.querySelector(`[data-entry-id="${entryId}"]`)) {
+      window.CodexHubReadingExperience?.pinToBottom?.(true);
+      return true;
+    }
+
+    const template = document.createElement("template");
+    template.innerHTML = entryHtml;
+    const entry = template.content.querySelector(".chat-message[data-entry-id]");
+    if (!entry || entry.dataset.entryId !== entryId) return false;
+    chatSection.querySelector(":scope > .empty-chat")?.remove();
+    chatSection.appendChild(template.content);
+    window.CodexHubReadingExperience?.pinToBottom?.(true);
+    return true;
+  }
+
+  function latestChatEntryId() {
+    if (!chatSection) return 0;
+    return Array.from(chatSection.querySelectorAll(".chat-message[data-entry-id]"))
+      .reduce((latest, entry) => Math.max(latest, Number(entry.dataset.entryId || 0)), 0);
+  }
+
+  function appendChatUpdates(items) {
+    if (!chatSection || !Array.isArray(items) || !items.length) return false;
+    const nearBottom = chatSection.scrollHeight - chatSection.scrollTop
+      - chatSection.clientHeight < 120;
+    let appended = false;
+    items.forEach((item) => {
+      const entryId = String(item?.id || "");
+      const entryHtml = String(item?.html || "").trim();
+      if (!entryId || !entryHtml || chatSection.querySelector(`[data-entry-id="${entryId}"]`)) {
+        return;
+      }
+      const template = document.createElement("template");
+      template.innerHTML = entryHtml;
+      const entry = template.content.querySelector(".chat-message[data-entry-id]");
+      if (!entry || entry.dataset.entryId !== entryId) return;
+      chatSection.querySelector(":scope > .empty-chat")?.remove();
+      chatSection.appendChild(template.content);
+      appended = true;
+    });
+    if (appended && nearBottom) {
+      window.requestAnimationFrame(() => {
+        if (window.CodexHubReadingExperience?.pinToBottom) {
+          window.CodexHubReadingExperience.pinToBottom(true);
+        } else {
+          chatSection.scrollTop = chatSection.scrollHeight;
+        }
+      });
+    }
+    return appended;
+  }
+
+  async function fetchChatUpdates() {
+    if (!chatSection || !chatUpdateUrl || document.visibilityState === "hidden") {
+      return { changed: false, hasMore: false };
+    }
+    if (chatUpdatePromise) return chatUpdatePromise;
+    chatUpdatePromise = (async () => {
+      const controller = typeof AbortController === "function" ? new AbortController() : null;
+      const timeout = window.setTimeout(() => controller?.abort(), 8000);
+      try {
+        const url = new URL(chatUpdateUrl, window.location.origin);
+        url.searchParams.set("after_entry_id", String(latestChatEntryId()));
+        url.searchParams.set("limit", "50");
+        const response = await fetch(url, {
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: controller?.signal,
+          headers: {
+            Accept: "application/json",
+            "X-Requested-With": "codex-hub-chat-updates",
+          },
+        });
+        if (redirectIfSessionExpired(response)) {
+          return { changed: false, hasMore: false };
+        }
+        if (!response.ok) {
+          throw new Error(`chat update failed: ${response.status}`);
+        }
+        const payload = await response.json();
+        if (payload?.reset_required) {
+          await refreshProject({ force: true });
+          chatUpdateFailures = 0;
+          return { changed: true, hasMore: false };
+        }
+        const changed = appendChatUpdates(payload?.entries || []);
+        chatUpdateFailures = 0;
+        stampSync(changed ? "新消息" : "已同步");
+        return { changed, hasMore: Boolean(payload?.has_more) };
+      } catch {
+        chatUpdateFailures += 1;
+        if (sync) sync.textContent = "连接恢复中";
+        return { changed: false, hasMore: false };
+      } finally {
+        window.clearTimeout(timeout);
+        chatUpdatePromise = null;
+      }
+    })();
+    return chatUpdatePromise;
+  }
+
+  function chatUpdateDelay(hasMore = false) {
+    if (hasMore) return 20;
+    if (document.visibilityState === "hidden") return 15000;
+    const base = isAndroidApp ? 1200 : 2500;
+    if (!chatUpdateFailures) return base;
+    const backoff = Math.min(30000, base * (2 ** Math.min(chatUpdateFailures, 4)));
+    return backoff + Math.floor(Math.random() * 400);
+  }
+
+  function scheduleChatUpdates(delay = 250) {
+    window.clearTimeout(chatUpdateTimer);
+    chatUpdateTimer = window.setTimeout(async () => {
+      const result = await fetchChatUpdates();
+      scheduleChatUpdates(chatUpdateDelay(result.hasMore));
+    }, delay);
+  }
+
+  messageForm?.addEventListener("submit", async (event) => {
+    if (messageSending || !window.fetch || !window.FormData) {
+      if (messageSending) event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    if (!input.value.trim() && !window.CodexHubComposerAttachments?.hasFiles?.()) {
+      input.setCustomValidity("请输入消息或添加照片、文件");
+      input.reportValidity();
+      setMessageStatus("请输入消息或添加附件", true);
+      return;
+    }
+    input.setCustomValidity("");
+    if (window.CodexHubDelivery?.validate && !window.CodexHubDelivery.validate()) return;
+    if (!messageForm.reportValidity()) return;
+
+    messageSending = true;
+    const originalLabel = sendButton?.textContent || "发送";
+    if (sendButton) {
+      sendButton.disabled = true;
+      sendButton.setAttribute("aria-busy", "true");
+      sendButton.textContent = "发送中…";
+    }
+    setMessageStatus("正在发送…");
+
+    try {
+      const response = await fetch(messageForm.action, {
+        method: "POST",
+        credentials: "same-origin",
+        body: window.CodexHubComposerAttachments?.formData?.(messageForm)
+          || new FormData(messageForm),
+        headers: {
+          Accept: "application/json",
+          "X-Requested-With": "codex-hub-composer",
+        },
+      });
+      if (redirectIfSessionExpired(response)) return;
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => ({}));
+        const detail = typeof errorPayload.detail === "string" ? errorPayload.detail : "";
+        if (detail && response.status >= 400 && response.status < 500) {
+          setMessageStatus(detail, true);
+          return;
+        }
+        throw new Error(`send failed: ${response.status}`);
+      }
+      const payload = await response.json();
+      messageForm.dispatchEvent(new CustomEvent("codex-hub:message-sent"));
+
+      input.value = "";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      window.CodexHubComposerAttachments?.clear?.();
+      const appended = appendSentEntry(payload);
+      const refreshed = appended
+        ? true
+        : await refreshProject({ force: true, pinChatToBottom: true });
+      setMessageStatus(refreshed ? "已发送" : "已发送，正在等待消息同步");
+      try {
+        input.focus({ preventScroll: true });
+      } catch {}
+      window.requestAnimationFrame(() => {
+        window.CodexHubReadingExperience?.pinToBottom?.(true);
+      });
+    } catch {
+      setMessageStatus("发送状态未确认，请先等待同步后再重试", true);
+    } finally {
+      messageSending = false;
+      if (sendButton) {
+        sendButton.disabled = false;
+        sendButton.removeAttribute("aria-busy");
+        sendButton.textContent = originalLabel;
+      }
+    }
+  });
+
+  async function sendDeviceHeartbeat() {
+    if (!webDevice || !webDevice.value || document.visibilityState === "hidden") {
+      return;
+    }
+    const form = new FormData();
+    form.append("_csrf", csrf);
+    const base = webDevice.dataset.heartbeatBase || "/devices";
+    const response = await fetch(`${base}/${webDevice.value}/heartbeat`, {
+      method: "POST",
+      credentials: "same-origin",
+      body: form,
+    });
+    if (redirectIfSessionExpired(response)) return;
+    if (!response.ok) {
+      throw new Error("heartbeat failed");
+    }
+  }
+
+  function setupWebDevicePresence() {
+    if (!webDevice || !webDevice.value) return;
+    const storedDeviceId = readWebDeviceId();
+    if (
+      storedDeviceId &&
+      Array.from(webDevice.options).some((option) => option.value === storedDeviceId)
+    ) {
+      webDevice.value = storedDeviceId;
+    }
+    const heartbeat = () => {
+      sendDeviceHeartbeat()
+        .catch(() => {
+          if (sync) sync.textContent = "在线状态暂停";
+        });
+    };
+    webDevice.addEventListener("change", () => {
+      writeWebDeviceId(webDevice.value);
+      heartbeat();
+    });
+    heartbeat();
+    window.setInterval(heartbeat, 30000);
+  }
+
+  setupWebDevicePresence();
+  scheduleChatUpdates();
+  window.setInterval(() => refreshProject(), 60000);
+  window.addEventListener("focus", () => {
+    scheduleChatUpdates(0);
+    window.setTimeout(() => refreshProject(), 1200);
+  });
+  window.addEventListener("online", () => scheduleChatUpdates(0));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") scheduleChatUpdates(0);
+  });
+  window.addEventListener("pagehide", () => {
+    window.clearTimeout(chatUpdateTimer);
+  }, { once: true });
+})();
+</script>
+{% endblock %}
+{% block extra_scripts %}
+<script src="{{ app_path('/static/composer-routing.js') }}?v=20260911-routing1" defer></script>
+<script src="{{ app_path('/static/agent-workspace.js') }}?v=20261027-workspace1" defer></script>
+{% if entries %}<script src="{{ app_path('/static/codex-markdown.js') }}?v=20260812-page-features1" defer></script>{% endif %}
+{% if media_library|selectattr('is_inline_video')|list %}<script src="{{ app_path('/static/codex-video-reader.js') }}?v=20260812-page-features1" defer></script>{% endif %}
+<script
+  src="{{ app_path('/static/deferred-features.js') }}?v=20260817-image-gallery2"
+  data-image-viewer-src="{{ app_path('/static/image-viewer.js') }}?v=20260817-image-gallery2"
+  data-voice-session-src="{{ app_path('/static/hub-voice.js') }}?v=20260812-page-features1"
+  data-markdown-src="{{ app_path('/static/codex-markdown.js') }}?v=20260812-page-features1"
+  data-video-reader-src="{{ app_path('/static/codex-video-reader.js') }}?v=20260812-page-features1"
+  defer></script>
+<script src="{{ app_path('/static/reading-experience.js') }}?v=20260811-scroll-stability1" defer></script>
+{% endblock %}

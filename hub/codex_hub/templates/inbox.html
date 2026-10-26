@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}设备收件箱 - Codex Hub{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <a class="back-link" href="{{ app_path('/projects') }}">返回项目</a>
+    <h1>设备收件箱</h1>
+    <p>按设备查看任务提醒。设备分组只负责提醒，最终参与仍以项目白名单为准。</p>
+  </div>
+</section>
+
+<section class="inbox-layout">
+  <aside class="panel">
+    <div class="section-head">
+      <h2>设备</h2>
+      <span>{{ devices|length }} 台</span>
+    </div>
+    <div class="list compact">
+      {% for device in devices %}
+      <a class="row flat {% if selected_device and selected_device.id == device.id %}selected-row{% endif %}" href="{{ app_path('/devices/' ~ device.id ~ '/inbox') }}">
+        <span>
+          <strong>{{ device.label }}</strong>
+          <small>{% if device.group_name %}Group: {{ device.group_name }}{% else %}未分组{% endif %}</small>
+        </span>
+        <span class="row-arrow">查看</span>
+      </a>
+      {% else %}
+      <div class="empty-state">
+        <strong>还没有设备</strong>
+        <p>先到设备页创建设备和 API token。</p>
+      </div>
+      {% endfor %}
+    </div>
+  </aside>
+
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <h2>{{ selected_device.label if selected_device else "选择一个设备" }}</h2>
+        <p class="muted">这里只展示该设备已被白名单允许读取的项目任务。</p>
+      </div>
+      <span>{{ inbox_tasks|length }} 项</span>
+    </div>
+    <div class="task-list">
+      {% for task in inbox_tasks %}
+      <article class="task-card priority-{{ task.priority }}">
+        <a href="{{ app_path('/projects/' ~ task.project_slug ~ '/tasks/' ~ task.id) }}">
+          <strong>{{ task.title }}</strong>
+          <small>{{ task.project_name }} / {{ task.status }} / {{ task.priority }}</small>
+          <small>
+            {% if task.assigned_device_label %}指定：{{ task.assigned_device_label }}{% endif %}
+            {% if task.requested_group_name %}Group: {{ task.requested_group_name }}{% endif %}
+          </small>
+        </a>
+        <a class="mini-link" href="{{ app_path('/projects/' ~ task.project_slug ~ '/tasks/' ~ task.id ~ '/prompt.md') }}">Copy Codex Prompt</a>
+      </article>
+      {% else %}
+      <div class="empty-state">
+        <strong>{% if selected_device %}暂无待办{% else %}请先选择设备{% endif %}</strong>
+        <p>任务只有在设备属于项目白名单时才会出现在这里。</p>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</section>
+{% endblock %}

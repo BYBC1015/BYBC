@@ -1,0 +1,160 @@
+"""Independent agent-only worker; never consumes legacy inbox work or mentions."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import platform
+import sys
+import threading
+import time
+from pathlib import Path
+from typing import Any, Callable
+
+from .client import HubClient, HubClientError
+from .config import load_config
+from .runner import BridgeRunner
+from .single_instance import SingleInstance
+
+
+def filter_agent_inbox(inbox: dict[str, Any], pending_ids: set[int] | None = None) -> dict[str, Any]:
+    device_id = (inbox.get("device") or {}).get("id")
+    if type(device_id) is not int or device_id < 1:
+        raise HubClientError("Hub 未返回有效的本连接身份，已停止领取任务。")
+    pending = pending_ids or set()
+    tasks = []
+    for task in inbox.get("tasks") or []:
+        agent_id = task.get("assigned_agent_id")
+        if (type(agent_id) is not int or agent_id < 1
+                or task.get("assigned_device_id") != device_id):
+            continue
+        # Existing work without a local recovery receipt is not a new request.
+        # A fresh worker must not repeat an in-progress or already reviewed job.
+        if task.get("status") in {"open", "claimed"} or task.get("id") in pending:
+            tasks.append(task)
+    return {**inbox, "tasks": tasks, "mentions": []}
+
+
+class AgentOnlyHubClient(HubClient):
+    pending_task_ids: Callable[[], set[int]] = staticmethod(set)
+    machine_name: str = ''
+
+    def get_inbox(self) -> dict[str, Any]:
+        return filter_agent_inbox(super().get_inbox(), self.pending_task_ids())
+
+    def post_device_capabilities(self, capabilities: dict[str, Any]) -> dict[str, Any]:
+        return super().post_device_capabilities({**capabilities,
+            'machine_name': self.machine_name or platform.node(), 'runtime_kind': 'durable-agent'})
+
+
+class AgentWorkerHeartbeat:
+    """Keep a busy dedicated worker visible without polling or claiming work."""
+    def __init__(self, client: HubClient, interval_seconds: float = 45):
+        self.client = client
+        self.interval_seconds = max(0.01, interval_seconds)
+        self.stopped = threading.Event()
+        self.thread = threading.Thread(target=self._run, name='hub-agent-heartbeat', daemon=True)
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def close(self) -> None:
+        self.stopped.set()
+        if self.thread.is_alive():
+            self.thread.join(timeout=max(3, self.client.timeout_seconds + 1))
+
+    def _run(self) -> None:
+        while not self.stopped.is_set():
+            try:
+                self.client.heartbeat()
+            except Exception:
+                # Never print server bodies/credentials, reset receipts, or
+                # trigger another execution when only a heartbeat fails.
+                pass
+            self.stopped.wait(self.interval_seconds)
+
+
+def mutex_name(config_path: Path, binding_id: str) -> str:
+    identity = os.path.normcase(str(config_path.resolve())) + "|" + binding_id
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+    return "Local\\CodexHub.AgentWorker." + digest
+
+
+def main(argv: list[str] | None = None) -> int:
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    os.environ["PYTHONUTF8"] = "1"
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+    parser = argparse.ArgumentParser(description="Run only durable-agent tasks on a dedicated Hub connection.")
+    parser.add_argument("--config", required=True, type=Path)
+    parser.add_argument("--binding-id")
+    parser.add_argument("--once", action="store_true", help="Report capabilities and inbox counts once; never claim or execute work.")
+    args = parser.parse_args(argv)
+    try:
+        config_path = args.config.expanduser().resolve(strict=True)
+        runtimes = load_config(config_path).runtime_configs()
+        if args.binding_id:
+            runtimes = [item for item in runtimes if item.binding_id == args.binding_id]
+        if len(runtimes) != 1:
+            raise ValueError("专用 worker 必须选择一个配置完整的执行连接。")
+        config = runtimes[0]
+        if config.execution_backend != "codex" or not config.auto_execute_codex:
+            raise ValueError("专用 worker 需要启用 Codex CLI 自动执行。")
+        if config.ignore_existing_on_first_run:
+            raise ValueError("专用 worker 配置需设置 ignore_existing_on_first_run=false，避免跳过已分配工作。")
+        # The new process supplies a distinct config and state directory; this
+        # mutex intentionally never touches the old Bridge singleton.
+        instance = SingleInstance(mutex_name(config_path, config.binding_id))
+        if not instance.acquire():
+            print("该专用智能体 worker 已在运行。", flush=True)
+            return 0
+        try:
+            os.environ["CODEX_BRIDGE_AGENT_CONFIG"] = str(config_path)
+            package_root = str(Path(__file__).resolve().parent.parent)
+            current_pythonpath = os.environ.get("PYTHONPATH", "")
+            paths = [package_root, *[p for p in current_pythonpath.split(os.pathsep) if p and p != package_root]]
+            os.environ["PYTHONPATH"] = os.pathsep.join(paths)
+            client = AgentOnlyHubClient(config.hub, config.token,
+                timeout_seconds=config.hub_request_timeout_seconds,
+                get_retry_attempts=config.hub_get_retry_attempts,
+                retry_backoff_seconds=config.hub_retry_backoff_seconds,
+                source_ip=config.hub_source_ip)
+            client.machine_name = str(config.backend_options.get('machine_name') or '').strip()[:128]
+            runner = BridgeRunner(config, client=client)
+            client.pending_task_ids = lambda: {int(item["task_id"]) for item in runner.state.task_deliveries.values()
+                                               if isinstance(item.get("task_id"), int)}
+            if args.once:
+                status = runner.poll_status()
+                print(f"连接已检查：{status.device_label}；可处理智能体任务 {status.task_count} 项；未领取或执行。", flush=True)
+                return 0
+            heartbeat = AgentWorkerHeartbeat(HubClient(config.hub, config.token,
+                timeout_seconds=min(12, config.hub_request_timeout_seconds),
+                get_retry_attempts=1, source_ip=config.hub_source_ip))
+            heartbeat.start()
+            try:
+                print("专用智能体 worker 已启动；仅处理明确分配给本连接的持久智能体任务。", flush=True)
+                while True:
+                    try:
+                        result = runner.process_once()
+                        for message in result.messages:
+                            print(message, flush=True)
+                        if result.executed_codex:
+                            print(f"本轮执行 {len(result.executed_codex)} 项智能体任务，结果已处理。", flush=True)
+                    except Exception as exc:
+                        # Durable receipts distinguish safe result retries
+                        # from uncertain work; do not reset that state.
+                        print(f"本轮未完成：{exc}", flush=True)
+                    time.sleep(max(3, config.interval_seconds))
+            finally:
+                heartbeat.close()
+        finally:
+            instance.close()
+    except KeyboardInterrupt:
+        return 0
+    except (OSError, ValueError, HubClientError) as exc:
+        parser.exit(1, f"Agent worker: {exc}\n")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

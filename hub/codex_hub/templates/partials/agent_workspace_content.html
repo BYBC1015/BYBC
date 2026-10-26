@@ -1,0 +1,23 @@
+<div class="agent-overview" aria-label="团队概览">
+  <span><strong>{{ durable_agents|length }}</strong> 个长期执行者</span>
+  <span><strong>{{ durable_agents|sum(attribute='task_count') }}</strong> 项未完成任务</span>
+  <span><strong>{{ durable_agents|sum(attribute='experience_count') }}</strong> 条当前经验</span>
+  <span><strong>{{ agent_conversations|length }}</strong> 场工作对话</span>
+</div>
+<div class="agent-card-grid">
+  {% for agent in durable_agents %}
+  {% set binding = namespace(ready=false, label='') %}{% for member in memberships if member.device_id == agent.device_id %}{% set binding.label=member.device_label %}{% if member.permission in ['write','admin'] and not member.server_ai_provider %}{% set binding.ready=true %}{% endif %}{% endfor %}
+  {% set ready = agent.active and binding.ready %}
+  <article class="agent-card" data-agent-tone="{{ ['iris','blue','sage','amber','rose','slate'][agent.id % 6] }}" data-agent-card="{{ agent.id }}" data-agent-name="{{ agent.name }}" data-agent-search-text="{{ agent.name }} {{ agent.job }} {{ agent.instructions }}" data-ready="{{ 'true' if ready else 'false' }}" data-active="{{ 'true' if agent.task_count else 'false' }}" data-learned="{{ 'true' if agent.experience_count else 'false' }}">
+    <div class="agent-identity"><span class="agent-portrait" aria-hidden="true">{{ agent.name[:1] }}</span><span class="agent-identity-caption">{{ 'COORDINATOR' if agent.kind == 'controller' else 'TEAM MEMBER' }}</span></div>
+    <div class="agent-card-head"><label class="agent-card-select"><input type="checkbox" data-agent-select value="{{ agent.id }}" aria-label="选择 {{ agent.name }}" {% if not ready %}disabled{% endif %}><strong>{{ agent.name }}</strong></label><span class="agent-badge">{{ '总控' if agent.kind == 'controller' else '智能体' }}</span></div>
+    <p class="agent-presence"><i class="agent-state-dot {% if ready %}is-ready{% endif %}" aria-hidden="true"></i>{{ '已暂停' if not agent.active else '可分配工作' if ready else '待绑定执行连接' }}</p>
+    <div class="agent-roles"><p><strong>{{ agent.job }}</strong><span>{{ agent.instructions or '按职责完成任务，记录结果并持续改进工作方法。' }}</span></p></div>
+    <div class="agent-metrics"><span><strong>{{ agent.task_count }}</strong> 任务</span><span><strong>{{ agent.experience_count }}</strong> 经验</span><span><strong>{{ agent.conversation_count }}</strong> 对话</span></div>
+    <small class="agent-execution-kind">执行连接 · {{ binding.label or '尚未绑定' }}</small>
+    <div class="agent-card-actions"><a href="{{ app_path('/projects/' ~ project.slug ~ '/agents/' ~ agent.id) }}">身份与经验</a><button type="button" data-agent-assign="{{ agent.id }}" {% if not ready %}disabled{% endif %}>分配任务</button></div>
+  </article>
+  {% else %}<div class="agent-empty"><span class="agent-empty-mark" aria-hidden="true">＋</span><strong>从第一个执行者开始</strong><p>创建总控或一位专业智能体，设定职责，让每次工作成为下一次的经验。</p><button type="button" class="primary" data-agent-create-open>创建智能体</button></div>{% endfor %}
+</div>
+{% if agent_conversations %}<section class="agent-conversations"><div class="agent-section-title"><h3>最近的工作对话</h3><span>执行者可以在不同对话中协作</span></div>{% for conversation in agent_conversations[:4] %}<a href="{{ app_path('/projects/' ~ project.slug ~ '/conversations/' ~ conversation.id) }}"><span><strong>{{ conversation.title }}</strong><small>{{ conversation.participants or '等待加入' }}</small></span><span aria-hidden="true">↗</span></a>{% endfor %}</section>{% endif %}
+<p class="agent-workspace-note">总控积累分工与验收经验，智能体积累执行经验。任务结果、复盘内容和每次修订都有来源记录。</p>

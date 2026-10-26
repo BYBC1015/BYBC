@@ -1,0 +1,5 @@
+recursive-include codex_hub/templates *.html
+recursive-include codex_hub/static *
+recursive-include deploy *
+
+recursive-include codex_bridge/assets *

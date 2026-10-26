@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}邮件通知 - Codex Hub{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ app_path('/static/email-notifications.css') }}?v=20261004-1">{% endblock %}
+{% block body_class %}email-notifications-screen{% endblock %}
+{% block content %}
+<section class="email-settings" aria-labelledby="email-heading">
+  <header class="email-heading"><div><p class="email-eyebrow">通知设置</p><h1 id="email-heading">邮件通知</h1><p class="muted">任务有进展时，让提醒到达你的邮箱。</p></div><span class="email-pill {% if prefs.enabled and service.ready and recipient_ready %}is-ready{% endif %}">{% if prefs.enabled and service.ready and recipient_ready %}自动提醒已开启{% else %}自动提醒未开启{% endif %}</span></header>
+  {% if notice %}<p class="email-notice" role="status">{{ notice }}</p>{% endif %}
+  <section class="email-service" aria-label="发送服务状态">
+    <div><strong>{% if service.ready %}发送配置已就绪{% else %}尚未配置完成发送服务{% endif %}</strong><p>{% if service.ready %}保存并验证收件邮箱后，可以测试和开启提醒。实际发送与投递状态请查看记录。{% else %}你可以先保存地址和通知偏好，完成配置后再验证收件邮箱。{% endif %}</p></div>
+    {% if not service.ready %}<ul>{% for reason in service.reasons %}<li>{{ reason }}</li>{% endfor %}</ul>{% endif %}
+  </section>
+  {% if channel.paused_reason %}<section class="email-warning"><strong>发送通道已暂停</strong><p>{% if channel.paused_reason == 'backup_restored' %}已恢复历史备份。请先核查服务商发送记录，历史邮件不会自动重发。{% else %}上次发送遇到服务配置或发信权限问题。请检查凭证、域验证和服务商状态。{% endif %}</p><form method="post" action="{{ app_path('/settings/notifications/email/channel/resume') }}"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><label class="email-checkbox"><input type="checkbox" name="cause_fixed" required><span>我已核查发送配置和历史待核查记录，确认恢复后续发送</span></label><button type="submit" class="ghost"{% if not deployment_ready %} disabled{% endif %}>恢复发送通道</button></form><p>恢复后仍需手动开启自动提醒。已取消的邮件不会补发。</p></section>{% endif %}
+  <nav class="email-tabs" aria-label="邮件通知页面">
+    <a href="{{ app_path('/settings/notifications/email') }}"{% if tab == 'rules' %} aria-current="page"{% endif %}>通知规则</a>
+    <a href="{{ app_path('/settings/notifications/email?tab=preview') }}"{% if tab == 'preview' %} aria-current="page"{% endif %}>邮件预览</a>
+    <a href="{{ app_path('/settings/notifications/email?tab=history') }}"{% if tab == 'history' %} aria-current="page"{% endif %}>发送记录</a>
+  </nav>
+  {% if tab == 'rules' %}
+  <div class="email-columns">
+    <section class="email-card" aria-labelledby="recipient-heading">
+      <header class="email-card-heading"><h2 id="recipient-heading">收件邮箱</h2><span class="email-pill">{% if recipient and recipient.paused_reason %}已暂停{% elif recipient and recipient.verified_at %}已验证{% elif recipient %}待验证{% else %}未设置{% endif %}</span></header>
+      <p class="muted">此地址仅接收 Hub 自身的默认提醒。脚本和应用可通过<a href="{{ app_path('/mail') }}">发信接口</a>指定任意收件人，无需绑定或逐个验证。</p>
+      <form method="post" action="{{ app_path('/settings/notifications/email/recipient') }}" class="email-form">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <label for="recipient-address">邮箱地址</label><input id="recipient-address" name="address" type="email" maxlength="254" value="{{ recipient.address if recipient else '' }}" placeholder="你的 QQ 邮箱或其他邮箱" autocomplete="email" required>
+        <button type="submit">保存地址</button>
+      </form>
+      <div class="email-actions">
+        <form method="post" action="{{ app_path('/settings/notifications/email/verify') }}"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><button type="submit" class="ghost"{% if not service.ready or not recipient or recipient.paused_reason %} disabled{% endif %}>{% if recipient and recipient.verified_at %}重新验证邮箱{% else %}发送验证邮件{% endif %}</button></form>
+        {% if recipient %}<form method="post" action="{{ app_path('/settings/notifications/email/recipient/remove') }}"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><button type="submit" class="ghost">移除地址</button></form>{% endif %}
+      </div>
+      <p class="email-help">更换地址后需要重新验证。验证邮件不包含项目信息。请在收到邮件后打开链接，并登录管理员账号确认。</p>
+      {% if recipient and recipient.paused_reason %}
+      <div class="email-warning"><strong>该邮箱已暂停接收通知</strong><p>请处理退信、投诉或收件限制，再恢复发送。</p><form method="post" action="{{ app_path('/settings/notifications/email/recipient/resume') }}"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><label class="email-checkbox"><input type="checkbox" name="cause_fixed" required><span>我已处理暂停原因，并确认继续接收通知</span></label><button type="submit" class="ghost">恢复收件地址</button></form></div>
+      {% endif %}
+    </section>
+    <section class="email-card" aria-labelledby="rules-heading">
+      <h2 id="rules-heading">何时提醒我</h2>
+      <form method="post" action="{{ app_path('/settings/notifications/email/rules') }}" class="email-form">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <label class="email-checkbox email-master"><input type="checkbox" name="enabled"{% if prefs.enabled %} checked{% endif %}{% if not prefs.enabled and (not service.ready or not recipient_ready) %} disabled{% endif %}><span><strong>开启自动邮件提醒</strong><small>{% if not service.ready or not recipient_ready %}发送服务就绪且收件邮箱已验证后可开启。{% else %}仅通知开启后发生的新事件。{% endif %}</small></span></label>
+        <fieldset><legend>通知事件</legend>
+          <label class="email-checkbox"><input type="checkbox" name="task_done"{% if prefs.task_done %} checked{% endif %}><span><strong>任务完成</strong><small>任务从其他状态变为已完成时。</small></span></label>
+          <label class="email-checkbox"><input type="checkbox" name="task_blocked"{% if prefs.task_blocked %} checked{% endif %}><span><strong>任务需要处理</strong><small>任务进入阻塞状态时。</small></span></label>
+          <label class="email-checkbox"><input type="checkbox" name="ai_failed"{% if prefs.ai_failed %} checked{% endif %}><span><strong>服务器 AI 最终失败</strong><small>重试结束仍失败时。</small></span></label>
+        </fieldset>
+        <label class="email-checkbox"><input type="checkbox" name="show_project_name"{% if prefs.show_project_name %} checked{% endif %}><span><strong>在邮件中显示项目名称</strong><small>关闭后，主题、正文和链接都不会透露项目名称。</small></span></label>
+        <button type="submit">保存通知规则</button>
+      </form>
+      <form method="post" action="{{ app_path('/settings/notifications/email/test') }}" class="email-test"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><button type="submit" class="ghost"{% if not service.ready or not recipient_ready %} disabled{% endif %}>发送测试通知</button><p class="email-help">测试会向已验证邮箱发送一封真实邮件，不需要开启自动提醒。</p></form>
+    </section>
+  </div>
+  <p class="email-footnote">邮件不包含聊天正文、任务结果、附件或原始报错。关闭提醒会停止新的发送请求；已被服务商接收的邮件无法撤回。</p>
+  {% elif tab == 'preview' %}
+  <section class="email-card email-preview-card">
+    <header><h2>固定模板预览</h2><p class="muted">以下使用示例内容，不会发出邮件。项目名称是否显示，遵循已保存的通知规则。</p></header>
+    <form method="get" action="{{ app_path('/settings/notifications/email') }}" class="email-preview-picker"><input type="hidden" name="tab" value="preview"><label for="preview-event">通知类型</label><select id="preview-event" name="event">{% for kind in ['task.done','task.blocked','ai.failed','test'] %}<option value="{{ kind }}"{% if event == kind %} selected{% endif %}>{{ event_labels[kind] }}</option>{% endfor %}</select><button type="submit" class="ghost">查看预览</button></form>
+    <div class="email-preview-subject"><small>邮件主题</small><strong>{{ preview.subject }}</strong></div>
+    <iframe class="email-preview-frame" title="邮件正文预览（示例内容）" sandbox="" referrerpolicy="no-referrer" srcdoc="{{ preview.html }}"></iframe>
+    <details class="email-text-preview"><summary>查看纯文本版本</summary><pre>{{ preview.text }}</pre></details>
+  </section>
+  {% else %}
+  <section class="email-card">
+    <header><h2>最近发送记录</h2><p class="muted">最近 50 条记录。时间均为北京时间（Asia/Shanghai）。</p></header>
+    {% if deliveries %}<div class="email-history">{% for item in deliveries %}<article class="email-history-item"><div><a href="{{ app_path('/settings/notifications/email/deliveries/' ~ item.id) }}"><strong>{{ event_labels.get(item.event_type, '邮件通知') }}</strong></a><small>{{ local_time(item.occurred_at) }}</small></div><span>{{ masked_address(item.address) }}</span><span class="email-pill">{{ status_labels.get(item.status, '等待核查') }}</span></article>{% endfor %}</div>{% else %}<div class="email-empty"><strong>还没有发送记录</strong><p>验证邮件、测试通知和自动提醒会在这里显示真实状态。</p></div>{% endif %}
+    <p class="email-help">“服务商已接收”表示发送请求已受理；“对方服务器已接收”不代表进入收件箱或已经阅读。状态不确定时会保留等待核查。</p>
+  </section>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Codex Hub{% endblock %}</title>
+  <link rel="icon" href="{{ app_path('/static/assets/codex-owl-logo-lite-20260708.png') }}">
+  <link rel="stylesheet" href="{{ app_path('/static/app.css') }}?v=20260820-bybc-video1">
+  {% block extra_head %}{% endblock %}
+  <link rel="stylesheet" href="{{ app_path('/static/hub-refined.css') }}?v=20260911-mobile4">
+  <script src="{{ app_path('/static/hub-refined.js') }}?v=20260911-mobile4" defer></script>
+  {% block shared_navigation_script %}{% if user %}<script src="{{ app_path('/static/hub-navigation.js') }}?v=20260812-core-navigation1" defer></script>{% endif %}{% endblock %}
+  </head>
+  <body class="{% block body_class %}{% endblock %}">
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+    {% set current_path = request.url.path %}
+    <header class="topbar" data-site-header>
+      <a class="brand" href="{{ app_path('/projects') }}">
+        <img class="brand-logo" src="{{ app_path('/static/assets/codex-owl-logo-lite-20260708.png') }}" width="192" height="191" alt="">
+        <span>Codex Hub</span>
+      </a>
+      <button class="mobile-nav-toggle" type="button" aria-label="打开主导航" aria-controls="primary-navigation" aria-expanded="false" data-nav-toggle>
+        <span aria-hidden="true">☰</span>
+      </button>
+      <nav id="primary-navigation" class="nav" aria-label="主导航" data-primary-navigation>
+        <a href="{{ app_path('/projects') }}"{% if current_path.startswith('/projects') %} aria-current="page"{% endif %}>项目</a>
+        <a href="{{ app_path('/inbox') }}"{% if current_path == '/inbox' or (current_path.startswith('/devices/') and current_path.endswith('/inbox')) %} aria-current="page"{% endif %}>设备收件箱</a>
+        <a href="{{ app_path('/devices') }}"{% if current_path in ['/devices', '/admin/devices'] %} aria-current="page"{% endif %}>设备</a>
+        <a href="{{ app_path('/downloads') }}"{% if current_path.startswith('/downloads') %} aria-current="page"{% endif %}>下载应用</a>
+        <a href="{{ inbox_url }}">邮箱</a>
+        {% if user and project is defined and project %}<a href="{{ app_path('/projects/' ~ project.slug ~ '/feedback') }}?kind=bug&amp;page_url={{ request.url.path|urlencode }}{% if task is defined and task %}&amp;task_id={{ task.id }}{% if task.conversation_id %}&amp;conversation_id={{ task.conversation_id }}{% endif %}{% endif %}{% if agent is defined and agent %}&amp;agent_id={{ agent.id }}{% elif assigned_agent is defined and assigned_agent %}&amp;agent_id={{ assigned_agent.id }}{% endif %}" target="_blank" rel="noopener noreferrer" data-project-feedback>反馈与建议 ↗</a>{% endif %}
+        {% if user and user.role == 'owner' %}<a href="{{ app_path('/settings/notifications/email') }}"{% if current_path.startswith('/settings/notifications/email') %} aria-current="page"{% endif %}>邮件通知</a>{% endif %}
+        {% if user and user.role == 'owner' %}<a href="{{ app_path('/mail') }}"{% if current_path == '/mail' or current_path.startswith('/mail/') %} aria-current="page"{% endif %}>发信接口</a>{% endif %}
+      </nav>
+      {% if user %}
+      <div class="topbar-actions">
+        <button class="ghost compact topbar-back-button" type="button" onclick="history.length > 1 ? history.back() : location.assign('{{ app_path('/projects') }}')">返回</button>
+        <form method="post" action="{{ app_path('/logout') }}" class="topbar-action">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <button class="ghost compact" type="submit">退出</button>
+        </form>
+      </div>
+      {% endif %}
+    </header>
+    <main id="main-content" class="shell" tabindex="-1">
+      {% block content %}{% endblock %}
+    </main>
+    {% block extra_scripts %}{% endblock %}
+  </body>
+</html>

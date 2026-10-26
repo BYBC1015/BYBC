@@ -1,0 +1,21 @@
+[Unit]
+Description=Codex Hub private collaboration relay
+After=network.target
+
+[Service]
+Type=simple
+User=codex-hub
+Group=codex-hub
+WorkingDirectory=/opt/codex-hub
+Environment=CODEX_HUB_DATA_DIR=/var/lib/codex-hub
+Environment=CODEX_HUB_BIND_HOST=127.0.0.1
+Environment=CODEX_HUB_BIND_PORT=8797
+EnvironmentFile=-/etc/codex-hub.env
+ExecStart=/opt/codex-hub/.venv/bin/uvicorn codex_hub.main:app --host 127.0.0.1 --port 8797
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

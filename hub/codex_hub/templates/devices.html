@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}设备 - Codex Hub{% endblock %}
+{% block content %}
+<section class="grid two">
+  <div>
+    <div class="section-head">
+      <h1>设备</h1>
+      <span>{{ devices|length }} 台</span>
+    </div>
+    {% if created_token %}
+    <div class="token-box">
+      <strong>新 token 只显示一次</strong>
+      <code>{{ created_token }}</code>
+    </div>
+    {% endif %}
+    <div class="list">
+      {% for device in devices %}
+      <div class="row">
+        <strong>{{ device.label }}</strong>
+        <small>{% if device.group_name %}{{ device.group_name }}{% else %}未分组{% endif %} · {{ device.note }}</small>
+        <form method="post" action="{{ app_path('/devices/' ~ device.id ~ '/tokens') }}" class="inline">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <input name="name" value="main" aria-label="token name">
+          <button type="submit">生成 token</button>
+        </form>
+      </div>
+      {% else %}
+      <p class="muted">暂无设备</p>
+      {% endfor %}
+    </div>
+    <h2>已建 token</h2>
+    <div class="list compact">
+      {% for token in tokens %}
+      <div class="row flat">
+        <strong>{{ token.device_label }}</strong>
+        <small>{{ token.name }} · {{ token.token_prefix }} · {% if token.is_active %}启用{% else %}停用{% endif %}</small>
+      </div>
+      {% else %}
+      <p class="muted">暂无 token</p>
+      {% endfor %}
+    </div>
+  </div>
+  <aside class="panel stack">
+    <h2>新建设备</h2>
+    <form method="post" action="{{ app_path('/devices') }}" class="stack">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <label>
+        <span>名称</span>
+        <input name="label" placeholder="device-a" required>
+      </label>
+      <label>
+        <span>分组</span>
+        <select name="group_id">
+          <option value="">不分组</option>
+          {% for group in groups %}
+          <option value="{{ group.id }}">{{ group.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>备注</span>
+        <textarea name="note" rows="4"></textarea>
+      </label>
+      <button class="primary" type="submit">添加设备</button>
+    </form>
+    <h2>新建分组</h2>
+    <form method="post" action="{{ app_path('/groups') }}" class="stack">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <input name="name" placeholder="核心设备" required>
+      <input name="description" placeholder="说明">
+      <button type="submit">添加分组</button>
+    </form>
+  </aside>
+</section>
+{% endblock %}
