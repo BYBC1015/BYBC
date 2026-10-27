@@ -425,6 +425,17 @@
 
   shell.addEventListener("click", (event) => {
     const target = event.target;
+    const taskView=target.closest('[data-ws-task-view]');
+    if(taskView){
+      event.preventDefault();
+      shell.dataset.workspaceUrl=taskView.href;
+      history.replaceState(null,'',taskView.href);
+      etag='';refreshController?.abort();
+      const list=shell.querySelector('[data-ws-task-list]');if(list)list.open=true;
+      input.focus({preventScroll:true});
+      clearTimeout(refreshTimer);refreshTimer=setTimeout(refresh,50);
+      return;
+    }
     const agent = target.closest("[data-ws-agent]");
     if (agent) {
       if (!inspector.querySelector(`[data-ws-agent-panel="${CSS.escape(agent.dataset.wsAgent)}"]`)) {
@@ -625,6 +636,29 @@
       if (!pendingSubmission) shell.querySelector("[data-ws-draft-status]").textContent = attachments.length ? "文字与附件已保留，可修改后重试" : "草稿已保留";
       input.focus({ preventScroll:true });
     }
+  });
+
+  let organizingTask=false;
+  shell.addEventListener('submit',async(event)=>{
+    const actionForm=event.target.closest('[data-ws-task-action]');if(!actionForm)return;
+    event.preventDefault();if(organizingTask)return;
+    const action=event.submitter?.value;if(!action)return;
+    organizingTask=true;
+    const notice=shell.querySelector('[data-ws-task-feedback]');
+    const buttons=Array.from(actionForm.querySelectorAll('button'));
+    const data=new FormData(actionForm);data.set('action',action);
+    data.set('_csrf',form.querySelector('[name="_csrf"]').value);
+    buttons.forEach(button=>button.disabled=true);
+    try{
+      const response=await fetch(actionForm.getAttribute('action'),{method:'POST',body:data,credentials:'same-origin',headers:{Accept:'application/json'}});
+      if(response.redirected)throw new Error('登录已过期，请重新登录后操作。当前草稿和附件仍保留。');
+      const result=await response.json().catch(()=>{throw new Error('连接未完成，记录已保留，请稍后重试。');});
+      if(!response.ok)throw new Error(typeof result.detail==='string'?result.detail:'未能更新，请稍后重试');
+      notice.textContent=action==='restore'?'已恢复到待办。':action==='complete'?'已完成并归档，聊天与成果已保留。':'已归档，可在历史任务中恢复。';
+      etag='';refreshController?.abort();input.focus({preventScroll:true});
+      clearTimeout(refreshTimer);refreshTimer=setTimeout(refresh,50);
+    }catch(error){notice.textContent=error.message||'连接未完成，记录已保留，请稍后重试。';}
+    finally{notice.hidden=false;buttons.forEach(button=>button.disabled=false);organizingTask=false;}
   });
 
   async function refresh() {

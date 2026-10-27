@@ -992,6 +992,8 @@ class Repository:
             if task and status in {'blocked','cancelled'}:
                 from .handoffs import block_unanswered_handoff
                 block_unanswered_handoff(self,task_id)
+            if task and status in {'open','claimed','in_progress'} and task['status']!=status:
+                self.connection.execute("UPDATE tasks SET board_state='auto' WHERE id=?",(task_id,))
             if task and status in {'done','cancelled'}:
                 self.connection.execute("""UPDATE tasks SET status='cancelled',status_version=status_version+1,
                     result_summary='原工作已结束，交接无需继续。',updated_at=?

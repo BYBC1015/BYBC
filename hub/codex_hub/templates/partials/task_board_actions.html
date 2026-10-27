@@ -1,0 +1,9 @@
+<form class="ws-task-actions" method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/tasks/' ~ task.id ~ '/organize') }}" data-ws-task-action="{{ task.id }}">
+  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+  {% if task.in_history %}
+    <button type="submit" name="action" value="restore" title="重新显示任务，不重新执行">恢复到待办</button>
+  {% elif task.archive_eligible %}
+    {% if task.status == 'review' %}<button type="submit" name="action" value="complete">完成并归档</button>{% endif %}
+    <button type="submit" name="action" value="archive" title="收起任务，保留当前状态、聊天和成果">归档</button>
+  {% endif %}
+</form>

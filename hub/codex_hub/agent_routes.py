@@ -53,6 +53,18 @@ def register_agent_routes(app: FastAPI) -> None:
             raise HTTPException(409, '智能体已暂停或任务已结束')
         return repo, project, store, task
 
+    @app.post('/projects/{slug}/tasks/{task_id}/organize')
+    def organize_task_web(request:Request,slug:str,task_id:int,action:str=Form(...),csrf:str=Form('',alias='_csrf')):
+        from .task_board import organize_task
+        require_user(request);verify_csrf_token(request,csrf)
+        repo,project,store=store_for(request,slug)
+        require_project_task(repo,project,task_id)
+        task=checked(lambda:organize_task(repo,project['id'],task_id,action))
+        if 'application/json' in request.headers.get('accept',''):
+            return {'task_id':task_id,'action':action,'status':task['status'],'board_state':task['board_state']}
+        suffix=f'/conversations/{task["conversation_id"]}' if task['conversation_id'] else ''
+        return redirect_to(request,f'/projects/{slug}'+suffix)
+
     @app.post('/projects/{slug}/agents')
     def create_agent_web(request: Request, slug: str, name: str = Form(...), job: str = Form(...),
                          instructions: str = Form(''), kind: str = Form('worker'), device_id: str = Form(''),

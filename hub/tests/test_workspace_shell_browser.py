@@ -84,11 +84,18 @@ def test_workspace_identity_inspector_markdown_and_actual_dispatch(live_hub, rep
             assert page.locator('[data-ws-task-list]').get_attribute('open') is None
             page.locator('[data-ws-task-summary]').click()
             statuses = {task['status']:task for task in data['tasks']}
-            for status, label in [('blocked','遇到阻碍'),('cancelled','已取消'),('review','待复核')]:
+            for status, label in [('blocked','遇到阻碍'),('review','待复核')]:
                 task = statuses[status]
                 card = page.locator(f'.ws-task-delivery[data-ws-task="{task["id"]}"]')
                 assert label in card.inner_text()
                 assert '已验收' not in card.inner_text()
+            cancelled = page.locator(f'.ws-task-delivery[data-ws-task="{statuses["cancelled"]["id"]}"]')
+            playwright.expect(cancelled).to_have_count(0)
+            page.locator('[data-ws-task-view]').filter(has_text='历史任务').click()
+            playwright.expect(cancelled).to_contain_text('已取消')
+            assert '已验收' not in cancelled.inner_text()
+            page.locator('[data-ws-task-view]').filter(has_text='待办与交付').click()
+            playwright.expect(cancelled).to_have_count(0)
             blocked = statuses['blocked']
             page.locator(f'.ws-task-delivery[data-ws-task="{blocked["id"]}"]').click()
             panel = page.locator(f'[data-ws-task-panel="{blocked["id"]}"]')

@@ -136,10 +136,11 @@ class AgentStore:
         self.db = connection
 
     def list(self, project_id: int) -> list[dict]:
-        return [dict(row) for row in self.db.execute('''
+        from .task_board import active_sql
+        return [dict(row) for row in self.db.execute(f'''
             SELECT a.*, d.label AS device_label,
               (SELECT COUNT(*) FROM tasks t WHERE t.assigned_agent_id=a.id
-               AND t.status NOT IN ('done','cancelled')) AS task_count,
+               AND t.status NOT IN ('done','cancelled') AND {active_sql()}) AS task_count,
               (SELECT COUNT(*) FROM hub_agent_experiences e WHERE e.agent_id=a.id AND e.active=1) AS experience_count,
               (SELECT COUNT(*) FROM hub_conversation_agents c WHERE c.agent_id=a.id) AS conversation_count
             FROM hub_agents a LEFT JOIN devices d ON d.id=a.device_id
@@ -509,6 +510,9 @@ class AgentStore:
                      '按 handoff.max_rounds 控制轮数，一轮合并相关问题。提问成功后结束本次执行，等待总控真实答复，不自行模拟对方、轮询等候或继续依赖该答复的操作。'
                      '总控的交接答复任务应读取 handoff.rounds，使用 answer_handoff 或直接最终答复，明确可执行的细节与取舍。'
                      '答复后原执行者继续同一个任务；已有成果先检查再接续，不重新做一遍。双方交流会即时显示给用户。\n')
+        guidance += ('继续保护既有 SW 中转链路；此约束来自 Hub 初建时用户要求，不得因精简回复而取消。'
+                     '面向用户的回复聚焦成果、可直接打开的预览、实际问题和下一步。不要例行附带“未触碰 SW /upload 或 /u”等内部操作排除说明；'
+                     '保留真实影响交付的限制，例如视频尚未修改或缺少必要素材。\n')
         return '\n\n## Durable agent identity and experience\n' + guidance + (
             '你是以下持久智能体。对话是工作场所，设备是执行连接，两者都不是你的身份。'
             '按职责执行，读取以往经验并检查其适用条件；待复核经验不是事实。'
