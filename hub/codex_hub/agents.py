@@ -176,10 +176,14 @@ class AgentStore:
         return self.get(project_id, cursor.lastrowid)
 
     def update(self, project_id: int, agent_id: int, *, job: str, instructions: str,
-               device_id: int | None, active: bool, role_key: str | None = None) -> dict:
+               device_id: int | None, active: bool, role_key: str | None = None,
+               handoff_round_limit: int | None = None) -> dict:
         original = self.get(project_id, agent_id)
         from .agent_roles import validate_role
         role_key = validate_role(original['role_key'] if role_key is None else role_key, original['kind'])
+        rounds = original.get('handoff_round_limit',2) if handoff_round_limit is None else handoff_round_limit
+        if type(rounds) is not int or not 0<=rounds<=10:
+            raise ValueError('交接轮数须在 0 至 10 之间')
         self.validate_device(project_id, device_id)
         job = clean(job, 200)
         if not job:
@@ -187,9 +191,9 @@ class AgentStore:
         # In-flight tasks retain their original execution binding.
         try:
             with self.db:
-                self.db.execute('''UPDATE hub_agents SET job=?, instructions=?, device_id=?, active=?, role_key=?,
+                self.db.execute('''UPDATE hub_agents SET job=?, instructions=?, device_id=?, active=?, role_key=?, handoff_round_limit=?,
                     revision=revision+1, updated_at=? WHERE id=?''',
-                    (job, clean(instructions, 8000), device_id, int(active), role_key, now(), agent_id))
+                    (job, clean(instructions, 8000), device_id, int(active), role_key, rounds, now(), agent_id))
         except sqlite3.IntegrityError as exc:
             raise ValueError('项目已有启用中的总控，或该分工角色已有负责人') from exc
         return self.get(project_id, agent_id)
@@ -269,11 +273,14 @@ class AgentStore:
         agent = self.get(task['project_id'], task['assigned_agent_id'])
         from .repository import Repository
         from .agent_roles import ROLES, enabled, work_context
+        from .handoffs import handoff_context
         return {'agent': agent, 'task': {k: task[k] for k in ('id','title','description','conversation_id','route_reason','route_engine')},
+                'execution_scope': {'mode':task.get('execution_mode','shared'),'resources':json.loads(task.get('resource_keys_json') or '[]')},
                 'attachments': Repository(self.db).list_task_attachments(task['project_id'], task['id']),
                 'role_contracts': {key: {'name': value[0], 'scope': value[1]} for key, value in ROLES.items()}
                     if enabled(self.db, task['project_id']) else {},
                 'work_assignments': work_context(self.db, task['project_id'], task.get('conversation_id')),
+                'handoff': handoff_context(self.db,task),
                 'team': [{k: a[k] for k in ('id','name','job','active','device_id','role_key')} for a in self.list(task['project_id'])]
                         if agent['kind']=='controller' else [],
                 'experiences': self.relevant_experiences(task),
@@ -305,11 +312,13 @@ class AgentStore:
                  attachment_ids: list[int] | None = None, execution: dict | None = None,
                  model_selection: dict | None = None, model_request: dict | None = None,
                  model_data_dir=None, work_type: str | None = None, work_key: str | None = None,
-                 fallback_reason: str = '') -> dict:
+                 fallback_reason: str = '', execution_mode: str = 'shared', resource_keys: list[str] | None = None) -> dict:
         """Atomic, retry-safe group work. Every participant keeps its own identity."""
         if not agent_ids or len(agent_ids) > 12 or any(i is not None and (type(i) is not int or i <= 0) for i in agent_ids):
             raise ValueError('请选择 1 至 12 个有效智能体')
         from .agent_roles import enabled, resolve_owner, previous_work, contract_hash
+        from .execution_resources import normalize_scope
+        execution_mode,resource_keys=normalize_scope(execution_mode,resource_keys)
         managed = enabled(self.db, project_id)
         if managed and source_task_id is not None:
             if len(agent_ids) != 1:
@@ -340,6 +349,8 @@ class AgentStore:
             digest = hashlib.sha256((digest + json.dumps(model_request or model_selection, sort_keys=True)).encode()).hexdigest()
         if managed and source_task_id is not None:
             digest = hashlib.sha256((digest + json.dumps([work_type,work_key,fallback_reason], ensure_ascii=False)).encode()).hexdigest()
+        if execution_mode!='shared' or resource_keys:
+            digest=hashlib.sha256((digest+json.dumps([execution_mode,resource_keys])).encode()).hexdigest()
         created = False
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
@@ -381,6 +392,9 @@ class AgentStore:
                     fingerprint = contract_hash(title, description, [item['id'] for item in inherited])
                     existing_task = previous_work(self.db, project_id, conversation_id, work_key, fingerprint, ids[0], work_type)
                     if existing_task:
+                        previous_task=repo.get_task(existing_task)
+                        if previous_task['execution_mode']!=execution_mode or json.loads(previous_task['resource_keys_json'])!=resource_keys:
+                            raise ValueError('已有工作的执行范围不同，请接续原任务，不可通过重复派工改写资源归属')
                         # Persist this retry key too: changing its content later must fail.
                         dispatch_id = self.db.execute('''INSERT INTO hub_agent_dispatches
                             (project_id,request_key,payload_hash,conversation_id,created_at) VALUES (?,?,?,?,?)''',
@@ -413,6 +427,8 @@ class AgentStore:
                                      if ids != requested_ids else '发起者指定的共同协作对话',task['id']))
                     self.db.execute('INSERT INTO hub_dispatch_tasks VALUES (?,?)', (dispatch_id,task['id']))
                     task_ids.append(task['id'])
+                    self.db.execute('UPDATE tasks SET execution_mode=?,resource_keys_json=? WHERE id=?',
+                                    (execution_mode,json.dumps(resource_keys),task['id']))
                     if selected:
                         from .model_policy import freeze_choice
                         freeze_choice(self.db, task['id'], selected)
@@ -430,6 +446,12 @@ class AgentStore:
                     self.db.execute('''INSERT INTO hub_work_assignments
                         (project_id,conversation_id,work_key,content_hash,work_type,agent_id,task_id,fallback_reason)
                         VALUES (?,?,?,?,?,?,?,?)''', (project_id,room_id,work_key,fingerprint,work_type,ids[0],task_ids[0],fallback_reason))
+                    sender = self.get(project_id,source['assigned_agent_id'])
+                    receiver = self.get(project_id,ids[0])
+                    repo.create_entry(project_id,sender['name'],'message',
+                        f"**{sender['name']} → {receiver['name']} · 安排工作 #{task_ids[0]}**\n\n{title}\n\n{description}",
+                        task_id=source_task_id,author_device_id=device_id,commit=False,execution_fenced=True,
+                        metadata_json=json.dumps({'handoff':'assignment','recipient_agent_id':ids[0],'delegated_task_id':task_ids[0]}))
                 created = True
             # Construct the result before commit: a read/serialization failure must
             # still roll back before the route cleans its staged physical files.
@@ -483,6 +505,10 @@ class AgentStore:
                     '依据现有附件先完成可行部分；缺少最终工程只阻塞依赖部分，不扩大到遍搜无关项目。\n'
                     if context['agent']['kind'] == 'controller' else
                     '优先处理已提供附件与相关项目。截图修改先给可审查图片；真实包装合成或最终视频替换才依赖对应源素材。\n')
+        guidance += ('交接交流是同事之间的澄清，不是审批。要求明确直接执行；确有歧义、缺少细节或发现不合理点时用 ask_handoff 提问，'
+                     '按 handoff.max_rounds 控制轮数，一轮合并相关问题。提问成功后结束本次执行，等待总控真实答复，不自行模拟对方、轮询等候或继续依赖该答复的操作。'
+                     '总控的交接答复任务应读取 handoff.rounds，使用 answer_handoff 或直接最终答复，明确可执行的细节与取舍。'
+                     '答复后原执行者继续同一个任务；已有成果先检查再接续，不重新做一遍。双方交流会即时显示给用户。\n')
         return '\n\n## Durable agent identity and experience\n' + guidance + (
             '你是以下持久智能体。对话是工作场所，设备是执行连接，两者都不是你的身份。'
             '按职责执行，读取以往经验并检查其适用条件；待复核经验不是事实。'

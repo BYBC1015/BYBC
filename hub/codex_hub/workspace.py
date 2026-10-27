@@ -84,7 +84,7 @@ def _task_views(repo, project_id: int, *, conversation_id: int | None = None,
     # Exclude large context packs and bound the previews at the database boundary.
     rows = repo.connection.execute(f"""SELECT t.id,t.project_id,t.title,t.status,t.priority,
         t.assigned_agent_id,t.assigned_device_id,t.conversation_id,t.created_at,t.updated_at,
-        t.status_version,t.route_engine,t.route_reason,t.wait_for_task_id,substr(t.description,1,2000) AS description,
+        t.status_version,t.route_engine,t.route_reason,t.wait_for_task_id,t.coordination_state,t.execution_mode,substr(t.description,1,2000) AS description,
         substr(t.result_summary,1,2000) AS result_summary,
         a.name AS assigned_agent_name,a.kind AS assigned_agent_kind,
         d.label AS assigned_device_label,c.title AS conversation_title,mc.selection_json AS model_selection_json
@@ -111,7 +111,7 @@ def _entry_views(request: Request, repo, project: dict, conversation_id: int, be
         e.source_label,e.kind,e.created_at,e.updated_at,
         substr(e.body_markdown,1,{ENTRY_BODY_LIMIT}) AS body_markdown,
         length(e.body_markdown) AS body_length,t.title AS task_title,
-        t.assigned_agent_id,t.status AS task_status,t.wait_for_task_id,a.kind AS agent_kind,a.name AS agent_name,a.name AS assigned_agent_name
+        t.assigned_agent_id,t.status AS task_status,t.wait_for_task_id,t.coordination_state,a.kind AS agent_kind,a.name AS agent_name,a.name AS assigned_agent_name
         FROM entries e JOIN tasks t ON t.id=e.task_id
         LEFT JOIN hub_agents a ON a.id=t.assigned_agent_id
         WHERE e.project_id=? AND t.conversation_id=? AND e.deleted_at IS NULL{clause}
@@ -150,10 +150,12 @@ def _entry_views(request: Request, repo, project: dict, conversation_id: int, be
                     (PurePosixPath(attachment['original_filename']).suffix.lower() in {'.md','.txt','.csv','.json','.log'} and attachment['byte_size']<=1024*1024) else '',
             })
     for row in rows:
-        row['view_version']=hashlib.sha256(json.dumps([row['body_markdown'],row['attachments'],row['task_status']],sort_keys=True).encode()).hexdigest()[:16]
+        row['view_version']=hashlib.sha256(json.dumps([row['body_markdown'],row['attachments'],row['task_status'],row['coordination_state']],sort_keys=True).encode()).hexdigest()[:16]
         row['receipt_label']={'open':'已收到 · 等待总控回应' if row['agent_kind']=='controller' else '已收到 · 等待执行',
             'claimed':'已收到 · 准备处理','in_progress':'已收到 · 正在处理','review':'已回复 · 可查看结果',
             'blocked':'已收到 · 当前遇阻','done':'已完成','cancelled':'已取消'}.get(row['task_status'],'已收到')
+        if row['coordination_state']=='waiting' and row['task_status'] not in {'done','cancelled'}:
+            row['receipt_label']='正在交接 · 等待总控答复'
     oldest_id = rows[-1]['id'] if rows else None
     return list(reversed(rows)), oldest_id if has_older else None
 

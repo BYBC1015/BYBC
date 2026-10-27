@@ -94,6 +94,22 @@ def controller_source(repo,d):
     return source,run
 
 
+def test_isolated_revision_receives_outputs_created_after_revision_was_queued(client,repo,lease_task):
+    d=lease_task;store=ExecutionStore(repo)
+    repo.connection.execute("UPDATE tasks SET execution_mode='isolated' WHERE id=?",(d['task']['id'],));repo.connection.commit()
+    execution=start(store,d)
+    source,control_run=controller_source(repo,d)
+    amendment=revise_task(repo,source,d['device']['id'],{'target_task_id':d['task']['id'],
+        'instruction':'根据成品调整标题','request_key':'isolated-revision-001','execution':control_run})
+    next_task=repo.get_task(amendment['next_task_id'])
+    assert next_task['execution_mode']=='isolated'
+    uploaded=upload_result(client,repo,d,execution)
+    assert uploaded.status_code==200
+    store.complete(d['task']['id'],d['device']['id'],execution['generation'],execution['run_key'],**RESULT)
+    store.acquire(next_task['id'],d['device']['id'],'isolated-revision-run-001')
+    assert uploaded.json()['attachment_id'] in {a['id'] for a in repo.list_task_attachments(d['project']['id'],next_task['id'])}
+
+
 @pytest.mark.parametrize('running',[False,True])
 def test_revisions_are_idempotent_wait_until_prior_work_finishes(repo,lease_task,running):
     d=lease_task;store=ExecutionStore(repo)

@@ -214,6 +214,18 @@ def run_agent_request(arguments: argparse.Namespace) -> dict[str, Any]:
         return {"context": context,
                 "agents": client._json("GET", f"/api/projects/{arguments.project}/agents"),
                 "tasks": client._json("GET", f"/api/projects/{arguments.project}/tasks")}
+    if action in {'ask_handoff','answer_handoff'}:
+        expected='worker' if action=='ask_handoff' else 'controller'
+        if context['agent'].get('kind')!=expected:
+            raise ValueError('交接提问由执行者发起，答复由总控给出')
+        if os.environ.get('CODEX_HUB_EXECUTION_TASK_ID')!=str(arguments.task_id) or os.environ.get('CODEX_HUB_EXECUTION_PROJECT')!=arguments.project:
+            raise ValueError('交接需要当前任务的执行记录')
+        payload={k:request.get(k) for k in (('question','request_key') if action=='ask_handoff' else ('handoff_id','answer'))}
+        if action=='ask_handoff' and not payload['request_key']:
+            payload['request_key']=hashlib.sha256(str(payload['question']).encode('utf-8')).hexdigest()
+        payload['execution']={'generation':int(os.environ.get('CODEX_HUB_EXECUTION_GENERATION','0')),'run_key':os.environ.get('CODEX_HUB_EXECUTION_RUN_KEY','')}
+        suffix='question' if action=='ask_handoff' else 'answer'
+        return client._json('POST',f'/api/projects/{arguments.project}/tasks/{arguments.task_id}/handoff/{suffix}',payload)
     if action == 'model_options':
         agent_id = request.get('agent_id')
         if type(agent_id) is not int or agent_id < 1:
@@ -233,6 +245,8 @@ def run_agent_request(arguments: argparse.Namespace) -> dict[str, Any]:
     if target is None and not request.get('work_type'):
         raise ValueError('请提供目标智能体编号或 work_type 自动分工')
     payload = {"assigned_agent_id": target}
+    if 'execution_mode' in request: payload['execution_mode']=request['execution_mode']
+    if 'resource_keys' in request: payload['resource_keys']=request['resource_keys']
     for field in ('work_type','work_key','fallback_reason'):
         if field in request:
             if not isinstance(request[field], str):

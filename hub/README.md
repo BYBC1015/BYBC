@@ -2,7 +2,7 @@
 
 Web workspace for persistent agents, shared conversations and device-bound execution.
 
-Version 2.5.1 (2026-10-28). Agents are durable roles, independent of conversations, models and devices.
+Version 2.6.0 (2026-10-28). Agents are durable roles, independent of conversations, models and devices.
 
 - Chat attachments stay in the composer and follow the assigned task.
 - The controller chooses a reported model and reasoning level per task; explicit user overrides take priority.
@@ -11,6 +11,8 @@ Version 2.5.1 (2026-10-28). Agents are durable roles, independent of conversatio
 - Generation-fenced execution, atomic result publication and local completion receipts prevent unsafe replay.
 - User messages persist immediately; live replies preserve reading position and drafts.
 - Separate controller and worker lanes support chat, delegation and follow-up changes during execution.
+- Real handoff questions and answers appear live in the original conversation, with a configurable two-round default limit.
+- Durable per-task runners overlap independent jobs while shared workspaces and declared external resources remain serialized.
 - Results are published as viewable images and document previews in the conversation.
 
 ## Run locally
@@ -20,7 +22,7 @@ Requires Python 3.10+. Create a virtual environment, install `pip install -e ".[
 `uvicorn codex_hub.main:app --host 127.0.0.1 --port 8797`.
 Use your own deployment configuration; examples contain placeholders, never production credentials.
 
-See `deploy/MAINTENANCE.md` for weekly operations and `deploy/RELEASE-2.5.1.md` for verified release behavior.
+See `deploy/MAINTENANCE.md` for weekly operations and `deploy/RELEASE-2.6.0.md` for verified release behavior.
 The `codex_bridge` package includes the dedicated agent worker and compatibility code for existing clients.
 Mobile native clients and installers are outside this web source snapshot.
 

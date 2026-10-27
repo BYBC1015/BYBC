@@ -51,6 +51,12 @@ def register_execution_routes(app: FastAPI) -> None:
         store, device_id = execution(request, slug, task_id)
         return checked(lambda: store.reconcile(task_id, device_id))
 
+    @app.post('/api/projects/{slug}/tasks/{task_id}/execution/stopped')
+    async def stopped(request: Request, slug: str, task_id: int):
+        store,device_id=execution(request,slug,task_id)
+        data=await json_object(request)
+        return checked(lambda:store.acknowledge_stopped(task_id,device_id,data.get('generation'),data.get('run_key')))
+
     @app.post('/api/projects/{slug}/tasks/{task_id}/execution/complete')
     async def complete(request: Request, slug: str, task_id: int):
         store, device_id = execution(request, slug, task_id)

@@ -115,6 +115,8 @@ def revise_task(repo, source, device_id, payload):
                 assigned_agent_id=target['assigned_agent_id'],created_by_device_id=device_id,commit=False)
             db.execute('UPDATE tasks SET conversation_id=?,wait_for_task_id=?,route_engine=?,route_reason=? WHERE id=?',
                 (source['conversation_id'],target_id,'controller_revision','收到修改；原执行结束并核对结果后接续',next_task['id']))
+            db.execute('UPDATE tasks SET execution_mode=?,resource_keys_json=? WHERE id=?',
+                       (target.get('execution_mode','shared'),target.get('resource_keys_json','[]'),next_task['id']))
             repo.bind_task_attachments(source['project_id'],[next_task['id']],
                 [r['attachment_id'] for r in db.execute('SELECT attachment_id FROM hub_task_attachments WHERE task_id=?',(target_id,))],source_task_id=target_id)
         repo.bind_task_attachments(source['project_id'],[next_task['id']],
@@ -131,4 +133,20 @@ def dependency_ready(db, task):
     parent=db.execute('SELECT status FROM tasks WHERE id=?',(dependency,)).fetchone()
     execution=latest_execution(db,dependency)
     return bool(parent and parent['status'] in {'review','done','blocked','cancelled'} and
-                (not execution or execution['state']=='completed'))
+                (not execution or execution['state'] in {'completed','stopped'}))
+
+
+def inherit_dependency_artifacts(db, task):
+    """Resolve outputs at execution time: a queued revision may predate them."""
+    dependency = task.get('wait_for_task_id')
+    if not dependency:
+        return
+    parent = db.execute('SELECT project_id FROM tasks WHERE id=?', (dependency,)).fetchone()
+    if not parent or parent['project_id'] != task['project_id']:
+        raise ExecutionConflict('接续任务的原工程不一致，不能接入成果')
+    db.execute('''INSERT OR IGNORE INTO hub_task_attachments(task_id,attachment_id,source_task_id)
+        SELECT ?,ar.attachment_id,? FROM hub_task_artifacts ar
+        JOIN attachments a ON a.id=ar.attachment_id
+        WHERE ar.task_id=? AND a.project_id=?
+        AND ar.generation=(SELECT MAX(e.generation) FROM hub_task_executions e WHERE e.task_id=?)''',
+        (task['id'],dependency,dependency,task['project_id'],dependency))

@@ -40,11 +40,14 @@ class AgentOnlyHubClient(HubClient):
     pending_task_ids: Callable[[], set[int]] = staticmethod(set)
     machine_name: str = ''
     lane: str = ''
+    task_selector = None
 
     def get_inbox(self) -> dict[str, Any]:
         inbox=filter_agent_inbox(super().get_inbox(), self.pending_task_ids())
         if self.lane:
             inbox['tasks']=[t for t in inbox['tasks'] if (t.get('assigned_agent_kind') or 'worker')==self.lane]
+        if self.task_selector is not None:
+            inbox['tasks']=self.task_selector(inbox['tasks'])
         return inbox
 
     def post_device_capabilities(self, capabilities: dict[str, Any]) -> dict[str, Any]:
@@ -165,23 +168,31 @@ def main(argv: list[str] | None = None) -> int:
             stopped=threading.Event()
             controller_thread=threading.Thread(target=run_lane,args=(controller_runner,stopped,3),name='hub-controller',daemon=True)
             controller_thread.start()
+            # Preserve and recover pre-pool receipts without letting the legacy
+            # state file consume new work. Each new task owns its own durable state.
+            client.task_selector=lambda tasks:[task for task in tasks if task['id'] in client.pending_task_ids()]
+            recovery_thread=threading.Thread(target=run_lane,args=(runner,stopped,12),name='hub-legacy-recovery',daemon=True)
+            recovery_thread.start()
+            pool_client=AgentOnlyHubClient(config.hub,config.token,timeout_seconds=config.hub_request_timeout_seconds,
+                get_retry_attempts=config.hub_get_retry_attempts,retry_backoff_seconds=config.hub_retry_backoff_seconds,source_ip=config.hub_source_ip)
+            pool_client.lane='worker'
+            pool_client.task_selector=lambda tasks:[task for task in tasks if task['id'] not in client.pending_task_ids()]
+            from .task_pool import DurableTaskPool
+            pool=DurableTaskPool(config,pool_client,capacity=config.backend_options.get('agent_parallelism',2))
             try:
-                print("专用智能体 worker 已启动；仅处理明确分配给本连接的持久智能体任务。", flush=True)
+                print(f"专用智能体 worker 已启动；独立任务最多并行 {pool.capacity} 项，共享工程顺序执行，总控保持独立。", flush=True)
                 while True:
                     try:
-                        result = runner.process_once()
-                        for message in result.messages:
-                            print(message, flush=True)
-                        if result.executed_codex:
-                            print(f"本轮执行 {len(result.executed_codex)} 项智能体任务，结果已处理。", flush=True)
+                        for message in pool.tick(): print(message,flush=True)
                     except Exception as exc:
                         # Durable receipts distinguish safe result retries
                         # from uncertain work; do not reset that state.
-                        print(f"本轮未完成：{exc}", flush=True)
-                    time.sleep(max(3, config.interval_seconds))
+                        print(f"本轮未完成：{type(exc).__name__}；保留回执等待恢复。", flush=True)
+                    stopped.wait(3)
             finally:
                 stopped.set()
                 heartbeat.close()
+                pool.close()
         finally:
             instance.close()
     except KeyboardInterrupt:

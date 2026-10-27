@@ -989,6 +989,16 @@ class Repository:
                 """,
                 (status, status, result_summary.strip(), now, task_id),
             )
+            if task and status in {'blocked','cancelled'}:
+                from .handoffs import block_unanswered_handoff
+                block_unanswered_handoff(self,task_id)
+            if task and status in {'done','cancelled'}:
+                self.connection.execute("""UPDATE tasks SET status='cancelled',status_version=status_version+1,
+                    result_summary='原工作已结束，交接无需继续。',updated_at=?
+                    WHERE id IN (SELECT controller_task_id FROM hub_task_handoffs WHERE task_id=? AND state='open')
+                    AND status NOT IN ('done','cancelled')""",(now,task_id))
+                self.connection.execute("UPDATE hub_task_handoffs SET state='cancelled' WHERE task_id=? AND state IN ('open','blocked')",(task_id,))
+                self.connection.execute("UPDATE tasks SET coordination_state='ready' WHERE id=?",(task_id,))
             if task and task["status"] != status and status in {"done", "blocked"}:
                 notifications.capture_event(
                     event_type="task." + status, entity_type="task", entity_id=task_id,
@@ -1026,10 +1036,11 @@ class Repository:
                 LEFT JOIN devices AS primary_device ON primary_device.id = projects.primary_device_id
                 LEFT JOIN device_groups ON device_groups.id = tasks.requested_group_id
                 WHERE tasks.status NOT IN ('done', 'cancelled')
+                  AND tasks.coordination_state != 'waiting'
                   AND (tasks.wait_for_task_id IS NULL OR NOT EXISTS (
                     SELECT 1 FROM tasks parent WHERE parent.id=tasks.wait_for_task_id AND
                       (parent.status NOT IN ('review','done','blocked','cancelled') OR EXISTS
-                       (SELECT 1 FROM hub_task_executions ex WHERE ex.task_id=parent.id AND ex.state!='completed'
+                       (SELECT 1 FROM hub_task_executions ex WHERE ex.task_id=parent.id AND ex.state NOT IN ('completed','stopped')
                         AND ex.generation=(SELECT MAX(last.generation) FROM hub_task_executions last WHERE last.task_id=parent.id)))))
                   AND (
                     tasks.assigned_device_id = ?

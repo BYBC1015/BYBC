@@ -472,3 +472,5 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
     initialize_maintenance_schema(connection)
     from .work_delivery import initialize_delivery_schema
     initialize_delivery_schema(connection)
+    from .handoffs import initialize_handoff_schema
+    initialize_handoff_schema(connection)

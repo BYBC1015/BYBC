@@ -610,12 +610,22 @@ class BridgeRunner:
                     continue
                 receipt['execution'] = current
                 receipt['model_selection'] = remote.get('model_selection') or receipt.get('model_selection') or {}
-                if current['state'] == 'completed':
-                    self.state.seen_task_ids.add(str(task_id))
+                if current['state'] in {'completed','yielded'}:
+                    if current['state']=='completed': self.state.seen_task_ids.add(str(task_id))
+                    else: self.state.seen_task_ids.discard(str(task_id))
                     self.state.remove_task_delivery(slug, task_id)
                     self._save_state()
                     continue
                 if task.get('status') in {'done', 'cancelled'} or current['task_version'] != task.get('status_version'):
+                    completion=read_execution_completion(Path(receipt.get('completion_path') or ''),current)
+                    acknowledge=getattr(self.client,'acknowledge_task_stopped',None)
+                    if task.get('status') in {'done','cancelled'} and callable(acknowledge):
+                        if receipt.get('stage')=='agent_result' or completion:
+                            acknowledge(slug,task_id,current)
+                        elif current.get('state') in {'running','uncertain'}:
+                            # A cancellation isn't proof the external process exited.
+                            result.pending_tasks.append(task_id)
+                            continue
                     self._reject_agent_receipt(slug, task_id, '任务已取消、结束或被更新；执行结果保留本地。', result)
                     continue
                 if current['state'] == 'prepared':
@@ -810,6 +820,10 @@ class BridgeRunner:
             f"总控调度通道请直接使用：{command} --request-json '<JSON对象>'，不需写请求文件。\n"
             "总控运行于独立调度目录；实际项目文件修改必须委派执行者。不得绕过目录限制修改原项目。\n"
             '查看当前身份、经验、团队和任务：{"action":"inspect"}。\n'
+            '执行者交接提问：{"action":"ask_handoff","question":"具体疑问、缺少的细节或发现的不合理点","request_key":"stable-question-key"}。'
+            '提问成功后结束本次执行，不等待、不模拟总控、不继续做依赖答复的操作；系统保留原任务，答复后再唤醒你。'
+            '总控答复：{"action":"answer_handoff","handoff_id":实际交接编号,"answer":"具体答复和取舍"}。'
+            '交接默认最多两轮，实际按上下文 max_rounds；明确任务无需凑轮数。所有交接消息实时对用户可见。\n'
             '总控调整当前对话已有工作：{"action":"revise","target_task_id":真实任务编号,"request_key":"stable-change-key","instruction":"最新具体修改要求"}。'
             '返回 updated 表示待办已更新；queued 表示待原工作结束后接续，不能声称执行者已经按修改完成。\n'
             '按需查看某个智能体实际可用模型：{"action":"model_options","agent_id":智能体数字编号}。\n'
@@ -821,6 +835,9 @@ class BridgeRunner:
             '最后一种只用于专业职责均不适用的交付，必填 fallback_reason；缺配置交工程师，离线或忙碌不换职业。'
             '例：{"action":"delegate","work_type":"visual_production","work_key":"campaign-cover-v1","title":"交付封面","description":"明确素材与验收标准"}。'
             'created=false 表示复用已有工作，不能声称新开一项；修改用 revise。依赖成果未就绪时先等待，同一文件不要并行修改。\n'
+            '仅使用随任务提供的附件即可独立产出时，delegate 指定 "execution_mode":"isolated"，在独立工作目录执行，可与同身份其他任务并行。'
+            '需要修改现有代码、原项目或现有时间线时保持 shared，等待共享工程空闲。使用共享外部工程/服务时另给 resource_keys，例如 ["resolve:project-id"]；'
+            '不同任务引用同一资源必须用相同名称，不能换名字规避占用。isolated 不会复制整个原工程，只带本任务附件；缺少必要输入应明确交接。\n'
             '委派默认继承当前源任务的附件；可加 "attachment_ids":[附件数字编号] 只传必要文件，'
             '或 "attachment_ids":[] 不传附件。只可选择当前任务清单里的编号，不能引用项目其他文件。\n'
             '总控可在委派请求加 "model_selection":{"model":"实际目录中的模型ID",'
@@ -863,7 +880,7 @@ class BridgeRunner:
                     from .artifacts import publish_artifacts
                     body=publish_artifacts(self.client,project_slug,task_id,receipt['execution'],
                         self._resolve_project_path(receipt.get('target_project') or project_slug),body)
-                self.client.complete_task_execution(project_slug, task_id, receipt['execution'],
+                published = self.client.complete_task_execution(project_slug, task_id, receipt['execution'],
                     status=status, summary=body[:1000], body=body, reflection=receipt['reflection'])
             except Exception as exc:
                 if isinstance(exc, ValueError) or getattr(exc,'status_code',None) in {413,415,422}:
@@ -876,12 +893,24 @@ class BridgeRunner:
                     self._save_state()
                     return self._publish_agent_result(project_slug,task_id,result)
                 if getattr(exc, 'status_code', None) in {403,404,409}:
+                    acknowledge=getattr(self.client,'acknowledge_task_stopped',None)
+                    if callable(acknowledge):
+                        try:
+                            remote=self.client.reconcile_task_execution(project_slug,task_id)
+                            if remote.get('task',{}).get('status') in {'done','cancelled'}:
+                                acknowledge(project_slug,task_id,receipt['execution'])
+                        except Exception:
+                            result.pending_tasks.append(task_id)
+                            return
                     self._reject_agent_receipt(project_slug, task_id, '任务状态或执行代际已改变，结果保留本地，未覆盖 Hub。', result)
                 else:
                     result.pending_tasks.append(task_id)
                     result.messages.append(f'任务 #{task_id} 的结果已保存本地，恢复连接后核对回传，未重复执行。')
                 return
-            self.state.seen_task_ids.add(str(task_id))
+            if isinstance(published,dict) and published.get('yielded'):
+                self.state.seen_task_ids.discard(str(task_id))
+            else:
+                self.state.seen_task_ids.add(str(task_id))
             self.state.remove_task_delivery(project_slug, task_id)
             self._save_state()
             return

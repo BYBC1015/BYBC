@@ -127,6 +127,10 @@ class HubClient:
     def reconcile_task_execution(self, slug: str, task_id: int) -> dict:
         return self._json('POST', f'/api/projects/{slug}/tasks/{task_id}/execution/reconcile', {})
 
+    def acknowledge_task_stopped(self, slug: str, task_id: int, execution: dict) -> dict:
+        return self._json('POST',f'/api/projects/{slug}/tasks/{task_id}/execution/stopped',
+                          {key:execution[key] for key in ('generation','run_key')})
+
     def complete_task_execution(self, slug: str, task_id: int, execution: dict, *,
                                 status: str, summary: str, body: str, reflection: dict) -> dict:
         return self._json('POST', f'/api/projects/{slug}/tasks/{task_id}/execution/complete',

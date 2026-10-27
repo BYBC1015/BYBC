@@ -115,6 +115,8 @@ class ExecutionStore:
         with self.transaction():
             task = self._task(task_id, device_id)
             latest = latest_execution(self.db, task_id)
+            if task.get('coordination_state')=='waiting':
+                raise ExecutionConflict('正在等待交接答复；该任务不占执行位置，其他独立工作可继续')
             from .work_delivery import dependency_ready
             if not dependency_ready(self.db, task):
                 raise ExecutionConflict('原工作尚未结束，调整任务等待原执行结果')
@@ -135,11 +137,17 @@ class ExecutionStore:
                 if latest['state'] == 'prepared' and latest['lease_until'] <= self.clock():
                     self.db.execute("UPDATE hub_task_executions SET state='superseded',detail=? WHERE id=?",
                                     ('执行前凭据到期；没有发出开始执行许可。', latest['id']))
+                elif latest['state'] == 'yielded':
+                    pass  # A real handoff answer resumes the same task with a new generation.
                 elif latest['state'] == 'completed' and task['status_version'] > latest['task_version']:
                     pass  # A later explicit task reopen permits a new generation.
                 else:
                     raise ExecutionConflict('此前执行仍持有凭据或结果不确定，等待核对；不会自动接管。')
             generation = (latest['generation'] if latest else 0) + 1
+            from .execution_resources import resource_conflict
+            resource_conflict(self.db,task,self.clock())
+            from .work_delivery import inherit_dependency_artifacts
+            inherit_dependency_artifacts(self.db,task)
             self.db.execute('''INSERT INTO hub_task_executions
                 (task_id,generation,run_key,device_id,state,task_version,lease_until,created_at,detail)
                 VALUES (?,?,?,?,'prepared',?,?,?,?)''',
@@ -156,6 +164,8 @@ class ExecutionStore:
             agent = self.db.execute('SELECT active FROM hub_agents WHERE id=?', (task['assigned_agent_id'],)).fetchone()
             if not agent or not agent['active']:
                 raise ExecutionConflict('智能体已暂停。')
+            from .execution_resources import resource_conflict
+            resource_conflict(self.db,task,self.clock())
             updated = self.repo.update_task_status(task_id, 'in_progress', '专用执行器已取得本次执行许可。',
                                                    actor_device_id=device_id, execution_fenced=True)
             self.db.execute("""UPDATE hub_task_executions SET state='running',started_at=?,lease_until=?,
@@ -172,6 +182,17 @@ class ExecutionStore:
             self.db.execute('UPDATE hub_task_executions SET lease_until=? WHERE id=?',
                             (self.clock() + self.lease_seconds, record['id']))
             return self._reply(task_id, latest_execution(self.db, task_id))
+
+    def acknowledge_stopped(self, task_id, device_id, generation, run_key):
+        """Called only with local proof that the cancelled process exited."""
+        with self.transaction():
+            task,record=self._fenced(task_id,device_id,generation,run_key)
+            if record['state'] in {'completed','yielded','stopped'}: return self._reply(task_id,record)
+            if task['status'] not in {'done','cancelled'}:
+                raise ExecutionConflict('任务仍可执行，不能仅凭请求释放运行资源')
+            self.db.execute("UPDATE hub_task_executions SET state='stopped',completed_at=?,detail=? WHERE id=?",
+                            (self.clock(),'原执行器确认进程已经退出，保留用户结束状态。',record['id']))
+            return self._reply(task_id,latest_execution(self.db,task_id))
 
     def reconcile(self, task_id, device_id):
         with self.transaction():
@@ -195,20 +216,35 @@ class ExecutionStore:
                                            sort_keys=True).encode()).hexdigest()
         with self.transaction():
             task, record = self._fenced(task_id, device_id, generation, run_key)
-            if record['state'] == 'completed':
+            if record['state'] in {'completed','yielded'}:
                 if record['result_digest'] != digest:
                     raise ExecutionConflict('同一执行不能回传不同结果。')
-                return {**self._reply(task_id, record), 'accepted': True, 'replayed': True}
+                return {**self._reply(task_id, record), 'accepted': True, 'replayed': True,'yielded':record['state']=='yielded'}
             if (record['state'] not in {'running','uncertain'} or task['status_version'] != record['task_version']
                     or task['status'] not in {'in_progress','blocked'}):
                 raise ExecutionConflict('任务已取消、结束或被更新；迟到结果保留本地，不覆盖当前状态。')
+            handoff=self.db.execute('SELECT * FROM hub_task_handoffs WHERE task_id=? AND generation=?',(task_id,generation)).fetchone()
+            if handoff:
+                # complete is sent only after the child process exits (including
+                # recovery from a native completion receipt). Until then we hold resources.
+                updated=self.repo.update_task_status(task_id,'blocked' if handoff['state']=='blocked' else 'open',
+                    '交接答复未完成，请查看总控的具体阻塞原因；保留原工作。' if handoff['state']=='blocked' else
+                    '等待总控交接答复，其他独立工作继续。' if handoff['state']=='open' else '交接已澄清，等待接续本项工作。',execution_fenced=True)
+                self.db.execute("UPDATE hub_task_executions SET state='yielded',completed_at=?,result_digest=?,task_version=?,detail=? WHERE id=?",
+                    (self.clock(),digest,updated['status_version'],'执行者已退出本轮，等待或接续交接。',record['id']))
+                return {**self._reply(task_id,latest_execution(self.db,task_id)),'accepted':True,'yielded':True,'replayed':False}
+            reply=self.db.execute('SELECT * FROM hub_task_handoffs WHERE controller_task_id=?',(task_id,)).fetchone()
             from .work_delivery import artifact_links
             summary=artifact_links(self.db,task_id,generation,summary,'../attachments')
+            body=artifact_links(self.db,task_id,generation,body,'../attachments')
+            if reply and reply['state']=='open' and status=='review':
+                if not body.strip(): raise ValueError('交接答复不能为空')
+                from .handoffs import record_answer
+                reply=record_answer(self.repo,task,reply,body[:6000],device_id)
             updated = self.repo.update_task_status(task_id, status, summary, reflection=reflection,
                                                    actor_device_id=device_id, execution_fenced=True)
             device = self.repo.get_device(device_id)
-            body=artifact_links(self.db,task_id,generation,body,'../attachments')
-            entry = self.repo.create_entry(task['project_id'], device['label'], 'markdown', body,
+            entry = {'id':reply['answer_entry_id']} if reply and reply['answer_entry_id'] else self.repo.create_entry(task['project_id'], device['label'], 'markdown', body,
                 author_device_id=device_id, task_id=task_id, commit=False, execution_fenced=True,
                 metadata_json=json.dumps({'execution': {'generation':generation,'run_key':run_key}}))
             self.db.execute('UPDATE attachments SET entry_id=? WHERE id IN (SELECT attachment_id FROM hub_task_artifacts WHERE task_id=? AND generation=?)',(entry['id'],task_id,generation))
