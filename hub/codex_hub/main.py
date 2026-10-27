@@ -1420,13 +1420,20 @@ def register_routes(app: FastAPI) -> None:
         require_device_write(repo, project, device)
         payload = await json_object(request)
         try:
+            from .agent_roles import enabled as role_routing_enabled
+            from .agents import AgentStore
+            target_agent_id = parse_optional_int(payload.get('assigned_agent_id'))
+            if target_agent_id and role_routing_enabled(repo.connection, project['id']):
+                target_agent = AgentStore(repo.connection).get(project['id'], target_agent_id)
+                if target_agent['kind'] != 'controller':
+                    raise ValueError('专业工作请由总控通过 delegate / revise 接口安排，保留唯一负责人和去重记录；用户可在网页直接指定')
             task = repo.create_task(
                 project_id=project["id"],
                 title=str(payload.get("title", "")),
                 description=str(payload.get("description", "")),
                 priority=validate_task_priority(str(payload.get("priority", "normal"))),
                 assigned_device_id=payload.get("assigned_device_id"),
-                assigned_agent_id=parse_optional_int(payload.get("assigned_agent_id")),
+                assigned_agent_id=target_agent_id,
                 requested_group_id=payload.get("requested_group_id"),
                 created_by_device_id=device["id"],
                 context_pack_markdown=str(payload.get("context_pack_markdown", "")),

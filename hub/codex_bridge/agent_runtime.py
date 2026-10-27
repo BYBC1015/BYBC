@@ -228,9 +228,16 @@ def run_agent_request(arguments: argparse.Namespace) -> dict[str, Any]:
     if action != "delegate" or context["agent"].get("kind") != "controller":
         raise ValueError("仅总控智能体可委派；支持 inspect、model_options 或 delegate")
     target = request.get("assigned_agent_id")
-    if type(target) is not int or target < 1:
+    if target is not None and (type(target) is not int or target < 1):
         raise ValueError("请使用有效的目标智能体编号")
+    if target is None and not request.get('work_type'):
+        raise ValueError('请提供目标智能体编号或 work_type 自动分工')
     payload = {"assigned_agent_id": target}
+    for field in ('work_type','work_key','fallback_reason'):
+        if field in request:
+            if not isinstance(request[field], str):
+                raise ValueError(f'{field} 必须是文本')
+            payload[field] = request[field]
     for key, limit in (("title", 200), ("description", 16000), ("priority", 20)):
         value = request.get(key, "normal" if key == "priority" else "")
         if not isinstance(value, str) or len(value) > limit:

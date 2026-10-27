@@ -88,8 +88,10 @@ def execution_identity(context: dict[str, Any]) -> dict:
     task = context.get('task') or {}
     return {
         'agent': {k: agent[k] for k in ('id', 'name', 'job', 'instructions', 'kind', 'revision') if k in agent},
-        'work': {k: task[k] for k in ('id', 'conversation_id') if k in task},
+        'work': {k: task[k] for k in ('id', 'conversation_id', 'route_reason') if k in task},
         'team': context.get('team', []),
+        'role_contracts': context.get('role_contracts', {}),
+        'work_assignments': context.get('work_assignments', []),
         'experiences': context.get('experiences', []),
         'attachments': context.get('attachments', []),
     }

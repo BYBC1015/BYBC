@@ -34,6 +34,7 @@
       <form method="post" action="{{ app_path('/projects/' ~ project.slug ~ '/agents/' ~ agent.id) }}" data-agent-settings>
         <input type="hidden" name="_csrf" value="{{ csrf_token }}">
         <label><span>职业与职责</span><input name="job" value="{{ agent.job }}" maxlength="200" required></label>
+        <label><span>自动分工角色</span><select name="role_key"><option value="">自定义职责</option>{% for key, label in {'controller':'总控','engineering':'工程维护','art_direction':'美术方向','visual_production':'视觉制作','postproduction':'后期技术','general_support':'通用支援'}.items() if (key == 'controller') == (agent.kind == 'controller') %}<option value="{{ key }}" {% if agent.role_key == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><small>每个角色只有一位负责人。总控按交付类型分工，设备离线时仍保留原职责。</small></label>
         <label><span>工作方式</span><textarea name="instructions" rows="7" maxlength="8000">{{ agent.instructions }}</textarea></label>
         <label><span>执行连接</span><select name="device_id"><option value="">暂不绑定</option>{% for member in memberships if member.permission in ['write','admin'] and not member.server_ai_provider %}<option value="{{ member.device_id }}" {% if agent.device_id == member.device_id %}selected{% endif %}>{{ member.device_label }}</option>{% endfor %}</select><small>调整连接后，已经派出的任务仍由原连接执行。</small></label>
         <label class="agent-toggle-label"><input type="checkbox" name="active" value="1" {% if agent.active %}checked{% endif %}><span>启用这个执行者</span></label>

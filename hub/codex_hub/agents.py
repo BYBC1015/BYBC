@@ -73,7 +73,18 @@ def initialize_agent_schema(db: sqlite3.Connection) -> None:
         source_task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
         PRIMARY KEY(task_id, attachment_id)
       );
+      CREATE TABLE IF NOT EXISTS hub_work_assignments (
+        id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        conversation_id INTEGER NOT NULL REFERENCES hub_conversations(id) ON DELETE CASCADE,
+        work_key TEXT NOT NULL, content_hash TEXT NOT NULL, work_type TEXT NOT NULL,
+        agent_id INTEGER NOT NULL REFERENCES hub_agents(id), task_id INTEGER NOT NULL REFERENCES tasks(id),
+        fallback_reason TEXT NOT NULL DEFAULT '', UNIQUE(project_id,work_key)
+      );
+      CREATE INDEX IF NOT EXISTS hub_work_content ON hub_work_assignments(project_id,conversation_id,content_hash);
     """)
+    if 'role_key' not in {row['name'] for row in db.execute('PRAGMA table_info(hub_agents)')}:
+        db.execute("ALTER TABLE hub_agents ADD COLUMN role_key TEXT NOT NULL DEFAULT ''")
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS hub_project_role ON hub_agents(project_id,role_key) WHERE role_key!=''")
     columns = {row['name'] for row in db.execute('PRAGMA table_info(tasks)')}
     for name, ddl in {
         'assigned_agent_id': 'INTEGER REFERENCES hub_agents(id) ON DELETE SET NULL',
@@ -165,8 +176,10 @@ class AgentStore:
         return self.get(project_id, cursor.lastrowid)
 
     def update(self, project_id: int, agent_id: int, *, job: str, instructions: str,
-               device_id: int | None, active: bool) -> dict:
-        self.get(project_id, agent_id)
+               device_id: int | None, active: bool, role_key: str | None = None) -> dict:
+        original = self.get(project_id, agent_id)
+        from .agent_roles import validate_role
+        role_key = validate_role(original['role_key'] if role_key is None else role_key, original['kind'])
         self.validate_device(project_id, device_id)
         job = clean(job, 200)
         if not job:
@@ -174,11 +187,11 @@ class AgentStore:
         # In-flight tasks retain their original execution binding.
         try:
             with self.db:
-                self.db.execute('''UPDATE hub_agents SET job=?, instructions=?, device_id=?, active=?,
+                self.db.execute('''UPDATE hub_agents SET job=?, instructions=?, device_id=?, active=?, role_key=?,
                     revision=revision+1, updated_at=? WHERE id=?''',
-                    (job, clean(instructions, 8000), device_id, int(active), now(), agent_id))
+                    (job, clean(instructions, 8000), device_id, int(active), role_key, now(), agent_id))
         except sqlite3.IntegrityError as exc:
-            raise ValueError('项目已有启用中的总控') from exc
+            raise ValueError('项目已有启用中的总控，或该分工角色已有负责人') from exc
         return self.get(project_id, agent_id)
 
     def assignment(self, project_id: int, agent_id: int) -> dict:
@@ -255,9 +268,13 @@ class AgentStore:
             return {}
         agent = self.get(task['project_id'], task['assigned_agent_id'])
         from .repository import Repository
+        from .agent_roles import ROLES, enabled, work_context
         return {'agent': agent, 'task': {k: task[k] for k in ('id','title','description','conversation_id','route_reason','route_engine')},
                 'attachments': Repository(self.db).list_task_attachments(task['project_id'], task['id']),
-                'team': [{k: a[k] for k in ('id','name','job','active','device_id')} for a in self.list(task['project_id'])]
+                'role_contracts': {key: {'name': value[0], 'scope': value[1]} for key, value in ROLES.items()}
+                    if enabled(self.db, task['project_id']) else {},
+                'work_assignments': work_context(self.db, task['project_id'], task.get('conversation_id')),
+                'team': [{k: a[k] for k in ('id','name','job','active','device_id','role_key')} for a in self.list(task['project_id'])]
                         if agent['kind']=='controller' else [],
                 'experiences': self.relevant_experiences(task),
                 'conversations': [c for c in self.conversations(task['project_id']) if c['status']=='active'][:20]}
@@ -287,11 +304,26 @@ class AgentStore:
                  attachments: list[dict] | None = None, source_task_id: int | None = None,
                  attachment_ids: list[int] | None = None, execution: dict | None = None,
                  model_selection: dict | None = None, model_request: dict | None = None,
-                 model_data_dir=None) -> dict:
+                 model_data_dir=None, work_type: str | None = None, work_key: str | None = None,
+                 fallback_reason: str = '') -> dict:
         """Atomic, retry-safe group work. Every participant keeps its own identity."""
-        if not agent_ids or len(agent_ids) > 12 or any(type(i) is not int or i <= 0 for i in agent_ids):
+        if not agent_ids or len(agent_ids) > 12 or any(i is not None and (type(i) is not int or i <= 0) for i in agent_ids):
             raise ValueError('请选择 1 至 12 个有效智能体')
-        ids = sorted(set(agent_ids))
+        from .agent_roles import enabled, resolve_owner, previous_work, contract_hash
+        managed = enabled(self.db, project_id)
+        if managed and source_task_id is not None:
+            if len(agent_ids) != 1:
+                raise ValueError('一项交付只指定一位负责人，请先拆分不同交付')
+            agent_ids = [resolve_owner(self.db, project_id, work_type, agent_ids[0], fallback_reason)]
+        if any(i is None for i in agent_ids):
+            raise ValueError('请选择有效智能体')
+        requested_ids = sorted(set(agent_ids))
+        ids = requested_ids
+        if managed and len(ids) > 1:
+            controller = self.db.execute("SELECT id FROM hub_agents WHERE project_id=? AND role_key='controller' AND active=1", (project_id,)).fetchone()
+            if not controller:
+                raise ValueError('多人协作需要启用总控，由总控拆分交付并分工')
+            ids = [controller['id']]
         title, description = clean(title, 200), clean(description, 16000)
         if not title or not isinstance(request_key, str) or not re.fullmatch(r'[a-zA-Z0-9:_.-]{8,160}', request_key):
             raise ValueError('缺少任务标题或有效的请求标识')
@@ -302,13 +334,30 @@ class AgentStore:
             raise ValueError('每项工作最多 12 个有效附件')
         if attachment_ids and source_task_id is None:
             raise ValueError('继承附件需要明确的源任务')
-        digest = dispatch_payload_hash(ids, title, description, conversation_id, priority,
+        digest = dispatch_payload_hash(requested_ids, title, description, conversation_id, priority,
                                        attachments, source_task_id, attachment_ids)
         if model_request or model_selection:
             digest = hashlib.sha256((digest + json.dumps(model_request or model_selection, sort_keys=True)).encode()).hexdigest()
+        if managed and source_task_id is not None:
+            digest = hashlib.sha256((digest + json.dumps([work_type,work_key,fallback_reason], ensure_ascii=False)).encode()).hexdigest()
         created = False
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
+            # Fence first, even for a retry: an obsolete run cannot dispatch or
+            # appear to succeed after another device has taken ownership.
+            source = None
+            if source_task_id is not None:
+                source = repo.get_task(source_task_id)
+                if not source or source['project_id'] != project_id or source['conversation_id'] != conversation_id:
+                    raise ValueError('附件源任务必须属于当前项目和工作对话')
+                if device_id is not None:
+                    from .execution_leases import require_execution_fence
+                    require_execution_fence(self.db, source, device_id, execution, allow_unleased=not managed)
+                if managed:
+                    source_agent = self.get(project_id, source['assigned_agent_id'])
+                    if source_agent['kind'] != 'controller' or not source_agent['active']:
+                        raise ValueError('只有启用中的总控可以分配专业工作')
+                    resolve_owner(self.db, project_id, work_type, ids[0], fallback_reason)
             previous = self.db.execute('SELECT * FROM hub_agent_dispatches WHERE project_id=? AND request_key=?',
                                        (project_id,request_key)).fetchone()
             if previous:
@@ -318,12 +367,6 @@ class AgentStore:
             else:
                 inherited = []
                 if source_task_id is not None:
-                    source = repo.get_task(source_task_id)
-                    if not source or source['project_id'] != project_id or source['conversation_id'] != conversation_id:
-                        raise ValueError('附件源任务必须属于当前项目和工作对话')
-                    if device_id is not None:
-                        from .execution_leases import require_execution_fence
-                        require_execution_fence(self.db, source, device_id, execution)
                     available = repo.list_task_attachments(project_id, source_task_id)
                     available_ids = {item['id'] for item in available}
                     requested = available_ids if attachment_ids is None else set(attachment_ids)
@@ -332,8 +375,18 @@ class AgentStore:
                     inherited = [item for item in available if item['id'] in requested]
                 if len(attachments) + len(inherited) > 12:
                     raise ValueError('每项工作最多 12 个附件')
-                for agent_id in ids:
+                for agent_id in set(ids + requested_ids):
                     self.assignment(project_id, agent_id)
+                if managed and source_task_id is not None:
+                    fingerprint = contract_hash(title, description, [item['id'] for item in inherited])
+                    existing_task = previous_work(self.db, project_id, conversation_id, work_key, fingerprint, ids[0], work_type)
+                    if existing_task:
+                        # Persist this retry key too: changing its content later must fail.
+                        dispatch_id = self.db.execute('''INSERT INTO hub_agent_dispatches
+                            (project_id,request_key,payload_hash,conversation_id,created_at) VALUES (?,?,?,?,?)''',
+                            (project_id,request_key,digest,conversation_id,now())).lastrowid
+                        self.db.execute('INSERT INTO hub_dispatch_tasks VALUES (?,?)', (dispatch_id,existing_task))
+                        return {'conversation_id': conversation_id, 'tasks': [repo.get_task(existing_task)], 'created': False}
                 if conversation_id:
                     room = self.db.execute("SELECT id FROM hub_conversations WHERE id=? AND project_id=? AND status='active'",
                                            (conversation_id,project_id)).fetchone()
@@ -356,7 +409,8 @@ class AgentStore:
                         created_by_user_id=user_id,created_by_device_id=device_id,commit=False)
                     self.db.execute('INSERT OR IGNORE INTO hub_conversation_agents VALUES (?,?)', (room_id,agent_id))
                     self.db.execute("UPDATE tasks SET conversation_id=?,route_reason=?,route_engine='user' WHERE id=?",
-                                    (room_id,'发起者指定的共同协作对话',task['id']))
+                                    (room_id,('多人需求由总控分工；候选参与者：'+','.join(map(str,requested_ids)))
+                                     if ids != requested_ids else '发起者指定的共同协作对话',task['id']))
                     self.db.execute('INSERT INTO hub_dispatch_tasks VALUES (?,?)', (dispatch_id,task['id']))
                     task_ids.append(task['id'])
                     if selected:
@@ -372,6 +426,10 @@ class AgentStore:
                 if inherited:
                     repo.bind_task_attachments(project_id, task_ids, [item['id'] for item in inherited],
                                                 source_task_id=source_task_id)
+                if managed and source_task_id is not None:
+                    self.db.execute('''INSERT INTO hub_work_assignments
+                        (project_id,conversation_id,work_key,content_hash,work_type,agent_id,task_id,fallback_reason)
+                        VALUES (?,?,?,?,?,?,?,?)''', (project_id,room_id,work_key,fingerprint,work_type,ids[0],task_ids[0],fallback_reason))
                 created = True
             # Construct the result before commit: a read/serialization failure must
             # still roll back before the route cleans its staged physical files.
@@ -435,4 +493,9 @@ class AgentStore:
             '<hub-reflection>{"outcome":"review","summary":"实际结果","worked":"有证据的有效方法，没有则留空",'
             '"failed":"失败原因或不确定性","next_time":"下次可执行的改进及适用条件"}</hub-reflection>\n'
             'outcome 只能填 review 或 blocked；因权限、工具或依赖等原因未能完成本次目标时必须填 blocked。\n'
-            '如需委派，使用 Hub 任务接口 assigned_agent_id 指派执行者；不要把设备或新建对话当作创建智能体。\n')
+            '只有总控使用专用 delegate / revise 接口分工；执行者仅完成自己任务，跨职责需求反馈总控，不自行另建任务。'
+            '启用分工角色时：delegate 必填 work_type、work_key；接口自动选择负责人。general_support 需说明 fallback_reason。'
+            '同一交付的 work_key 在重试及后续轮次保持不变；修改用 revise，不用换标题或编号绕过去重。'
+            '先 inspect 查已有任务及成果；依赖的素材或标准尚未交付时，不提前派发下游执行任务。'
+            '同一文件的写入工作顺序交接，独立交付才并行；不把专业负责人离线、忙碌或配置缺失当成职责空缺。'
+            '设备或新建对话不是新的智能体身份。\n')

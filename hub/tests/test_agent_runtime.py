@@ -326,6 +326,13 @@ def test_controller_helper_uses_binding_and_stable_request_key(tmp_path, monkeyp
     source.write_text(json.dumps({'action':'model_options','agent_id':9}), encoding='utf-8')
     run_agent_request(args)
     assert requests[-1] == ('GET','/api/projects/sample-project/agents/9/model-policy')
+    source.write_text(json.dumps({'action':'delegate','work_type':'general_support','work_key':'translate-note-v1',
+        'fallback_reason':'这是资料翻译工作，现有专业均不适用','title':'翻译资料'}),encoding='utf-8')
+    run_agent_request(args)
+    assert requests[-1][2]['assigned_agent_id'] is None
+    assert requests[-1][2]['work_type']=='general_support'
+    assert requests[-1][2]['work_key']=='translate-note-v1'
+    assert requests[-1][2]['fallback_reason']=='这是资料翻译工作，现有专业均不适用'
 
 
 def test_worker_helper_cannot_delegate(tmp_path, monkeypatch):

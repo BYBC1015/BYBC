@@ -84,6 +84,20 @@ def revise_task(repo, source, device_id, payload):
             raise ValueError('只能调整当前对话内明确的已有工作')
         target_agent=db.execute('SELECT kind FROM hub_agents WHERE id=?',(target['assigned_agent_id'],)).fetchone()
         if not target_agent or target_agent['kind']!='worker': raise ValueError('请选择实际执行者的工作任务')
+        # Users often refer to the original task. Follow its continuation chain
+        # before appending another change, otherwise two revisions can run at once.
+        visited = {target_id}
+        while True:
+            follow = db.execute('SELECT next_task_id FROM hub_task_amendments WHERE target_task_id=? AND next_task_id!=? ORDER BY id DESC LIMIT 1',
+                                (target['id'],target['id'])).fetchone()
+            if not follow or follow['next_task_id'] in visited:
+                break
+            candidate = repo.get_task(follow['next_task_id'])
+            if not candidate or candidate['project_id'] != source['project_id'] or candidate['conversation_id'] != source['conversation_id']:
+                raise ValueError('修改接续记录不一致，请先核对任务链')
+            target = candidate
+            visited.add(target['id'])
+        target_id = target['id']
         next_task=target
         # Coalesce changes into a pending continuation; never edit a running prompt.
         pending=db.execute("SELECT id FROM tasks WHERE wait_for_task_id=? AND status='open' AND NOT EXISTS (SELECT 1 FROM hub_task_executions e WHERE e.task_id=tasks.id) ORDER BY id DESC LIMIT 1",(target_id,)).fetchone()
@@ -107,6 +121,7 @@ def revise_task(repo, source, device_id, payload):
             [r['attachment_id'] for r in db.execute('SELECT attachment_id FROM hub_task_attachments WHERE task_id=? AND attachment_id NOT IN (SELECT attachment_id FROM hub_task_attachments WHERE task_id=?)',(source['id'],next_task['id']))],source_task_id=source['id'])
         row_id=db.execute('INSERT INTO hub_task_amendments(source_task_id,target_task_id,next_task_id,request_key,payload_hash,instruction,mode,created_at) VALUES (?,?,?,?,?,?,?,?)',
             (source['id'],target_id,next_task['id'],key,digest,instruction,mode,now())).lastrowid
+        db.execute('UPDATE hub_work_assignments SET task_id=? WHERE task_id=?', (next_task['id'],target_id))
         return dict(db.execute('SELECT * FROM hub_task_amendments WHERE id=?',(row_id,)).fetchone())
 
 

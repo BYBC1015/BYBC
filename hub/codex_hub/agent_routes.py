@@ -81,12 +81,13 @@ def register_agent_routes(app: FastAPI) -> None:
     @app.post('/projects/{slug}/agents/{agent_id}')
     def update_agent_web(request: Request, slug: str, agent_id: int, job: str = Form(...),
                          instructions: str = Form(''), device_id: str = Form(''), active: str = Form(''),
+                         role_key: str | None = Form(None),
                          csrf: str = Form('', alias='_csrf')):
         require_user(request)
         verify_csrf_token(request, csrf)
         repo, project, store = store_for(request, slug)
         checked(lambda: store.update(project['id'], agent_id, job=job, instructions=instructions,
-                                     device_id=parse_optional_int(device_id), active=active=='1'))
+                                     device_id=parse_optional_int(device_id), active=active=='1', role_key=role_key))
         return redirect_to(request, f'/projects/{slug}/agents/{agent_id}')
 
     @app.post('/projects/{slug}/agents/{agent_id}/experiences/{experience_id}/restore')
@@ -298,8 +299,9 @@ def register_agent_routes(app: FastAPI) -> None:
             conversation_id=task['conversation_id'],priority=data.get('priority','normal'),
             device_id=task['assigned_device_id'], source_task_id=task_id,
             attachment_ids=data.get('attachment_ids'), execution=data.get('execution'),
+            work_type=data.get('work_type'), work_key=data.get('work_key'), fallback_reason=data.get('fallback_reason',''),
             model_request=data.get('model_selection'), model_data_dir=get_settings(request).data_dir))
-        return {'task': result['tasks'][0]}
+        return {'task': result['tasks'][0], 'created': result['created']}
 
     @app.post('/api/projects/{slug}/tasks/{task_id}/agent-route')
     async def agent_route_api(request: Request, slug: str, task_id: int):
