@@ -80,14 +80,17 @@ def live_hub(tmp_path: Path):
 
 
 def connect_mobile_test_device(page):
-    """Give each newly created project a real writable recipient before composing."""
+    """Exercise the retained device-chat archive, now separate from the agent workspace."""
+    base=page.url.split('?')[0].split('#')[0]
+    if page.locator('[data-ws-shell]').count():
+        page.goto(base+'?view=archive')
     csrf = page.locator('#project-message-form input[name="_csrf"]').input_value()
     device_id = page.locator('form[action$="/members"] option').filter(has_text="mobile-test-codex").get_attribute("value")
     assert device_id
-    assert page.request.post(f"{page.url}/members", form={
+    assert page.request.post(f"{base}/members", form={
         "_csrf": csrf, "device_id": device_id, "permission": "write",
     }).ok
-    assert page.request.post(f"{page.url}/primary-device", form={
+    assert page.request.post(f"{base}/primary-device", form={
         "_csrf": csrf, "primary_device_id": device_id,
     }).ok
     page.reload()
@@ -944,9 +947,8 @@ def test_android_chat_header_moves_secondary_actions_into_project_drawer(
             assert page.locator("body").evaluate(
                 "node => node.classList.contains('android-chat-mode')"
             )
-            assert page.locator(".workbench-topbar").evaluate(
-                "node => node.getBoundingClientRect().height <= 60"
-            )
+            header_height=page.locator(".workbench-topbar").evaluate("node => node.getBoundingClientRect().height")
+            assert header_height<=60,header_height
             assert page.locator(".workbench-title h1").inner_text() == (
                 "Private Server Buildout"
             )
@@ -1117,7 +1119,7 @@ def test_live_chat_appends_incremental_reply_without_full_page_navigation(live_h
                 timeout=6000,
             )
 
-            assert page.url.endswith("/projects/incremental-browser-chat")
+            assert page.url.endswith("/projects/incremental-browser-chat?view=archive")
             assert update_requests
             assert all("after_entry_id=" in url for url in update_requests)
         finally:

@@ -102,6 +102,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_maintenance_routes(app)
     from .runtime_routes import register_execution_routes
     register_execution_routes(app)
+    from .delivery_routes import register_delivery_routes
+    register_delivery_routes(app)
     from .model_routes import register_model_routes
     register_model_routes(app)
     return app

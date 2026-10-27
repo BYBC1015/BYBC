@@ -96,6 +96,23 @@ class HubClient:
     def heartbeat(self) -> dict[str, Any]:
         return self._json('POST', '/api/device/heartbeat', {})
 
+    def upload_task_artifact(self, slug, task_id, execution, key, reference, filename, content_type, data):
+        boundary='hub-artifact-'+uuid.uuid4().hex
+        parts=[]
+        for name,value in {'execution':json.dumps({k:execution[k] for k in ('generation','run_key')}),
+                           'artifact_key':key,'local_reference':reference}.items():
+            parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode('utf-8'))
+        filename=filename.replace('"','_').replace('\r','_').replace('\n','_')
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\nContent-Type: {content_type}\r\n\r\n'.encode('utf-8'))
+        parts.extend([data,f'\r\n--{boundary}--\r\n'.encode()])
+        request=Request(f'{self.hub}/api/projects/{slug}/tasks/{task_id}/artifacts',data=b''.join(parts),
+            headers={**self._headers(),'Content-Type':'multipart/form-data; boundary='+boundary},method='POST')
+        opener=build_opener(ProxyHandler({}),_NoAttachmentRedirect(),_SourceBoundHTTPHandler(self.source_ip),_SourceBoundHTTPSHandler(self.source_ip)) if self.source_ip else build_opener(_NoAttachmentRedirect())
+        try:
+            with opener.open(request,timeout=max(30,self.timeout_seconds)) as response: return json.loads(response.read().decode('utf-8'))
+        except HTTPError as exc:
+            raise HubClientError(f'成果上传失败（HTTP {exc.code}），保留本地文件等待重试',status_code=exc.code) from None
+
     def acquire_task_execution(self, slug: str, task_id: int, run_key: str) -> dict:
         return self._json('POST', f'/api/projects/{slug}/tasks/{task_id}/execution/acquire', {'run_key':run_key})
 

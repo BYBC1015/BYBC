@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urlencode
 
@@ -83,7 +84,7 @@ def _task_views(repo, project_id: int, *, conversation_id: int | None = None,
     # Exclude large context packs and bound the previews at the database boundary.
     rows = repo.connection.execute(f"""SELECT t.id,t.project_id,t.title,t.status,t.priority,
         t.assigned_agent_id,t.assigned_device_id,t.conversation_id,t.created_at,t.updated_at,
-        t.status_version,t.route_engine,t.route_reason,substr(t.description,1,2000) AS description,
+        t.status_version,t.route_engine,t.route_reason,t.wait_for_task_id,substr(t.description,1,2000) AS description,
         substr(t.result_summary,1,2000) AS result_summary,
         a.name AS assigned_agent_name,a.kind AS assigned_agent_kind,
         d.label AS assigned_device_label,c.title AS conversation_title,mc.selection_json AS model_selection_json
@@ -101,19 +102,20 @@ def _task_views(repo, project_id: int, *, conversation_id: int | None = None,
 def _entry_views(request: Request, repo, project: dict, conversation_id: int, before: int | None):
     from .main import app_path
 
-    clause = " AND e.id<?" if before is not None else ""
-    params = (project['id'], conversation_id, before, ENTRY_PAGE_SIZE + 1) if before is not None else (
+    cursor = repo.connection.execute('SELECT created_at FROM entries WHERE id=? AND project_id=?',(before,project['id'])).fetchone() if before else None
+    clause = " AND (e.created_at<? OR (e.created_at=? AND e.id<?))" if cursor else ""
+    params = (project['id'], conversation_id, cursor['created_at'],cursor['created_at'],before, ENTRY_PAGE_SIZE + 1) if cursor else (
         project['id'], conversation_id, ENTRY_PAGE_SIZE + 1)
     rows = [dict(row) for row in repo.connection.execute(f"""SELECT
         e.id,e.project_id,e.task_id,e.author_type,e.author_user_id,e.author_device_id,
         e.source_label,e.kind,e.created_at,e.updated_at,
         substr(e.body_markdown,1,{ENTRY_BODY_LIMIT}) AS body_markdown,
         length(e.body_markdown) AS body_length,t.title AS task_title,
-        t.assigned_agent_id,a.name AS agent_name,a.name AS assigned_agent_name
+        t.assigned_agent_id,t.status AS task_status,t.wait_for_task_id,a.kind AS agent_kind,a.name AS agent_name,a.name AS assigned_agent_name
         FROM entries e JOIN tasks t ON t.id=e.task_id
         LEFT JOIN hub_agents a ON a.id=t.assigned_agent_id
         WHERE e.project_id=? AND t.conversation_id=? AND e.deleted_at IS NULL{clause}
-        ORDER BY e.id DESC LIMIT ?""", params)]
+        ORDER BY e.created_at DESC,e.id DESC LIMIT ?""", params)]
     has_older = len(rows) > ENTRY_PAGE_SIZE
     rows = rows[:ENTRY_PAGE_SIZE]
     # Prioritize the most recent result without permitting one page to grow
@@ -128,14 +130,30 @@ def _entry_views(request: Request, repo, project: dict, conversation_id: int, be
         row['attachments'] = []
     attachment_rows = repo.list_attachments_for_entries(project['id'], [row['id'] for row in rows])
     entries_by_id = {row['id']: row for row in rows}
+    seen_artifacts = set()
     for attachment in attachment_rows:
         entry = entries_by_id[attachment['entry_id']]
+        identity = (entry['id'], attachment['original_filename'], attachment['sha256'])
+        if entry['author_type'] != 'user' and attachment['sha256']:
+            if identity in seen_artifacts:
+                continue
+            seen_artifacts.add(identity)
         if len(entry['attachments']) < 12:
             entry['attachments'].append({
                 'id': attachment['id'], 'original_filename': attachment['original_filename'],
                 'byte_size': attachment['byte_size'], 'content_type': attachment['content_type'],
                 'url': app_path(request, f"/projects/{project['slug']}/attachments/{attachment['id']}"),
+                'preview_url': app_path(request, f"/projects/{project['slug']}/attachments/{attachment['id']}?inline=true&size=preview")
+                    if attachment['content_type'] in {'image/png','image/jpeg','image/gif','image/webp','image/avif'} else '',
+                'text_preview_url': app_path(request, f"/projects/{project['slug']}/attachments/{attachment['id']}/preview")
+                    if PurePosixPath(attachment['original_filename']).suffix.lower()=='.pdf' or
+                    (PurePosixPath(attachment['original_filename']).suffix.lower() in {'.md','.txt','.csv','.json','.log'} and attachment['byte_size']<=1024*1024) else '',
             })
+    for row in rows:
+        row['view_version']=hashlib.sha256(json.dumps([row['body_markdown'],row['attachments'],row['task_status']],sort_keys=True).encode()).hexdigest()[:16]
+        row['receipt_label']={'open':'已收到 · 等待总控回应' if row['agent_kind']=='controller' else '已收到 · 等待执行',
+            'claimed':'已收到 · 准备处理','in_progress':'已收到 · 正在处理','review':'已回复 · 可查看结果',
+            'blocked':'已收到 · 当前遇阻','done':'已完成','cancelled':'已取消'}.get(row['task_status'],'已收到')
     oldest_id = rows[-1]['id'] if rows else None
     return list(reversed(rows)), oldest_id if has_older else None
 

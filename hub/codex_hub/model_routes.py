@@ -31,13 +31,26 @@ def register_model_routes(app):
             raise HTTPException(409, '任务已结束、已开始或智能体暂停，不再启动模型规划')
         policy = agent_policy(repo.connection, agent['id'])
         models = available_models(get_settings(request).data_dir, task['assigned_device_id'])
-        if selection is None and (policy['mode'] == 'manual' or not models):
+        if selection is None and (policy['mode'] == 'manual' or not models or agent['kind']=='controller'):
             try:
-                selection = select_model(repo.connection, agent, get_settings(request).data_dir)
+                with repo.connection:
+                    repo.connection.execute('BEGIN IMMEDIATE')
+                    task = repo.get_task(task_id)
+                    agent = AgentStore(repo.connection).get(project['id'], task['assigned_agent_id'])
+                    if task['assigned_device_id'] != require_api_device(request)['id'] or not agent['active']:
+                        raise ExecutionConflict('执行连接或身份已改变')
+                    agent['device_id'] = task['assigned_device_id']
+                    selection = task_choice(repo.connection, task_id)
+                    if selection is None:
+                        if task['status'] not in {'open','claimed'}:
+                            raise ExecutionConflict('任务已开始或结束，不再重新选择模型')
+                        selection = select_model(repo.connection, agent, get_settings(request).data_dir, task=task)
+                        selection = freeze_choice(repo.connection, task_id, selection)
+                    policy = agent_policy(repo.connection, agent['id'])
+            except ExecutionConflict as exc:
+                raise HTTPException(409, str(exc)) from None
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from None
-            with repo.connection:
-                selection = freeze_choice(repo.connection, task_id, selection)
         controller = next((a for a in AgentStore(repo.connection).list(project['id'])
                            if a['kind'] == 'controller' and a['active']), None)
         return {'selection': selection, 'models': models, 'policy': policy,
@@ -45,7 +58,7 @@ def register_model_routes(app):
                 'task': {k: task[k] for k in ('id', 'title', 'priority')},
                 'task_description': task.get('description', '')[:3000],
                 'executor': {k: agent[k] for k in ('name', 'job')},
-                'preferences': ['GPT-5.6 high', 'GPT-6 medium', 'GPT-6 high'],
+                'preferences': ['GPT-6.1 series when reported', 'GPT-5.6 high', 'GPT-6 medium', 'GPT-6 high', 'Controller: GPT-6 Astra medium/high/xhigh'],
                 'instruction': '逐任务评估类型、难度、风险和成本；不要给同一身份的所有任务机械地选择相同模型。'}
 
     @app.post('/api/projects/{slug}/tasks/{task_id}/model-plan')

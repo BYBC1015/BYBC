@@ -195,9 +195,13 @@ def run_agent_request(arguments: argparse.Namespace) -> dict[str, Any]:
     client = HubClient(config.hub, config.token, timeout_seconds=config.hub_request_timeout_seconds,
         get_retry_attempts=config.hub_get_retry_attempts,
         retry_backoff_seconds=config.hub_retry_backoff_seconds, source_ip=config.hub_source_ip)
-    if arguments.request_file.stat().st_size > 32_000:
-        raise ValueError("智能体请求文件过大")
-    request = json.loads(arguments.request_file.read_text(encoding="utf-8-sig"))
+    raw=getattr(arguments,'request_json',None)
+    if raw is None:
+        if arguments.request_file.stat().st_size > 32_000:
+            raise ValueError("智能体请求文件过大")
+        raw=arguments.request_file.read_text(encoding='utf-8-sig')
+    if len(raw)>32000: raise ValueError('智能体请求过大')
+    request=json.loads(raw)
     if not isinstance(request, dict):
         raise ValueError("智能体请求必须是 JSON 对象")
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,62}[a-z0-9]", arguments.project):
@@ -215,6 +219,12 @@ def run_agent_request(arguments: argparse.Namespace) -> dict[str, Any]:
         if type(agent_id) is not int or agent_id < 1:
             raise ValueError('请使用有效的目标智能体编号')
         return client._json('GET', f'/api/projects/{arguments.project}/agents/{agent_id}/model-policy')
+    if action == 'revise' and context['agent'].get('kind') == 'controller':
+        payload={k:request.get(k) for k in ('target_task_id','instruction','request_key')}
+        if os.environ.get('CODEX_HUB_EXECUTION_TASK_ID')!=str(arguments.task_id) or os.environ.get('CODEX_HUB_EXECUTION_PROJECT')!=arguments.project:
+            raise ValueError('修改需要当前总控执行记录')
+        payload['execution']={'generation':int(os.environ.get('CODEX_HUB_EXECUTION_GENERATION','0')),'run_key':os.environ.get('CODEX_HUB_EXECUTION_RUN_KEY','')}
+        return client._json('POST',f'/api/projects/{arguments.project}/tasks/{arguments.task_id}/revise',payload)
     if action != "delegate" or context["agent"].get("kind") != "controller":
         raise ValueError("仅总控智能体可委派；支持 inspect、model_options 或 delegate")
     target = request.get("assigned_agent_id")
@@ -267,13 +277,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--binding-id")
     parser.add_argument("--project", required=True)
     parser.add_argument("--task-id", required=True, type=int)
-    parser.add_argument("--request-file", required=True, type=Path)
+    payload=parser.add_mutually_exclusive_group(required=True)
+    payload.add_argument("--request-file", type=Path)
+    payload.add_argument("--request-json", help="JSON request without creating a workspace file")
     arguments = parser.parse_args(argv)
     try:
         result = run_agent_request(arguments)
     except (OSError, ValueError, HubClientError) as exc:
         parser.exit(1, f"Hub agent request failed: {exc}\n")
-    print(json.dumps(result, ensure_ascii=False))
+    # ASCII JSON survives Windows PowerShell's legacy native pipe encoding.
+    print(json.dumps(result, ensure_ascii=True))
     return 0
 
 

@@ -1,0 +1,4 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel"><h1>{{ attachment.original_filename }}</h1><p><a href="{{ download_url }}" download>下载原文件</a></p><pre style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.9">{{ content }}</pre></section>
+{% endblock %}

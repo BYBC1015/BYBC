@@ -78,7 +78,11 @@ def test_attachment_error_retry_actual_dispatch_and_file_only(live_hub, repo, wi
             playwright.expect(image).to_be_visible()
             page.wait_for_function('document.querySelector(".ws-message-attachments img").naturalWidth > 0')
             file_link = page.get_by_role('link', name='工作说明.txt', exact=False)
-            assert page.request.get(file_link.evaluate('el => el.href')).body() == DOCUMENT
+            preview_url=file_link.evaluate('el => el.href')
+            preview=page.request.get(preview_url)
+            assert preview.status==200 and '打开预览' in file_link.inner_text()
+            assert DOCUMENT.decode('utf-8') in preview.text()
+            assert page.request.get(preview_url.removesuffix('/preview')).body() == DOCUMENT
             assert_composer_visible(page, 960)
             page.screenshot(path=str(OUTPUT / f'attachments-sent-{width}.png'))
 

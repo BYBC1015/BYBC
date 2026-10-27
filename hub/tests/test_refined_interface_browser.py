@@ -38,6 +38,7 @@ def test_narrow_phone_more_menu_preserves_tools_and_chat_geometry(browser, live_
         page.fill('input[name="name"]', "窄屏项目的完整工具菜单")
         page.click('form[action$="/projects"] button[type="submit"]')
         page.wait_for_url("**/projects/refined-phone-tools")
+        page.goto(f"{live_hub}/projects/refined-phone-tools?view=archive")
 
         more = page.locator(".hub-more")
         summary = more.locator("summary")

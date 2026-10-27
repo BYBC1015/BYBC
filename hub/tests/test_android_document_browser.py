@@ -139,7 +139,7 @@ def test_android_more_downloads_scroll_and_return_to_fixed_chat(
             scroll_document(page, -250)
             assert page.evaluate("scrollY") < bottom
             page.go_back()
-            page.wait_for_url("**/projects/android-document-scroll")
+            page.wait_for_url("**/projects/android-document-scroll?view=archive")
             inject_native_assets(page, native_style)
             page.locator('.android-bottom-nav [data-android-view="chat"]').click()
             chat_geometry = page.evaluate("""() => {

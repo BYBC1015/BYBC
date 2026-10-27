@@ -727,6 +727,21 @@ class BridgeRunner:
             return
         context = dict(receipt['execution'], task_id=task_id, project_slug=slug, receipt_path=str(completion_path))
         prompt_path = Path(receipt['prompt_path'])
+        # Fetch after start is fenced: amendments to queued work cannot leave an old prompt running.
+        try:
+            fresh_prompt = self.client.get_task_prompt(slug, task_id) + self._agent_tool_instructions(slug, task_id)
+            prepared = prepare_task_attachments(self.client, self.config, slug, task_id, self._resolve_project_path(receipt['target_project']))
+            fresh_prompt += prepared.prompt()
+            prompt_path.write_text(fresh_prompt,encoding='utf-8')
+            receipt['image_paths']=[str(path) for path in prepared.images]
+            self._save_state()
+        except Exception:
+            failure=CodexExecResult(ok=False,command=[],returncode=None,stdout='',stderr='',
+                last_message='执行前核对最新要求或附件失败，未启动工作进程。',output_path=prompt_path,
+                error='执行前核对最新要求或附件失败，未启动工作进程。')
+            self._save_agent_result(slug,task_id,failure)
+            self._publish_agent_result(slug,task_id,result)
+            return
         with ExecutionRenewal(self.client, slug, task_id, receipt['execution']) as renewal:
             exec_result = self._execute_codex(receipt['target_project'], prompt_path,
                 prompt_path.read_text(encoding='utf-8'), execution_preferences=receipt.get('model_selection'),
@@ -782,7 +797,7 @@ class BridgeRunner:
             return "'" + value.replace("'", "''") + "'"
 
         binding = str(getattr(self.config, "binding_id", "") or "")
-        command = f"& {quote(sys.executable)} -m codex_bridge.agent_runtime --project {quote(project_slug)} --task-id {task_id}"
+        command = f"& {quote(sys.executable)} -X utf8 -m codex_bridge.agent_runtime --project {quote(project_slug)} --task-id {task_id}"
         helper_config = os.environ.get("CODEX_BRIDGE_AGENT_CONFIG", "")
         if helper_config:
             command += " --config " + quote(helper_config)
@@ -792,7 +807,11 @@ class BridgeRunner:
             "\n\n## Hub 智能体工作接口\n"
             "用 UTF-8 文件提交结构化请求，通过现有连接读取身份和委派任务；不要读取、输出或复制连接 token。\n"
             f"PowerShell 调用：{command} --request-file '<请求 JSON 文件绝对路径>'\n"
+            f"总控调度通道请直接使用：{command} --request-json '<JSON对象>'，不需写请求文件。\n"
+            "总控运行于独立调度目录；实际项目文件修改必须委派执行者。不得绕过目录限制修改原项目。\n"
             '查看当前身份、经验、团队和任务：{"action":"inspect"}。\n'
+            '总控调整当前对话已有工作：{"action":"revise","target_task_id":真实任务编号,"request_key":"stable-change-key","instruction":"最新具体修改要求"}。'
+            '返回 updated 表示待办已更新；queued 表示待原工作结束后接续，不能声称执行者已经按修改完成。\n'
             '按需查看某个智能体实际可用模型：{"action":"model_options","agent_id":智能体数字编号}。\n'
             '总控委派示例：{"action":"delegate","request_key":"stable-subtask-key",'
             '"assigned_agent_id":目标智能体数字编号,"title":"明确交付结果",'
@@ -806,6 +825,9 @@ class BridgeRunner:
             "只有接口返回任务编号才算已分配。总控可在本任务授权范围内委派其他智能体；"
             "仍需汇报哪些已交付、哪些还在执行，不得把成功创建任务写成全部完成。"
             "工作结果与结构化复盘由 Bridge 回传，勿重复自行发回同一结果。\n"
+            '交付文件放在项目 output/hub-task-'+str(task_id)+'/，最终答复给出明确 Markdown 文件链接，'
+            '并追加 <hub-artifacts>[{"path":"项目内交付文件路径"}]</hub-artifacts>（最多12个、每个50MB、合计100MB）。'
+            'Bridge会上传到Hub并展示预览与下载；不需要SW公开上传，不要只报一个目录或称本地路径已可在网页打开。\n'
         )
 
     def _save_agent_result(self, project_slug: str, task_id: int, execution: CodexExecResult) -> None:
@@ -830,11 +852,24 @@ class BridgeRunner:
         summary = str(receipt.get("result_summary") or "")
         status = receipt.get("result_status") or ("review" if receipt["ok"] else "blocked")
         if receipt.get('execution'):
-            body = f"## {self._executor_label()} 智能体任务 #{task_id}\n\n- 状态：{'待复核' if status == 'review' else '遇阻'}\n\n{summary}"
+            body = summary
             try:
+                if not receipt.get('artifact_publish_failed') and callable(getattr(self.client,'upload_task_artifact',None)):
+                    from .artifacts import publish_artifacts
+                    body=publish_artifacts(self.client,project_slug,task_id,receipt['execution'],
+                        self._resolve_project_path(receipt.get('target_project') or project_slug),body)
                 self.client.complete_task_execution(project_slug, task_id, receipt['execution'],
-                    status=status, summary=summary[:1000], body=body, reflection=receipt['reflection'])
+                    status=status, summary=body[:1000], body=body, reflection=receipt['reflection'])
             except Exception as exc:
+                if isinstance(exc, ValueError) or getattr(exc,'status_code',None) in {413,415,422}:
+                    # Invalid delivery cannot heal through endless network retries.
+                    # Preserve the local execution output and publish an honest blocker once.
+                    receipt['artifact_publish_failed']=True
+                    receipt['result_status']='blocked'
+                    receipt['result_summary']=re.sub(r'<hub-artifacts>.*?</hub-artifacts>','',summary,flags=re.S).strip()+'\n\n成果尚未发布：文件清单、格式或大小不符合上传要求。原执行结果已保留，需要修正交付文件后继续；不能把本地路径当作网页成果。'
+                    receipt['reflection']={**receipt['reflection'],'failed':'成果文件未通过上传校验','next_time':'交付前检查清单、文件存在性和大小限制'}
+                    self._save_state()
+                    return self._publish_agent_result(project_slug,task_id,result)
                 if getattr(exc, 'status_code', None) in {403,404,409}:
                     self._reject_agent_receipt(project_slug, task_id, '任务状态或执行代际已改变，结果保留本地，未覆盖 Hub。', result)
                 else:

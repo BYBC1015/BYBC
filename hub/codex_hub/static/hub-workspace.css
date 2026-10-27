@@ -9,6 +9,7 @@ html body.hub-detail-screen {
 }
 html body.hub-detail-screen .workbench-shell::before { display:none; }
 html body.hub-detail-screen .workbench-shell { grid-template-rows:70px minmax(0,1fr); }
+html.codex-hub-android body.hub-detail-screen.android-chat-mode .workbench-shell { grid-template-rows:60px minmax(0,1fr); }
 html body.hub-detail-screen .workbench-topbar { background:#fff; border-bottom:1px solid #e8e8eb; gap:18px; min-height:70px; box-shadow:none; }
 html body.hub-detail-screen .workbench-brand { width:208px; flex-basis:208px; }
 html body.hub-detail-screen .workbench-brand strong { font-size:16px; letter-spacing:-.03em; font-weight:650; }

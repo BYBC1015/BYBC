@@ -54,7 +54,7 @@ def test_mobile_model_catalog_and_selected_member_delivery(client, repo, width):
                 "Content-Type": response.headers.get("content-type", "application/octet-stream")})
         page.route("http://hub.test/**", forward)
         try:
-            page.goto("http://hub.test/projects/model-routing")
+            page.goto("http://hub.test/projects/model-routing?view=archive")
             page.add_style_tag(path=str(ROOT / "android/app/src/main/assets/android-app.css"))
             page.evaluate("document.documentElement.classList.add('codex-hub-android'); document.body.classList.add('android-chat-mode')")
             page.wait_for_function("document.querySelector('[data-codex-model]').options.length === 3")

@@ -374,7 +374,7 @@ def test_web_owner_can_enable_provider_and_queue_before_key(tmp_path):
             follow_redirects=False,
         )
         status = client.get("/api/server-ai/status")
-        page = client.get("/projects/web-server-ai")
+        page = client.get("/projects/web-server-ai?view=archive")
 
     jobs = repo.list_server_ai_jobs(project["id"])
     assert enabled.status_code == 303

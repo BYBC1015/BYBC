@@ -83,7 +83,7 @@ def task_choice(db, task_id):
     return json.loads(row['selection_json']) if row else None
 
 
-def select_model(db, agent, data_dir, requested=None):
+def select_model(db, agent, data_dir, requested=None, *, task=None):
     policy = agent_policy(db, agent['id'])
     models = available_models(data_dir, agent.get('device_id'))
     if policy['mode'] == 'manual':
@@ -97,11 +97,21 @@ def select_model(db, agent, data_dir, requested=None):
     if policy['model']:
         return {**validate_choice(policy, models), 'source': 'controller', 'policy_revision': policy['revision']}
     # This default is an explicit preference rule, not a claim that an LLM evaluated this task.
-    preferences = [('gpt-6-sol', 'medium'), ('gpt-5.6-sol', 'high'), ('gpt-6-astra', 'medium')]
+    preferences = [('gpt-6.1-sol', 'medium'), ('gpt-6-sol', 'medium'), ('gpt-5.6-sol', 'high'), ('gpt-6-astra', 'medium')]
+    reason = '默认偏好策略；总控可按工作需要调整，用户可手动指定。'
+    if agent.get('kind') == 'controller':
+        description = ((task or {}).get('description') or (task or {}).get('title') or '').strip()
+        effort = 'high'
+        if any(word in description for word in ('深度优化', '深度审查', '架构设计', '复杂故障', '极高')):
+            effort = 'xhigh'
+        elif len(description) < 100 and any(word in description for word in ('进度', '怎么样了', '收到', '你好', '状态', '谢谢')):
+            effort = 'medium'
+        preferences = [('gpt-6-astra', e) for e in dict.fromkeys([effort, 'high', 'medium'])] + preferences
+        reason = '总控优先 GPT-6 Astra；简短状态沟通用中档，工作安排用高档，明确深度审查用极高档；仅选择设备支持的档位。'
     for model, effort in preferences:
         try:
             choice = validate_choice({'model': model, 'reasoning_effort': effort,
-                'reason': '默认偏好策略；总控可按工作需要调整，用户可手动指定。'}, models)
+                'reason': reason}, models)
             return {**choice, 'source': 'default_policy', 'policy_revision': policy['revision']}
         except ValueError:
             continue
@@ -128,6 +138,6 @@ def ensure_task_choice(repo, task, data_dir):
     agent = dict(repo.connection.execute('SELECT * FROM hub_agents WHERE id=?', (task['assigned_agent_id'],)).fetchone())
     # Existing work keeps its frozen execution device, even after an identity edit.
     agent['device_id'] = task['assigned_device_id']
-    choice = select_model(repo.connection, agent, data_dir)
+    choice = select_model(repo.connection, agent, data_dir, task=task)
     with repo.connection:
         return freeze_choice(repo.connection, task['id'], choice)

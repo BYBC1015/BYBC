@@ -8,6 +8,7 @@
   const send = form.querySelector("[data-ws-send]");
   const errors = shell.querySelector("[data-ws-dispatch-error]");
   const scroll = shell.querySelector("[data-ws-scroll]");
+  const newMessages = shell.querySelector("[data-ws-new-messages]");
   const sidebar = shell.querySelector("[data-ws-sidebar]");
   const inspector = shell.querySelector("[data-ws-inspector]");
   const backdrop = shell.querySelector("[data-ws-backdrop]");
@@ -543,8 +544,10 @@
       followBottom = shell.dataset.conversation !== "new" && !movedUp && scroll.scrollHeight-scroll.clientHeight-scroll.scrollTop < 16;
     }
     readingPosition = captureReadingPosition();
+    if (followBottom && newMessages) newMessages.hidden = true;
     clearTimeout(saveTimer); saveTimer = setTimeout(saveUi, 180);
   }, { passive:true });
+  newMessages?.addEventListener("click", () => { followBottom = true; restoreReadingPosition(); newMessages.hidden = true; });
   window.addEventListener("pagehide", () => { saveDraft(); saveUi(); refreshController?.abort(); });
   function viewportChanged() {
     drawer = null; drawerOpener = null;
@@ -627,8 +630,10 @@
   async function refresh() {
     clearTimeout(refreshTimer);
     if (pendingSubmission && !submitting && !document.hidden) { await checkReceipt(); if (committed) return; }
-    if (document.hidden || submitting || document.querySelector("dialog[open]")) { refreshTimer = setTimeout(refresh, 8000); return; }
+    if (document.hidden || submitting) { refreshTimer = setTimeout(refresh, 2000); return; }
+    if (refreshController) return;
     refreshController = new AbortController();
+    const timeout = setTimeout(() => refreshController?.abort(), 12000);
     try {
       const response = await fetch(shell.dataset.workspaceUrl || location.href, { headers:etag ? { "If-None-Match":etag } : {}, credentials:"same-origin", signal:refreshController.signal });
       if (response.status === 304) { shell.querySelector("[data-ws-sync]").textContent = "已同步"; return; }
@@ -645,8 +650,37 @@
       ["[data-ws-live]", "[data-ws-conversations]", "[data-ws-room-count]", "[data-ws-task-panels]", "[data-ws-agent-panels]"].forEach((selector) => {
         // Do not replace a details panel while someone is using its controls.
         if (insideInspector && selector.includes("panels")) { skipped = true; return; }
-        if (selector === "[data-ws-live]" && shell.querySelector(selector).contains(focused)) { skipped = true; return; }
         const destination = shell.querySelector(selector); const incoming = freshShell.querySelector(selector);
+        if (selector === "[data-ws-live]" && destination && incoming) {
+          const previous = new Map(Array.from(destination.querySelectorAll("[data-ws-entry]")).map(node => [node.dataset.wsEntry,node]));
+          const selection = window.getSelection();
+          let added = false;
+          const children = Array.from(incoming.children).map(node => {
+            const old = node.dataset.wsEntry && previous.get(node.dataset.wsEntry);
+            if (node.dataset.wsEntry && !old) added = true;
+            if (old && (old.contains(focused) || (selection && !selection.isCollapsed && old.contains(selection.anchorNode)))) { skipped = true; return old; }
+            if (old && old.dataset.wsEntryVersion === node.dataset.wsEntryVersion) return old;
+            return document.importNode(node,true);
+          });
+          // Keep the bounded part of the preceding page while someone is reading it.
+          // New replies must not evict their focused message at the 40-message boundary.
+          if (!followBottom && incoming.querySelector('.ws-load-records')) {
+            const incomingIds = new Set(children.filter(node => node.dataset.wsEntry).map(node => node.dataset.wsEntry));
+            const older = Array.from(previous.values());
+            const firstShared = older.findIndex(node => incomingIds.has(node.dataset.wsEntry));
+            const keep = firstShared > 0 ? older.slice(0, firstShared).slice(-40) : [];
+            const firstMessage = children.findIndex(node => node.dataset.wsEntry);
+            if (keep.length && firstMessage >= 0) { children.splice(firstMessage,0,...keep); skipped = true; }
+          }
+          // Move only changed nodes; stable messages retain focus, image state and selections.
+          const retained = new Set(children);
+          Array.from(destination.children).forEach(node => { if (!retained.has(node)) node.remove(); });
+          let cursor = destination.firstElementChild;
+          children.forEach(node => { if (node === cursor) cursor = cursor.nextElementSibling; else destination.insertBefore(node,cursor); });
+          while (cursor) { const next = cursor.nextElementSibling; cursor.remove(); cursor = next; }
+          if (added && !followBottom && newMessages) newMessages.hidden = false;
+          return;
+        }
         if (destination && incoming) destination.replaceChildren(...Array.from(incoming.childNodes).map((node) => document.importNode(node, true)));
       });
       if (!skipped) etag = nextEtag;
@@ -659,10 +693,10 @@
       restoreReadingPosition(positionBeforeRefresh);
       shell.querySelector("[data-ws-sync]").textContent = "已同步";
     } catch (error) {
-      if (error.name !== "AbortError") shell.querySelector("[data-ws-sync]").textContent = "等待连接";
-    } finally { refreshTimer = setTimeout(refresh, 8000); }
+      shell.querySelector("[data-ws-sync]").textContent = error.name === "AbortError" ? "连接超时 · 正在重试" : "等待连接";
+    } finally { clearTimeout(timeout); refreshController = null; refreshTimer = setTimeout(refresh, 2000); }
   }
-  refreshTimer = setTimeout(refresh, 8000);
+  refreshTimer = setTimeout(refresh, 2000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { etag = ""; clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 300); } });
   setInterval(() => { if (!document.hidden) formatTimes(); }, 60000);
   shell.dataset.wsReady = "true";

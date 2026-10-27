@@ -115,6 +115,9 @@ class ExecutionStore:
         with self.transaction():
             task = self._task(task_id, device_id)
             latest = latest_execution(self.db, task_id)
+            from .work_delivery import dependency_ready
+            if not dependency_ready(self.db, task):
+                raise ExecutionConflict('原工作尚未结束，调整任务等待原执行结果')
             previous = self.db.execute('SELECT * FROM hub_task_executions WHERE task_id=? AND run_key=?',
                                         (task_id, run_key)).fetchone()
             if previous:
@@ -199,12 +202,16 @@ class ExecutionStore:
             if (record['state'] not in {'running','uncertain'} or task['status_version'] != record['task_version']
                     or task['status'] not in {'in_progress','blocked'}):
                 raise ExecutionConflict('任务已取消、结束或被更新；迟到结果保留本地，不覆盖当前状态。')
+            from .work_delivery import artifact_links
+            summary=artifact_links(self.db,task_id,generation,summary,'../attachments')
             updated = self.repo.update_task_status(task_id, status, summary, reflection=reflection,
                                                    actor_device_id=device_id, execution_fenced=True)
             device = self.repo.get_device(device_id)
+            body=artifact_links(self.db,task_id,generation,body,'../attachments')
             entry = self.repo.create_entry(task['project_id'], device['label'], 'markdown', body,
                 author_device_id=device_id, task_id=task_id, commit=False, execution_fenced=True,
                 metadata_json=json.dumps({'execution': {'generation':generation,'run_key':run_key}}))
+            self.db.execute('UPDATE attachments SET entry_id=? WHERE id IN (SELECT attachment_id FROM hub_task_artifacts WHERE task_id=? AND generation=?)',(entry['id'],task_id,generation))
             self.db.execute("""UPDATE hub_task_executions SET state='completed',completed_at=?,
                 result_digest=?,result_entry_id=?,task_version=?,detail=? WHERE id=?""",
                 (self.clock(), digest, entry['id'], updated['status_version'], '结果、经验与工作记录已原子保存。', record['id']))

@@ -78,6 +78,8 @@ html body.workspace-screen { --ws-bg:#101112; --ws-left:#17191b; --ws-main:#1d1f
 .ws-sidebar-bottom footer form { margin:0; }
 .ws-sidebar-bottom footer button { border:0; padding:0; background:none; color:#7e8a91; font-size:11px; }
 .ws-center { display:grid; grid-template-rows:76px minmax(0,1fr) auto; background:var(--ws-main); position:relative; }
+.ws-receipt { margin:8px 0 0; color:#a9bbb4; font-size:12px; }
+.ws-new-messages { position:absolute; z-index:12; left:50%; top:85px; transform:translateX(-50%); border:1px solid #5b6962; border-radius:20px; background:#33443d; color:#e3ece5; padding:8px 18px; box-shadow:0 6px 24px #0005; }
 .ws-chat-head { display:flex; align-items:center; gap:14px; padding:0 26px; min-width:0; border-bottom:1px solid #292e31; }
 .ws-chat-title { min-width:0; }
 .ws-chat-title h1 { font-size:16px; font-weight:550; line-height:1.5; color:#e3e4e2; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

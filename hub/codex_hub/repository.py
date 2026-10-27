@@ -1007,6 +1007,7 @@ class Repository:
             for row in self.connection.execute(
                 """
                 SELECT tasks.*,
+                       (SELECT kind FROM hub_agents WHERE id=tasks.assigned_agent_id) AS assigned_agent_kind,
                        projects.slug AS project_slug,
                        projects.name AS project_name,
                        primary_device.label AS primary_device_label,
@@ -1025,6 +1026,11 @@ class Repository:
                 LEFT JOIN devices AS primary_device ON primary_device.id = projects.primary_device_id
                 LEFT JOIN device_groups ON device_groups.id = tasks.requested_group_id
                 WHERE tasks.status NOT IN ('done', 'cancelled')
+                  AND (tasks.wait_for_task_id IS NULL OR NOT EXISTS (
+                    SELECT 1 FROM tasks parent WHERE parent.id=tasks.wait_for_task_id AND
+                      (parent.status NOT IN ('review','done','blocked','cancelled') OR EXISTS
+                       (SELECT 1 FROM hub_task_executions ex WHERE ex.task_id=parent.id AND ex.state!='completed'
+                        AND ex.generation=(SELECT MAX(last.generation) FROM hub_task_executions last WHERE last.task_id=parent.id)))))
                   AND (
                     tasks.assigned_device_id = ?
                     OR tasks.claimed_by_device_id = ?

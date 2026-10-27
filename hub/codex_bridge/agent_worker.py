@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from dataclasses import replace
 from typing import Any, Callable
 
 from .client import HubClient, HubClientError
@@ -38,14 +39,36 @@ def filter_agent_inbox(inbox: dict[str, Any], pending_ids: set[int] | None = Non
 class AgentOnlyHubClient(HubClient):
     pending_task_ids: Callable[[], set[int]] = staticmethod(set)
     machine_name: str = ''
+    lane: str = ''
 
     def get_inbox(self) -> dict[str, Any]:
-        return filter_agent_inbox(super().get_inbox(), self.pending_task_ids())
+        inbox=filter_agent_inbox(super().get_inbox(), self.pending_task_ids())
+        if self.lane:
+            inbox['tasks']=[t for t in inbox['tasks'] if (t.get('assigned_agent_kind') or 'worker')==self.lane]
+        return inbox
 
     def post_device_capabilities(self, capabilities: dict[str, Any]) -> dict[str, Any]:
         return super().post_device_capabilities({**capabilities,
             'machine_name': self.machine_name or platform.node(), 'runtime_kind': 'durable-agent'})
 
+
+def controller_config(config):
+    root=config.state_path.parent/'controller-workspaces'
+    return replace(config,state_path=config.state_path.with_name('controller-'+config.state_path.name),
+        prompt_dir=config.prompt_dir/'controller',codex_exec_output_dir=config.codex_exec_output_dir/'controller',
+        projects={slug:root/slug for slug in config.projects},project_root=root,auto_create_missing_projects=True,
+        interval_seconds=3,codex_exec_sandbox='workspace-write',
+        backend_options={**config.backend_options,'agent_network_access':True})
+
+
+def run_lane(runner, stopped, interval):
+    while not stopped.is_set():
+        try:
+            result=runner.process_once()
+            for message in result.messages: print(message,flush=True)
+        except Exception as exc:
+            print(f'执行连接暂未完成：{type(exc).__name__}；保留回执等待恢复。',flush=True)
+        stopped.wait(max(3,interval))
 
 class AgentWorkerHeartbeat:
     """Keep a busy dedicated worker visible without polling or claiming work."""
@@ -132,6 +155,16 @@ def main(argv: list[str] | None = None) -> int:
                 timeout_seconds=min(12, config.hub_request_timeout_seconds),
                 get_retry_attempts=1, source_ip=config.hub_source_ip))
             heartbeat.start()
+            controller=controller_config(config)
+            controller_client=AgentOnlyHubClient(config.hub,config.token,timeout_seconds=config.hub_request_timeout_seconds,
+                get_retry_attempts=config.hub_get_retry_attempts,retry_backoff_seconds=config.hub_retry_backoff_seconds,source_ip=config.hub_source_ip)
+            controller_client.machine_name=client.machine_name
+            controller_client.lane='controller'; client.lane='worker'
+            controller_runner=BridgeRunner(controller,client=controller_client)
+            controller_client.pending_task_ids=lambda: {int(item['task_id']) for item in controller_runner.state.task_deliveries.values() if isinstance(item.get('task_id'),int)}
+            stopped=threading.Event()
+            controller_thread=threading.Thread(target=run_lane,args=(controller_runner,stopped,3),name='hub-controller',daemon=True)
+            controller_thread.start()
             try:
                 print("专用智能体 worker 已启动；仅处理明确分配给本连接的持久智能体任务。", flush=True)
                 while True:
@@ -147,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"本轮未完成：{exc}", flush=True)
                     time.sleep(max(3, config.interval_seconds))
             finally:
+                stopped.set()
                 heartbeat.close()
         finally:
             instance.close()

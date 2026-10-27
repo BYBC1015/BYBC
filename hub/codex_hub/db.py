@@ -470,3 +470,5 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
     initialize_model_policy_schema(connection)
     from .maintenance import initialize_maintenance_schema
     initialize_maintenance_schema(connection)
+    from .work_delivery import initialize_delivery_schema
+    initialize_delivery_schema(connection)
