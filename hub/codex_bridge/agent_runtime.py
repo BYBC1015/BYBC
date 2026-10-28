@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .subprocess_utils import hidden_subprocess_kwargs
+from .tool_locator import resolve_codex_cli_path
 
 
 class AgentDecisionError(RuntimeError):
@@ -107,7 +108,8 @@ class CodexAgentDecisionRunner:
 
     def decide(self, context: dict[str, Any]) -> dict[str, Any]:
         cli = getattr(self.config, "codex_cli_path", None)
-        if not cli or not Path(cli).expanduser().is_file():
+        cli = resolve_codex_cli_path(cli) if cli else None
+        if cli is None:
             raise AgentDecisionError("Codex CLI 尚未配置或不可用。")
         prompt = (
             "你是 Hub 智能体的工作安排决策器。本次只选择工作对话，不执行任务，不调用工具，"

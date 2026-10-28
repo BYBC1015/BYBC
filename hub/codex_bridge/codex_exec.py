@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .subprocess_utils import hidden_subprocess_kwargs
+from .tool_locator import resolve_codex_cli_path
 
 
 class ProcessRunner(Protocol):
@@ -86,12 +87,13 @@ class CodexExecRunner:
                 error="Codex CLI path is not configured.",
             )
 
-        cli_path = Path(cli_path).expanduser()
-        if not cli_path.exists():
+        configured_cli_path = Path(cli_path).expanduser()
+        cli_path = resolve_codex_cli_path(configured_cli_path)
+        if cli_path is None:
             return self._failed(
-                command=[str(cli_path)],
+                command=[str(configured_cli_path)],
                 output_path=self._output_path(project_slug, prompt_path),
-                error=f"Codex CLI not found: {cli_path}",
+                error=f"Codex CLI not found: {configured_cli_path}",
             )
 
         project_path = project_path.expanduser().resolve()

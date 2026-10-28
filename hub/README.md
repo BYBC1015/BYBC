@@ -15,7 +15,7 @@ Version 2.6.2 (2026-10-28). Agents are durable roles, independent of conversatio
 - Durable per-task runners overlap independent jobs while shared workspaces and declared external resources remain serialized.
 - Task cards support completion, reversible archiving and paginated history while preserving chat and drafts.
 - Executor presence refreshes in place across avatars, profiles and the composer; dedicated worker heartbeats expire after two minutes.
-- Desktop companion 1.0.31 hosts the durable agent worker with shared start/stop controls, supervised recovery and a bundled console helper.
+- Desktop companion 1.0.32 hosts the durable agent worker with shared start/stop controls, supervised recovery, local MCP configuration inheritance and same-family CLI path recovery after desktop updates.
 - Results are published as viewable images and document previews in the conversation.
 
 ## Run locally

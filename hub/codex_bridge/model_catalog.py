@@ -15,6 +15,7 @@ from typing import Any
 from codex_hub.model_catalog import normalize_codex_catalog
 
 from .subprocess_utils import hidden_subprocess_kwargs
+from .tool_locator import resolve_codex_cli_path
 
 
 def _utc_now() -> str:
@@ -129,7 +130,7 @@ def discover_codex_catalog(
             return cached
     except (OSError, ValueError):
         pass
-    executable = cli_path or shutil.which("codex")
+    executable = resolve_codex_cli_path(cli_path) if cli_path else shutil.which("codex")
     if executable:
         try:
             catalog = _read_app_server_catalog(executable, timeout_seconds)
