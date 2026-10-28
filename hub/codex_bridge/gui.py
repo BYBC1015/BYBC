@@ -29,6 +29,7 @@ from .config import (
     write_sample_config,
 )
 from .controller import BridgeController
+from .agent_service import AgentService
 from .i18n import text
 from .network_guard import UrlHealthProbe, find_default_cmynetwork_path
 from .persistent_log import PersistentLog
@@ -57,6 +58,7 @@ class BridgeApp:
         self.log_queue: queue.SimpleQueue[str] = queue.SimpleQueue()
         self.ui_queue: queue.SimpleQueue[tuple[str, str]] = queue.SimpleQueue()
         self.controller = BridgeController(self.config, log_callback=self.append_log)
+        self.agent_service = AgentService(log_callback=self.append_log)
         self._init_variables()
         self._configure_style()
         self._build_ui()
@@ -78,11 +80,14 @@ class BridgeApp:
             self.append_log(f"CodexBridge 托盘不可用：{self.tray.error}")
         if auto_start:
             self.root.after(300, self.start)
+        elif self.agent_service.configured:
+            self.root.after(300, self.agent_service.start)
 
     def _init_variables(self) -> None:
         codex_binding = find_binding(self.config, "codex")
         hermes_binding = find_binding(self.config, "hermes")
         self.status_var = tk.StringVar(value=text("stopped"))
+        self.agent_status_var = tk.StringVar(value="已停止")
         self.device_var = tk.StringVar(value="-")
         self.hub_var = tk.StringVar(value=self.config.hub)
         self.inbox_url_var = tk.StringVar(value=self.config.inbox_url)
@@ -215,7 +220,7 @@ class BridgeApp:
             row=1, column=0, sticky="w", pady=(6, 0)
         )
         summary = ttk.Frame(header)
-        summary.grid(row=2, column=0, sticky="w", pady=(6, 0))
+        summary.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
         ttk.Label(summary, text=text("online_devices"), style="Muted.TLabel").pack(
             side="left"
         )
@@ -224,7 +229,7 @@ class BridgeApp:
         ttk.Label(summary, textvariable=self.hub_var).pack(side="left", padx=(6, 0))
 
         actions = ttk.Frame(header)
-        actions.grid(row=0, column=1, rowspan=3, sticky="e")
+        actions.grid(row=0, column=1, rowspan=2, sticky="e")
         self.start_button = ttk.Button(
             actions, text=text("start"), command=self.start, style="Primary.TButton"
         )
@@ -283,6 +288,12 @@ class BridgeApp:
 
         self.backend_notebook = ttk.Notebook(self.ai_tab)
         self.backend_notebook.grid(row=1, column=0, sticky="nsew", pady=(12, 0))
+        self.agent_settings_tab = ttk.Frame(self.backend_notebook, padding=20)
+        self.backend_notebook.add(self.agent_settings_tab, text="Hub 智能体")
+        ttk.Label(self.agent_settings_tab, text="Hub 智能体执行连接", font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
+        ttk.Label(self.agent_settings_tab, textvariable=self.agent_status_var, font=("Microsoft YaHei UI", 12)).pack(anchor="w", pady=(12, 16))
+        ttk.Label(self.agent_settings_tab, text="总控和各专业智能体通过这条连接执行工作。\n智能体身份、职责和任务在 Hub 网页中统一管理。\n\n应用启动时自动连接，异常退出后自动恢复。\n停止时先等待已有工作收尾；关闭窗口后仍在托盘运行。", justify="left", wraplength=780).pack(anchor="w")
+        ttk.Button(self.agent_settings_tab, text="进入 Hub 工作区", command=self.open_hub).pack(anchor="w", pady=(20, 0))
         self.codex_settings_tab = ttk.Frame(self.backend_notebook, padding=16)
         self.hermes_settings_tab = ttk.Frame(self.backend_notebook, padding=16)
         self.backend_notebook.add(self.codex_settings_tab, text="Codex")
@@ -723,10 +734,13 @@ class BridgeApp:
         )
 
     def start(self) -> None:
+        if self._exiting: return
+        self.agent_service.start()
         self.controller.start()
         self.refresh_ui()
 
     def stop(self) -> None:
+        self.agent_service.stop()
         self.controller.stop()
         self.refresh_ui()
 
@@ -769,7 +783,9 @@ class BridgeApp:
         if not selection:
             return
         backend = str(self.binding_tree.set(selection[0], "backend")).lower()
-        if backend == "hermes":
+        if selection[0] == "hub-agents":
+            self.backend_notebook.select(self.agent_settings_tab)
+        elif backend == "hermes":
             self.backend_notebook.select(self.hermes_settings_tab)
         elif backend == "codex":
             self.backend_notebook.select(self.codex_settings_tab)
@@ -1074,17 +1090,20 @@ class BridgeApp:
                 pass
         self._drain_ui_queue()
         self.render_log()
-        self.status_var.set(self.controller.status_text)
-        snapshots = self.controller.binding_snapshots()
+        agent = self.agent_service.snapshot()
+        self.agent_status_var.set(f"{agent['device']} · {agent['status']}")
+        self.status_var.set(f"Hub 智能体：{agent['status']}  ·  其他连接：{self.controller.status_text}")
+        snapshots = [agent, *self.controller.binding_snapshots()]
         pending_count = sum(int(row.get("pending_count") or 0) for row in snapshots)
         self.pending_button.configure(
             text=f"待确认项 ({pending_count})" if pending_count else "待确认项"
         )
-        devices = [row["device"] for row in snapshots if row["device"] != "-"]
+        devices = [row["device"] for row in snapshots if row["device"] != "-" and str(row['status']).startswith('在线')]
         self.device_var.set("、".join(devices) if devices else "-")
         self._refresh_binding_tree(snapshots)
-        running = self.controller.is_running
-        self.start_button.configure(state="disabled" if running else "normal")
+        running = self.controller.is_running or self.agent_service.is_running
+        fully_running = (self.controller.is_running or not self.config.runtime_configs()) and (self.agent_service.is_running or not self.agent_service.configured)
+        self.start_button.configure(state="disabled" if fully_running else "normal")
         self.stop_button.configure(state="normal" if running else "disabled")
         self.run_once_button.configure(state="disabled" if running else "normal")
         self._refresh_after_id = self.root.after(1000, self.refresh_ui)
@@ -1139,11 +1158,11 @@ class BridgeApp:
             return [
                 {
                     **row,
-                    "interval": self.config.interval_seconds,
+                    "interval": row.get("interval", self.config.interval_seconds),
                 }
                 for row in snapshots
             ]
-        rows: list[dict] = []
+        rows: list[dict] = [row for row in snapshots if row['id'] == 'hub-agents']
         for binding in self.config.bindings:
             snapshot = snapshot_map.get(binding.id, {})
             rows.append(
@@ -1170,19 +1189,33 @@ class BridgeApp:
         self.exit_app()
 
     def exit_app(self) -> None:
+        if self._exiting: return
         self._exiting = True
         if self._refresh_after_id:
             try:
                 self.root.after_cancel(self._refresh_after_id)
             except tk.TclError:
                 pass
-        if self.controller.is_running:
-            self.controller.stop()
+        self.agent_service.stop()
+        self.status_var.set("正在安全退出，等待已有工作收尾…")
+        self.start_button.configure(state='disabled')
+        self.stop_button.configure(state='disabled')
+        self.run_once_button.configure(state='disabled')
+        # Keep Tk responsive while legacy lanes drain too.
+        self._exit_stop_thread = threading.Thread(target=self.controller.stop, daemon=True)
+        self._exit_stop_thread.start()
+        self._finish_exit()
+
+    def _finish_exit(self) -> None:
+        if self.agent_service.is_running or self.controller.is_running or self._exit_stop_thread.is_alive():
+            self.render_log()
+            self.root.after(250, self._finish_exit)
+            return
         self.tray.stop()
         self.root.destroy()
 
     def run(self) -> int:
-        if not self.config.runtime_configs():
+        if not self.config.runtime_configs() and not self.agent_service.configured:
             messagebox.showwarning(
                 text("window_title"), f"{text('missing_token')}\n{self.config_path}"
             )

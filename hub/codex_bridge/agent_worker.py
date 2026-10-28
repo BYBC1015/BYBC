@@ -41,9 +41,12 @@ class AgentOnlyHubClient(HubClient):
     machine_name: str = ''
     lane: str = ''
     task_selector = None
+    status_callback = None
 
     def get_inbox(self) -> dict[str, Any]:
         inbox=filter_agent_inbox(super().get_inbox(), self.pending_task_ids())
+        if self.status_callback:
+            self.status_callback({'connected': True, 'device': inbox['device']})
         if self.lane:
             inbox['tasks']=[t for t in inbox['tasks'] if (t.get('assigned_agent_kind') or 'worker')==self.lane]
         if self.task_selector is not None:
@@ -64,22 +67,24 @@ def controller_config(config):
         backend_options={**config.backend_options,'agent_network_access':True})
 
 
-def run_lane(runner, stopped, interval):
+def run_lane(runner, stopped, interval, emit=None):
+    emit = emit or (lambda message: print(message, flush=True))
     while not stopped.is_set():
         try:
             result=runner.process_once()
-            for message in result.messages: print(message,flush=True)
+            for message in result.messages: emit(message)
         except Exception as exc:
-            print(f'执行连接暂未完成：{type(exc).__name__}；保留回执等待恢复。',flush=True)
+            emit(f'执行连接暂未完成：{type(exc).__name__}；保留回执等待恢复。')
         stopped.wait(max(3,interval))
 
 class AgentWorkerHeartbeat:
     """Keep a busy dedicated worker visible without polling or claiming work."""
-    def __init__(self, client: HubClient, interval_seconds: float = 45):
+    def __init__(self, client: HubClient, interval_seconds: float = 45, on_success=None):
         self.client = client
         self.interval_seconds = max(0.01, interval_seconds)
         self.stopped = threading.Event()
         self.thread = threading.Thread(target=self._run, name='hub-agent-heartbeat', daemon=True)
+        self.on_success = on_success
 
     def start(self) -> None:
         self.thread.start()
@@ -93,6 +98,8 @@ class AgentWorkerHeartbeat:
         while not self.stopped.is_set():
             try:
                 self.client.heartbeat()
+                if self.on_success:
+                    self.on_success({'connected': True})
             except Exception:
                 # Never print server bodies/credentials, reset receipts, or
                 # trigger another execution when only a heartbeat fails.
@@ -106,7 +113,8 @@ def mutex_name(config_path: Path, binding_id: str) -> str:
     return "Local\\CodexHub.AgentWorker." + digest
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, stop_event=None, status_callback=None, log_callback=None) -> int:
+    emit = log_callback or (lambda message: print(message, flush=True))
     os.environ["PYTHONIOENCODING"] = "utf-8"
     os.environ["PYTHONUTF8"] = "1"
     for stream in (sys.stdout, sys.stderr):
@@ -133,7 +141,8 @@ def main(argv: list[str] | None = None) -> int:
         # mutex intentionally never touches the old Bridge singleton.
         instance = SingleInstance(mutex_name(config_path, config.binding_id))
         if not instance.acquire():
-            print("该专用智能体 worker 已在运行。", flush=True)
+            emit("该专用智能体 worker 已在运行。")
+            if status_callback: status_callback({'external': True})
             return 0
         try:
             os.environ["CODEX_BRIDGE_AGENT_CONFIG"] = str(config_path)
@@ -147,52 +156,69 @@ def main(argv: list[str] | None = None) -> int:
                 retry_backoff_seconds=config.hub_retry_backoff_seconds,
                 source_ip=config.hub_source_ip)
             client.machine_name = str(config.backend_options.get('machine_name') or '').strip()[:128]
+            client.status_callback = status_callback
             runner = BridgeRunner(config, client=client)
             client.pending_task_ids = lambda: {int(item["task_id"]) for item in runner.state.task_deliveries.values()
                                                if isinstance(item.get("task_id"), int)}
             if args.once:
                 status = runner.poll_status()
-                print(f"连接已检查：{status.device_label}；可处理智能体任务 {status.task_count} 项；未领取或执行。", flush=True)
+                emit(f"连接已检查：{status.device_label}；可处理智能体任务 {status.task_count} 项；未领取或执行。")
                 return 0
             heartbeat = AgentWorkerHeartbeat(HubClient(config.hub, config.token,
                 timeout_seconds=min(12, config.hub_request_timeout_seconds),
-                get_retry_attempts=1, source_ip=config.hub_source_ip))
-            heartbeat.start()
+                get_retry_attempts=1, source_ip=config.hub_source_ip), on_success=status_callback)
             controller=controller_config(config)
             controller_client=AgentOnlyHubClient(config.hub,config.token,timeout_seconds=config.hub_request_timeout_seconds,
                 get_retry_attempts=config.hub_get_retry_attempts,retry_backoff_seconds=config.hub_retry_backoff_seconds,source_ip=config.hub_source_ip)
             controller_client.machine_name=client.machine_name
+            controller_client.status_callback=status_callback
             controller_client.lane='controller'; client.lane='worker'
             controller_runner=BridgeRunner(controller,client=controller_client)
             controller_client.pending_task_ids=lambda: {int(item['task_id']) for item in controller_runner.state.task_deliveries.values() if isinstance(item.get('task_id'),int)}
+            # The caller's event means intentional shutdown. Never set it on
+            # failure, otherwise the desktop supervisor cannot restart us.
             stopped=threading.Event()
-            controller_thread=threading.Thread(target=run_lane,args=(controller_runner,stopped,3),name='hub-controller',daemon=True)
-            controller_thread.start()
+            controller_thread=threading.Thread(target=run_lane,args=(controller_runner,stopped,3,emit),name='hub-controller',daemon=True)
             # Preserve and recover pre-pool receipts without letting the legacy
             # state file consume new work. Each new task owns its own durable state.
             client.task_selector=lambda tasks:[task for task in tasks if task['id'] in client.pending_task_ids()]
-            recovery_thread=threading.Thread(target=run_lane,args=(runner,stopped,12),name='hub-legacy-recovery',daemon=True)
-            recovery_thread.start()
+            recovery_thread=threading.Thread(target=run_lane,args=(runner,stopped,12,emit),name='hub-legacy-recovery',daemon=True)
             pool_client=AgentOnlyHubClient(config.hub,config.token,timeout_seconds=config.hub_request_timeout_seconds,
                 get_retry_attempts=config.hub_get_retry_attempts,retry_backoff_seconds=config.hub_retry_backoff_seconds,source_ip=config.hub_source_ip)
             pool_client.lane='worker'
+            pool_client.status_callback=status_callback
             pool_client.task_selector=lambda tasks:[task for task in tasks if task['id'] not in client.pending_task_ids()]
             from .task_pool import DurableTaskPool
             pool=DurableTaskPool(config,pool_client,capacity=config.backend_options.get('agent_parallelism',2))
             try:
-                print(f"专用智能体 worker 已启动；独立任务最多并行 {pool.capacity} 项，共享工程顺序执行，总控保持独立。", flush=True)
-                while True:
+                if stop_event is not None and stop_event.is_set():
+                    return 0
+                heartbeat.start()
+                controller_thread.start()
+                recovery_thread.start()
+                emit(f"专用智能体 worker 已启动；独立任务最多并行 {pool.capacity} 项，共享工程顺序执行，总控保持独立。")
+                while not stopped.is_set() and not (stop_event and stop_event.is_set()):
+                    if not all(thread.is_alive() for thread in (controller_thread, recovery_thread, heartbeat.thread)):
+                        raise RuntimeError('An agent service lane exited unexpectedly')
                     try:
-                        for message in pool.tick(): print(message,flush=True)
+                        for message in pool.tick(): emit(message)
                     except Exception as exc:
                         # Durable receipts distinguish safe result retries
                         # from uncertain work; do not reset that state.
-                        print(f"本轮未完成：{type(exc).__name__}；保留回执等待恢复。", flush=True)
-                    stopped.wait(3)
+                        emit(f"本轮未完成：{type(exc).__name__}；保留回执等待恢复。")
+                    (stop_event if stop_event is not None else stopped).wait(3)
             finally:
                 stopped.set()
-                heartbeat.close()
-                pool.close()
+                if status_callback: status_callback({'phase': 'stopping'})
+                try:
+                    try:
+                        pool.close()
+                    finally:
+                        if controller_thread.ident is not None: controller_thread.join()
+                        if recovery_thread.ident is not None: recovery_thread.join()
+                finally:
+                    heartbeat.close()
+                emit('Hub 智能体后台已完成收尾并停止。')
         finally:
             instance.close()
     except KeyboardInterrupt:

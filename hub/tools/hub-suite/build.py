@@ -86,6 +86,12 @@ def build_bridge(stage):
         "--paths", str(ROOT), "--distpath", str(stage), "--workpath", str(stage.parent / "pyinstaller"),
         "--specpath", str(stage.parent), str(ROOT / "tools/codex_bridge_main.py"),
     ], cwd=ROOT, check=True)
+    subprocess.run([
+        sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--console",
+        "--name", "HubAgentRuntime", "--paths", str(ROOT), "--distpath", str(stage),
+        "--workpath", str(stage.parent / "agent-runtime"), "--specpath", str(stage.parent),
+        str(ROOT / "tools/agent_runtime_main.py"),
+    ], cwd=ROOT, check=True)
 
 
 def copy_music(stage):

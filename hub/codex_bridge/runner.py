@@ -807,7 +807,9 @@ class BridgeRunner:
             return "'" + value.replace("'", "''") + "'"
 
         binding = str(getattr(self.config, "binding_id", "") or "")
-        command = f"& {quote(sys.executable)} -X utf8 -m codex_bridge.agent_runtime --project {quote(project_slug)} --task-id {task_id}"
+        executable = Path(sys.executable).with_name('HubAgentRuntime.exe') if getattr(sys,'frozen',False) else Path(sys.executable)
+        mode = '' if getattr(sys,'frozen',False) else ' -X utf8 -m codex_bridge.agent_runtime'
+        command = f"& {quote(str(executable))}{mode} --project {quote(project_slug)} --task-id {task_id}"
         helper_config = os.environ.get("CODEX_BRIDGE_AGENT_CONFIG", "")
         if helper_config:
             command += " --config " + quote(helper_config)

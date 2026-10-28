@@ -180,7 +180,10 @@ class BridgeController:
                     getattr(config, "binding_name", "")
                     or getattr(config, "execution_backend", "AI").title()
                 )
-                if error:
+                worker_thread = self._worker_threads.get(binding_id) or self._threads.get(binding_id)
+                if self._stop_event.is_set():
+                    status = '正在收尾' if any(t and t.is_alive() for t in (thread, worker_thread)) else '已停止'
+                elif error:
                     status = f"连接异常：{error}"
                 elif result and busy:
                     status = f"在线 · {backend_name} 执行中"

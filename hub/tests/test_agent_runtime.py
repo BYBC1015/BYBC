@@ -366,3 +366,14 @@ def test_dedicated_worker_prompt_uses_its_own_config(tmp_path, monkeypatch):
     assert "--config '" + dedicated + "'" in instruction
     assert "token" in instruction  # prohibition only, never actual config token
     assert "--request-file" in instruction
+
+
+def test_packaged_worker_uses_console_helper_not_windowed_app(tmp_path, monkeypatch):
+    import sys
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'CodexBridge.exe'))
+    runner, _, _, _ = build_runner(tmp_path)
+    instruction = runner._agent_tool_instructions('sample-project', 42)
+    assert str(tmp_path / 'HubAgentRuntime.exe') in instruction
+    assert 'CodexBridge.exe' not in instruction
+    assert '-m codex_bridge.agent_runtime' not in instruction

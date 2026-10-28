@@ -91,6 +91,14 @@ def test_bridge_controller_runs_once_and_records_status():
     assert any("已领取任务 #1" in entry for entry in log.entries)
 
 
+def test_stopped_controller_does_not_keep_stale_online_badge():
+    controller = BridgeController(FakeConfig(), runner_factory=lambda _config: FakeRunner())
+    controller.run_once()
+    assert controller.binding_snapshots()[0]['status'] == '在线'
+    controller.stop()
+    assert controller.binding_snapshots()[0]['status'] == '已停止'
+
+
 def test_bridge_controller_checks_vpn_guard_after_hub_error():
     log = EventLog()
     guard = FakeNetworkGuard()
