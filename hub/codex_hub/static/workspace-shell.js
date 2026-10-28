@@ -273,7 +273,8 @@
     const note = form.querySelector("[data-ws-recipient-status]");
     const offline = checked.filter((item) => item.dataset.connectionState === "offline");
     const unverified = checked.filter((item) => item.dataset.connectionState === "unverified");
-    const message = offline.length ? `${offline.map((item) => item.dataset.agentName).join('、')}的连接离线，工作会先排队。` : unverified.length ? "已绑定连接，自动执行能力仍待核验；提交后可在任务里查看进展。" : "";
+    const unknown = checked.some((item) => item.dataset.connectionState === "unknown");
+    const message = unknown ? "连接状态待确认，当前文字和附件已保留。" : offline.length ? `${offline.map((item) => item.dataset.agentName).join('、')}的连接离线，工作会先排队。` : unverified.length ? "已绑定连接，自动执行能力仍待核验；提交后可在任务里查看进展。" : "";
     if (note.textContent !== message) note.textContent = message;
     note.hidden = !message;
   }
@@ -661,6 +662,55 @@
     finally{notice.hidden=false;buttons.forEach(button=>button.disabled=false);organizingTask=false;}
   });
 
+  function refreshPresence(freshShell) {
+    // Patch status only: never replace focused avatars, selected recipients,
+    // open identity forms or unsent attachments during a heartbeat refresh.
+    function patch(current, incoming, selector) {
+      const destination = current?.querySelector(selector);
+      const source = incoming?.querySelector(selector);
+      if (!destination || !source) return;
+      destination.className = source.className;
+      if (destination.textContent !== source.textContent) {
+        destination.replaceChildren(...Array.from(source.childNodes, node => document.importNode(node, true)));
+      }
+      // Status dots may change class without changing text.
+      const dot = destination.querySelector('i');
+      if (dot && source.querySelector('i')) dot.className = source.querySelector('i').className;
+    }
+    shell.querySelectorAll('[data-ws-agent-dock] [data-ws-agent]').forEach(button => {
+      const incoming = freshShell.querySelector(`[data-ws-agent-dock] [data-ws-agent="${CSS.escape(button.dataset.wsAgent)}"]`);
+      patch(button, incoming, '.ws-agent-presence');
+      patch(button, incoming, '.ws-agent-state');
+    });
+    recipients().forEach(choice => {
+      const incoming = freshShell.querySelector(`[data-ws-recipient][value="${CSS.escape(choice.value)}"]`);
+      if (!incoming) return;
+      choice.dataset.connectionState = incoming.dataset.connectionState;
+      patch(choice.closest('label'), incoming.closest('label'), 'small');
+    });
+    inspector.querySelectorAll('[data-ws-agent-panel]').forEach(panel => {
+      const incoming = freshShell.querySelector(`[data-ws-agent-panel="${CSS.escape(panel.dataset.wsAgentPanel)}"]`);
+      patch(panel, incoming, '.ws-identity-status');
+      patch(panel, incoming, '.ws-connection-hint');
+    });
+    document.querySelectorAll('[data-agent-card]').forEach(card => {
+      const incoming = freshShell.ownerDocument.querySelector(`[data-agent-card="${CSS.escape(card.dataset.agentCard)}"]`);
+      patch(card, incoming, '.agent-presence');
+    });
+    renderRecipients();
+  }
+  function presenceUnconfirmed() {
+    shell.querySelectorAll('[data-ws-agent-dock] .ws-agent-state').forEach(label => { label.textContent = '状态待确认'; });
+    shell.querySelectorAll('[data-ws-agent-dock] .ws-agent-presence').forEach(dot => { dot.className = 'ws-agent-presence ws-agent-presence-unknown'; });
+    inspector.querySelectorAll('.ws-identity-status').forEach(status => {
+      status.querySelector('span').textContent = '状态待确认';
+      status.querySelector('i').classList.remove('is-online');
+    });
+    document.querySelectorAll('[data-agent-card] .agent-presence').forEach(status => { status.textContent = '状态待确认'; });
+    recipients().forEach(choice => { choice.dataset.connectionState = 'unknown'; });
+    renderRecipients();
+    etag = ''; // Recovery must fetch fresh status rather than accept a 304.
+  }
   async function refresh() {
     clearTimeout(refreshTimer);
     if (pendingSubmission && !submitting && !document.hidden) { await checkReceipt(); if (committed) return; }
@@ -675,6 +725,7 @@
       const page = new DOMParser().parseFromString(await response.text(), "text/html");
       const freshShell = page.querySelector("[data-ws-shell]");
       if (!freshShell || freshShell.dataset.conversation !== shell.dataset.conversation || !updateCsrf(freshShell)) throw new Error();
+      refreshPresence(freshShell);
       const nextEtag = response.headers.get("ETag") || "";
       const positionBeforeRefresh = captureReadingPosition();
       const focused = document.activeElement;
@@ -727,11 +778,14 @@
       restoreReadingPosition(positionBeforeRefresh);
       shell.querySelector("[data-ws-sync]").textContent = "已同步";
     } catch (error) {
+      presenceUnconfirmed();
       shell.querySelector("[data-ws-sync]").textContent = error.name === "AbortError" ? "连接超时 · 正在重试" : "等待连接";
     } finally { clearTimeout(timeout); refreshController = null; refreshTimer = setTimeout(refresh, 2000); }
   }
   refreshTimer = setTimeout(refresh, 2000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { etag = ""; clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 300); } });
+  window.addEventListener('online', () => { etag = ''; clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 50); });
+  window.addEventListener('offline', presenceUnconfirmed);
   setInterval(() => { if (!document.hidden) formatTimes(); }, 60000);
   shell.dataset.wsReady = "true";
 })();

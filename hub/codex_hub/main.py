@@ -61,6 +61,7 @@ REASONING_EFFORT_VALUES = {"none", "minimal", "low", "medium", "high", "xhigh", 
 INLINE_IMAGE_CONTENT_TYPES = IMAGE_CONTENT_TYPES
 PERMISSION_VALUES = {"read", "write", "admin"}
 DEVICE_ONLINE_WINDOW_SECONDS = 10 * 60
+AGENT_WORKER_ONLINE_WINDOW_SECONDS = 120
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -2568,7 +2569,10 @@ def annotate_membership_presence(
         seconds_since_web = seconds_since(now, web_seen_at)
         seconds_since_agent = seconds_since(now, agent_seen_at)
         is_web_online = is_recent(seconds_since_web)
-        is_agent_online = is_recent(seconds_since_agent)
+        # Dedicated workers send a separate heartbeat every 45 seconds, even
+        # during long tasks. Legacy clients retain their longer grace period.
+        agent_window = AGENT_WORKER_ONLINE_WINDOW_SECONDS if copy.get('agent_tasks_only') else DEVICE_ONLINE_WINDOW_SECONDS
+        is_agent_online = is_recent(seconds_since_agent, agent_window)
         copy["is_online"] = is_recent(seconds_since_seen)
         copy["is_web_online"] = is_web_online
         copy["is_agent_online"] = is_agent_online
@@ -2579,6 +2583,7 @@ def annotate_membership_presence(
             device_label=str(copy.get("device_label") or ""),
             seconds_since_agent=seconds_since_agent,
             seconds_since_web=seconds_since_web,
+            agent_window=agent_window,
         )
         annotated.append(copy)
     return annotated
@@ -2588,8 +2593,8 @@ def seconds_since(now: datetime, seen_at: datetime | None) -> float | None:
     return (now - seen_at).total_seconds() if seen_at else None
 
 
-def is_recent(seconds: float | None) -> bool:
-    return seconds is not None and 0 <= seconds <= DEVICE_ONLINE_WINDOW_SECONDS
+def is_recent(seconds: float | None, window: int = DEVICE_ONLINE_WINDOW_SECONDS) -> bool:
+    return seconds is not None and 0 <= seconds <= window
 
 
 def parse_iso_datetime(value: str) -> datetime | None:
@@ -2608,9 +2613,10 @@ def presence_label(
     device_label: str,
     seconds_since_agent: float | None,
     seconds_since_web: float | None,
+    agent_window: int = DEVICE_ONLINE_WINDOW_SECONDS,
 ) -> str:
     agent_name = agent_display_name(device_label)
-    if is_recent(seconds_since_agent):
+    if is_recent(seconds_since_agent, agent_window):
         return f"{agent_name}已接入"
     if is_recent(seconds_since_web):
         return f"网页登录在线，{agent_name}未接入"
