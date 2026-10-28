@@ -10,7 +10,7 @@ This remains a WebView2 desktop application with native local execution, not an 
 
 Real Hub login cookies now survive a complete app exit. Login and authenticated page responses set persistence only for the existing server session's remaining lifetime (at most 14 days). This also migrates existing logins during a normal refresh; it does not extend the database expiry. Logout still revokes the session and removes both cookies.
 
-Verification: 286 core tests passed (1 opt-in test skipped); the composer group passed 50 checks including 27 browser cases, with an additional real timeout check; 11 existing continuity browser checks passed. Independent review exercised 8 account, attachment and multi-window cases. The frozen desktop also passed offline/restart/resource-version checks, and real WebView2 login was checked over three independent processes.
+Verification: 286 core tests passed (1 symlink test skipped because the test host cannot create symlinks); the composer group passed 50 checks including 27 browser cases, with an additional real timeout check; 11 existing continuity browser checks passed. Independent review exercised 8 account, attachment and multi-window cases. The frozen desktop also passed offline/restart/resource-version checks, and real WebView2 login was checked over three independent processes.
 
 Desktop installer: `CodexHub-Setup-v1.2.0.exe`, 375,629,082 bytes, SHA-256 `5be5914f8afcaa3b9ca848a9af7bd550b7e5e7d3a8cd7437e6c59ab8bfad084e`. The real isolated install, upgrade and uninstall verified 1,258 files and preserved user configuration and personal files; 40 installer regressions passed.
 
