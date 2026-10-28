@@ -1058,9 +1058,11 @@ def register_routes(app: FastAPI) -> None:
 
     @app.post("/api/device/heartbeat")
     def device_heartbeat_api(request: Request):
-        # Authentication updates only this connection's agent heartbeat. No
-        # inbox claim, task mutation, capabilities probe or model call is needed.
+        # Presence and bounded delivery-notice recovery only; no task claim,
+        # capabilities probe or model invocation occurs on this write path.
         device = require_api_device(request)
+        from .completion_followups import retry_completion_followups
+        retry_completion_followups(get_repo(request),device['id'])
         return {"ok": True, "device_id": device["id"]}
 
     @app.post("/api/device/capabilities")

@@ -14,7 +14,9 @@ def normalize_scope(mode='shared', resources=None):
 
 
 def task_resources(task):
-    if task.get('assigned_agent_kind')=='controller': return set()
+    if task.get('assigned_agent_kind')=='controller':
+        if task.get('controller_read_only'): return set()
+        return {'controller-room:'+str(task['project_id'])+':'+str(task.get('conversation_id') or 'unrouted')}
     mode,resources=normalize_scope(task.get('execution_mode','shared'),json.loads(task.get('resource_keys_json') or '[]'))
     keys=set(resources)
     if mode=='shared': keys.add('project:'+str(task['project_id']))
@@ -26,6 +28,14 @@ def resource_conflict(db, task, clock):
     agent=db.execute('SELECT kind FROM hub_agents WHERE id=?',(task['assigned_agent_id'],)).fetchone()
     keys=task_resources({**task,'assigned_agent_kind':agent['kind']})
     if not keys:return
+    if agent['kind']=='controller':
+        earlier=db.execute('''SELECT t.id FROM tasks t JOIN hub_agents a ON a.id=t.assigned_agent_id
+            WHERE t.project_id=? AND t.conversation_id IS ? AND t.id<? AND a.kind='controller'
+              AND t.controller_read_only=0 AND t.status IN ('open','claimed')
+              AND t.coordination_state!='waiting'
+            ORDER BY t.id LIMIT 1''',(task['project_id'],task.get('conversation_id'),task['id'])).fetchone()
+        if earlier:
+            raise ExecutionConflict(f"同一对话需按消息顺序处理；资源正等待较早的任务 #{earlier['id']}，不能先执行后续安排")
     # Cancellation/disconnection alone cannot prove the writer has stopped.
     rows=db.execute('''SELECT t.*,a.kind AS assigned_agent_kind,e.state,e.lease_until
         FROM hub_task_executions e JOIN tasks t ON t.id=e.task_id JOIN hub_agents a ON a.id=t.assigned_agent_id

@@ -94,6 +94,7 @@ def initialize_agent_schema(db: sqlite3.Connection) -> None:
         'execution_route': "TEXT NOT NULL DEFAULT 'direct' CHECK(execution_route IN ('chat','direct','project'))",
         'execution_route_reason': "TEXT NOT NULL DEFAULT ''",
         'wait_for_task_id': 'INTEGER REFERENCES tasks(id)',
+        'controller_read_only': 'INTEGER NOT NULL DEFAULT 0 CHECK(controller_read_only IN (0,1))',
     }.items():
         if name not in columns:
             db.execute(f'ALTER TABLE tasks ADD COLUMN {name} {ddl}')
@@ -279,13 +280,21 @@ class AgentStore:
         if not task.get('assigned_agent_id'):
             return {}
         agent = self.get(task['project_id'], task['assigned_agent_id'])
+        if task.get('work_stage')=='delivery_summary':
+            from .completion_followups import delivery_summary_context
+            return delivery_summary_context(self.db,task,agent)
         from .repository import Repository
         from .agent_roles import ROLES, enabled, work_context
         from .handoffs import handoff_context
+        from .conversation_context import conversation_brief
+        from .revision_inputs import task_input_manifest
+        inputs=task_input_manifest(Repository(self.db),task)
         return {'agent': agent, 'task': {k: task[k] for k in ('id','title','description','conversation_id','route_reason','route_engine',
                 'assigned_agent_id','assigned_device_id','execution_route','execution_route_reason')},
                 'execution_scope': {'mode':task.get('execution_mode','shared'),'resources':json.loads(task.get('resource_keys_json') or '[]')},
-                'attachments': Repository(self.db).list_task_attachments(task['project_id'], task['id']),
+                'attachments': inputs['attachments'],
+                'attachment_plan':{key:value for key,value in inputs.items() if key!='attachments'},
+                'conversation_brief': conversation_brief(self.db, task),
                 'role_contracts': {key: {'name': value[0], 'scope': value[1]} for key, value in ROLES.items()}
                     if enabled(self.db, task['project_id']) else {},
                 'work_assignments': work_context(self.db, task['project_id'], task.get('conversation_id')),
@@ -448,8 +457,13 @@ class AgentStore:
                     self.db.execute('INSERT INTO hub_dispatch_tasks VALUES (?,?)', (dispatch_id,task['id']))
                     task_ids.append(task['id'])
                     selected_route, selected_route_reason = execution_routes[agent_id]
+                    from .controller_followups import allows_read_only_followup
+                    read_only = allows_read_only_followup(agent=self.get(project_id, agent_id),
+                        route=selected_route, description=description, attachments=attachments,
+                        user_id=user_id, source_task_id=source_task_id)
                     self.db.execute('UPDATE tasks SET execution_mode=?,resource_keys_json=?,execution_route=?,execution_route_reason=? WHERE id=?',
                                     (execution_mode,json.dumps(resource_keys),selected_route,selected_route_reason,task['id']))
+                    self.db.execute('UPDATE tasks SET controller_read_only=? WHERE id=?', (int(read_only),task['id']))
                     if selected:
                         from .model_policy import freeze_choice
                         freeze_choice(self.db, task['id'], selected)
@@ -510,6 +524,9 @@ class AgentStore:
         return dict(self.db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone())
 
     def prompt(self, task: dict) -> str:
+        if task.get('work_stage')=='delivery_summary':
+            from .completion_followups import delivery_summary_prompt
+            return delivery_summary_prompt(self.db,task,self.get(task['project_id'],task['assigned_agent_id']))
         from .execution_context import execution_identity, room_history
         context = self.context(task)
         if not context:
@@ -526,10 +543,38 @@ class AgentStore:
                     '依据现有附件先完成可行部分；缺少最终工程只阻塞依赖部分，不扩大到遍搜无关项目。\n'
                     if context['agent']['kind'] == 'controller' else
                     '优先处理已提供附件与相关项目。截图修改先给可审查图片；真实包装合成或最终视频替换才依赖对应源素材。\n')
-        guidance += ('交接交流是同事之间的澄清，不是审批。要求明确直接执行；确有歧义、缺少细节或发现不合理点时用 ask_handoff 提问，'
+        if task.get('controller_read_only'):
+            guidance = ('这是总控的即时只读追问，身份和模型保持不变。只回答用户最新的状态或资料问题。'
+                        '依据下方实际任务状态和近期工作回答；其他总控轮次可能仍在安排工作，未有任务编号不能声称已经委派。'
+                        '不要重新执行、委派、修改任务、答复交接或改变模型设置；服务端会拒绝这些操作。'
+                        '不调用写工具、不制作文件。信息未知就明确当前尚未确认，保持简洁。'
+                        '后台工作继续执行，不需要等待它完成后再回答。\n')
+        if not task.get('controller_read_only'):
+            guidance += ('交接交流是同事之间的澄清，不是审批。要求明确直接执行；确有歧义、缺少细节或发现不合理点时用 ask_handoff 提问，'
                      '按 handoff.max_rounds 控制轮数，一轮合并相关问题。提问成功后结束本次执行，等待总控真实答复，不自行模拟对方、轮询等候或继续依赖该答复的操作。'
                      '总控的交接答复任务应读取 handoff.rounds，使用 answer_handoff 或直接最终答复，明确可执行的细节与取舍。'
                      '答复后原执行者继续同一个任务；已有成果先检查再接续，不重新做一遍。双方交流会即时显示给用户。\n')
+        guidance += ('同一对话是持续工作：结合 conversation_brief 的最初要求、用户后续原话和真实工作清单理解最新消息。'
+                     '用户补图、纠正细节或追问，不会自动取消其余总体目标；最新明确改变的要求优先。'
+                     '先回答当下问题，同时检查已授权交付是否漏分配；不要把修一张参考图当成整体项目完成。'
+                     '先前摘要不是原文件；不要让用户重复上传仍在本对话的资料。\n')
+        if not task.get('controller_read_only') and context['agent']['kind'] == 'controller':
+            guidance += ('需要重读 PDF 或参考图时，inherit_attachments 选本对话 reference_files 的编号，'
+                         '实际读取返回的本地路径后再委派，委派可使用这些已接续的附件编号。\n')
+            guidance += ('派工必须完整承接当前有效的验收要求：目标交付、参考版本、构图与风格、必须保留和禁止出现的内容、'
+                         '文字与尺寸、用户最新修正，以及仍未确认的部分。将相关要求原意写进执行任务，绑定实际需要的资料编号；'
+                         '涉及母版、系列延展或参考复用时，在任务中逐项写清“交付项 → 对应母版附件/版本 → 必须保留 → 允许改变”，'
+                         '不能把母版对应关系压缩成几个风格词，也不能仅给另一台设备无法使用的本机路径。'
+                         '用户未定的表达须标为建议或待确认，不得擅自升级为已锁定要求；这不妨碍先完成明确的部分。'
+                         '不要用通用美观、已生成文件或一句先前摘要代替明确标准。未经用户变更的要求持续有效。'
+                         '汇报成果时对照这些标准，区分执行者声称完成、实际有证据核验和仍未核验的部分。\n')
+        elif context['agent']['kind'] != 'controller':
+            guidance += ('开工前依据当前任务要求和已提供原始资料，整理本任务的验收要点；参考图的构图、风格和标题体系也是要求，'
+                         '不能仅提取主题名称后自由重做。读取已绑定附件；如缺少必要参考，用 ask_handoff 向总控一次说明缺口，'
+                         '逐项核对交付项与母版的对应关系、保留内容及允许变化范围；主题相关但母版体系不一致仍属于不符合要求。'
+                         '不要调用仅总控可用的 inherit_attachments。制作后逐项对照原要求和实际成果核验，不能只查错字、尺寸和文件数量。'
+                         '最终说明主要要求的符合情况、证据和未确认项；未实际看过成果或未对照参考时，明确尚未核验，不能声称已逐张检查或全部符合。'
+                         '发现不符时先在本任务范围内修正；仍不符就如实说明，不以已生成或已上传代替达标。\n')
         guidance += ('执行路线与身份、模型、设备分别管理：chat 是直接交流与总控协调，咨询直接回答，不为每句话创建专业交付；'
                      'direct 是单次工具或 CLI 工作，例如生成一张图片、一次修图、整理一个文件或参考调研；'
                      'project 是需要本机文件、应用及持续上下文的本地项目工作会话，例如开发、工程修改、达芬奇后期。'
@@ -539,6 +584,7 @@ class AgentStore:
                      '同一智能体可以参与多个工作会话，一个会话也可以有多个身份协作。\n')
         guidance += ('继续保护既有 SW 中转链路；此约束来自 Hub 初建时用户要求，不得因精简回复而取消。'
                      '面向用户的回复聚焦成果、可直接打开的预览、实际问题和下一步。不要例行附带“未触碰 SW /upload 或 /u”等内部操作排除说明；'
+                     '向用户汇报使用已交付、处理中、需要补充等自然语言，不输出 review、open 等内部状态码。'
                      '保留真实影响交付的限制，例如视频尚未修改或缺少必要素材。\n')
         return '\n\n## Durable agent identity and experience\n' + guidance + (
             '你是以下持久智能体。对话是工作场所，设备是执行连接，两者都不是你的身份。'

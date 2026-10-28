@@ -23,7 +23,7 @@
   <link rel="stylesheet" href="{{ app_path('/static/workspace-shell.css') }}?v=20261029-local1">
   <link rel="stylesheet" href="{{ app_path('/static/desktop-workspace.css') }}?v=20261029-local1">
   <script src="{{ app_path('/static/agent-workspace.js') }}?v=20261027-workspace1" defer></script>
-  <script src="{{ app_path('/static/codex-markdown.js') }}?v=20261027-reading4" defer></script>
+  <script src="{{ app_path('/static/codex-markdown.js') }}?v=20261029-download1" defer></script>
   <script src="{{ app_path('/static/workspace-store.js') }}?v=20261029-local1" defer></script>
   <script src="{{ app_path('/static/workspace-shell.js') }}?v=20261029-local1" defer></script>
   <script src="{{ app_path('/static/desktop-workspace.js') }}?v=20261029-local1" defer></script>
@@ -59,9 +59,10 @@
           {% for progress in conversation_progress|default([]) %}
           <article class="ws-message ws-message-progress" data-ws-entry="progress-{{ progress.task_id }}" data-ws-entry-version="{{ progress.view_version }}" data-ws-progress="{{ progress.task_id }}">
             {{ avatar(progress.assigned_agent_id, 'ws-avatar-small') }}
-            <div class="ws-message-content"><div class="ws-message-meta"><strong>{{ progress.agent_name }}</strong><span class="ws-live-indicator">正在处理</span></div>
+            <div class="ws-message-content"><div class="ws-message-meta"><strong>{{ progress.agent_name }}</strong><span class="{% if progress.execution_contact_valid %}ws-live-indicator{% endif %}">{{ '正在处理' if progress.execution_contact_valid else '执行状态待核对' }}</span></div>
               {% if progress.assistant_text %}<div class="ws-message-prose" data-ws-message-body><div data-markdown-source>{{ progress.assistant_text }}</div></div>{% endif %}
-              <p class="ws-progress-status" role="status">{{ progress.status_text or '工作正在进行，完成后会在这里交付。' }}</p>
+              <p class="ws-progress-status" role="status">最近报告：{{ progress.status_text or '尚无具体阶段报告' }}</p>
+              <p class="ws-connection-hint" data-ws-progress-timing><span>距本轮开始约 {{ progress.run_age_label }}</span> · <span>距上次进度约 {{ progress.report_age_label }}</span><br><span>{{ progress.device_label }} · {{ '执行连接正常' if progress.execution_contact_valid else '任务联系已过期，等待核对' }}</span> · <span>{{ '设备最近联系约 ' ~ progress.device_contact_age_label ~ '前' if progress.last_agent_seen_at else '尚未收到设备联系' }}{% if progress.last_agent_seen_at and not progress.device_contact_recent %}（已过期）{% endif %}</span><br><small>连接状态不代表产生了新进展；结果到达后会自动显示。</small></p>
               <button class="ws-message-source" type="button" data-ws-task="{{ progress.task_id }}">查看工作进度 <span aria-hidden="true">↗</span></button>
             </div>
           </article>
@@ -69,7 +70,7 @@
           <details class="ws-task-bundle" data-ws-task-list {% if task_history %}open{% endif %}>
             <summary data-ws-task-summary><span>{{ '历史任务' if task_history else '待办与交付' }} <small>{{ task_history_count if task_history else tasks|length }}</small></span><span aria-hidden="true">⌄</span></summary>
             <nav class="ws-task-filters" aria-label="任务列表"><a href="{{ task_active_url }}" data-ws-task-view {% if not task_history %}aria-current="page"{% endif %}>待办与交付</a><a href="{{ task_history_url }}" data-ws-task-view {% if task_history %}aria-current="page"{% endif %}>历史任务 · {{ task_history_count }}</a></nav>
-            <p class="ws-task-list-hint">{{ '归档保留原状态、聊天与成果；恢复仅重新显示，不会重新执行。' if task_history else '确认交付后完成并归档；暂不处理的任务也可归档。' }}</p>
+            <p class="ws-task-list-hint">{{ '已交付内容自动收起，仍待验收；聊天与成果保留。恢复后会留在待办，不会重新执行。' if task_history else '已有可打开成果的交付会自动收起到历史；进行中和未解决的问题保留。' }}</p>
             <section class="ws-task-deliveries" aria-label="这场对话的任务">{% for task in tasks %}<article class="ws-task-item" data-ws-task-card="{{ task.id }}"><button type="button" class="ws-task-delivery" data-ws-task="{{ task.id }}"><span class="ws-state ws-state-{{ task.status }}">{{ '交接中' if task.coordination_state == 'waiting' and task.status not in ['done','cancelled'] else task.board_label or state_names.get(task.status, task.status) }}{% if execution_route_labels.get(task.execution_route) %} · <span data-execution-route="{{ task.execution_route }}">{{ execution_route_labels[task.execution_route] }}</span>{% endif %}</span><strong>{{ task.title }}</strong>{% if task.description %}<p>{{ task.description }}</p>{% endif %}<span class="ws-task-owner">{{ task.assigned_agent_name or '未指定身份' }} <span aria-hidden="true">↗</span></span></button>{% include 'partials/task_board_actions.html' %}</article>{% else %}<p class="ws-task-list-hint">{{ '暂无历史任务。' if task_history else '当前没有需要处理的任务，聊天和成果仍保留在上方。' }}</p>{% endfor %}</section>
             {% if older_tasks_url %}<a class="ws-load-records" href="{{ older_tasks_url }}" data-ws-task-view>更早的任务 →</a>{% endif %}
           </details>

@@ -123,10 +123,14 @@ def test_gui_lists_durable_service_separately_from_legacy_bindings():
     assert len(rows) == 2
 
 
-def test_exit_keeps_window_alive_until_agent_work_finishes():
+def test_exit_keeps_window_alive_until_agent_work_finishes(tmp_path, monkeypatch):
     from codex_bridge.gui import BridgeApp
+    from codex_bridge import desktop_window
     calls = []
     app = object.__new__(BridgeApp)
+    app.config_path = tmp_path / 'isolated-bridge-config.json'
+    monkeypatch.setattr(desktop_window, 'request_desktop_close',
+                        lambda path: calls.append(('desktop-close', path)))
     app.agent_service = SimpleNamespace(is_running=True)
     app.controller = SimpleNamespace(is_running=True)
     app._exit_stop_thread = SimpleNamespace(is_alive=lambda:False)
@@ -135,9 +139,10 @@ def test_exit_keeps_window_alive_until_agent_work_finishes():
     app.render_log = lambda:calls.append('render')
     app._finish_exit()
     assert 'destroy' not in calls
+    assert not any(isinstance(call, tuple) for call in calls)
     app.agent_service.is_running=False
     app._finish_exit()
     assert 'destroy' not in calls
     app.controller.is_running=False
     app._finish_exit()
-    assert calls[-2:] == ['tray-stop','destroy']
+    assert calls[-3:] == ['tray-stop', ('desktop-close', app.config_path), 'destroy']

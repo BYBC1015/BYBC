@@ -285,6 +285,8 @@ class DesktopHost:
         self._first_load = True
         self._active_navigation = None
         self._cancelled_navigations = set()
+        self._failed_navigations = set()
+        self._recovery_target = None
         self._geometry_lock = threading.Lock()
         self._geometry = read_geometry(state_dir / 'window.json')
         self._children = []
@@ -323,6 +325,7 @@ class DesktopHost:
                 self.window.restore()
 
     def navigate_home(self):
+        self._recovery_target = None
         self._local_page = False
         # WebView2 setting Source to the current URL does not reload it.
         if self.window.get_current_url() == self.location.home:
@@ -440,8 +443,22 @@ class DesktopHost:
         navigation_id = int(args.NavigationId)
         if navigation_id in self._cancelled_navigations:
             self._cancelled_navigations.discard(navigation_id)
+            self._failed_navigations.add(navigation_id)
             return
         if navigation_id == self._active_navigation and not args.IsSuccess:
+            if (self._local_page or navigation_id in self._failed_navigations or
+                    str(getattr(args, 'WebErrorStatus', '')).endswith('OperationCanceled')):
+                return
+            self._failed_navigations.add(navigation_id)
+            if len(self._failed_navigations) > 64:
+                self._failed_navigations.remove(min(self._failed_navigations))
+            target = canonical_url(self._navigation_target)
+            if target == self._recovery_target:
+                # If the cached-document navigation itself fails, loading it
+                # again recursively can replace a usable chat and spin forever.
+                self.show_offline('页面未能打开。你的工作记录仍保留，请重新连接后重试。')
+                return
+            self._recovery_target = target
             self.log.write('Hub navigation failed; restoring local workspace if available.')
             threading.Thread(target=self.restore_workspace, args=(navigation_id, self._navigation_target), daemon=True).start()
 

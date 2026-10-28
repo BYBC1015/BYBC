@@ -174,7 +174,12 @@ def main(argv: list[str] | None = None, *, stop_event=None, status_callback=None
             controller_client.status_callback=status_callback
             controller_client.lane='controller'; client.lane='worker'
             controller_runner=BridgeRunner(controller,client=controller_client)
-            controller_client.pending_task_ids=lambda: {int(item['task_id']) for item in controller_runner.state.task_deliveries.values() if isinstance(item.get('task_id'),int)}
+            from .task_pool import DurableTaskPool, needs_recovery
+            controller_client.pending_task_ids=lambda: {int(item['task_id']) for item in controller_runner.state.task_deliveries.values()
+                if isinstance(item.get('task_id'),int) and needs_recovery(item)}
+            # Keep old controller receipts in their original state file, but all
+            # new turns own isolated workspaces/state and cannot stall polling.
+            controller_client.task_selector=lambda tasks:[task for task in tasks if task['id'] in controller_client.pending_task_ids()]
             # The caller's event means intentional shutdown. Never set it on
             # failure, otherwise the desktop supervisor cannot restart us.
             stopped=threading.Event()
@@ -188,19 +193,30 @@ def main(argv: list[str] | None = None, *, stop_event=None, status_callback=None
             pool_client.lane='worker'
             pool_client.status_callback=status_callback
             pool_client.task_selector=lambda tasks:[task for task in tasks if task['id'] not in client.pending_task_ids()]
-            from .task_pool import DurableTaskPool
             pool=DurableTaskPool(config,pool_client,capacity=config.backend_options.get('agent_parallelism',2))
+            controller_pool_client=AgentOnlyHubClient(config.hub,config.token,timeout_seconds=config.hub_request_timeout_seconds,
+                get_retry_attempts=config.hub_get_retry_attempts,retry_backoff_seconds=config.hub_retry_backoff_seconds,source_ip=config.hub_source_ip)
+            controller_pool_client.lane='controller'
+            controller_pool_client.status_callback=status_callback
+            controller_pool_client.task_selector=lambda tasks:[task for task in tasks if task['id'] not in controller_client.pending_task_ids()]
+            try:
+                controller_pool=DurableTaskPool(controller,controller_pool_client,
+                    capacity=config.backend_options.get('controller_parallelism',2),lane='controller')
+            except BaseException:
+                pool.close()
+                raise
             try:
                 if stop_event is not None and stop_event.is_set():
                     return 0
                 heartbeat.start()
                 controller_thread.start()
                 recovery_thread.start()
-                emit(f"专用智能体 worker 已启动；独立任务最多并行 {pool.capacity} 项，共享工程顺序执行，总控保持独立。")
+                emit(f"专用智能体 worker 已启动；独立任务最多并行 {pool.capacity} 项，共享工程顺序执行；总控不同对话并行，简短追问保留独立回应通道。")
                 while not stopped.is_set() and not (stop_event and stop_event.is_set()):
                     if not all(thread.is_alive() for thread in (controller_thread, recovery_thread, heartbeat.thread)):
                         raise RuntimeError('An agent service lane exited unexpectedly')
                     try:
+                        for message in controller_pool.tick(): emit(message)
                         for message in pool.tick(): emit(message)
                     except Exception as exc:
                         # Durable receipts distinguish safe result retries
@@ -212,7 +228,10 @@ def main(argv: list[str] | None = None, *, stop_event=None, status_callback=None
                 if status_callback: status_callback({'phase': 'stopping'})
                 try:
                     try:
-                        pool.close()
+                        try:
+                            controller_pool.close()
+                        finally:
+                            pool.close()
                     finally:
                         if controller_thread.ident is not None: controller_thread.join()
                         if recovery_thread.ident is not None: recovery_thread.join()

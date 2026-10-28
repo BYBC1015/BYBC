@@ -297,7 +297,8 @@ def register_agent_routes(app: FastAPI) -> None:
         task = require_project_task(repo, project, task_id)
         if task.get('assigned_device_id') != device['id']:
             manage_agents(repo, project, device)
-        return {'attachments': repo.list_task_attachments(project['id'], task_id)}
+        from .revision_inputs import task_input_manifest
+        return task_input_manifest(repo,task)
 
     @app.post('/api/projects/{slug}/tasks/{task_id}/delegate', status_code=201)
     async def delegate_api(request: Request, slug: str, task_id: int):
@@ -324,6 +325,19 @@ def register_agent_routes(app: FastAPI) -> None:
             execution_route=data.get('execution_route'), execution_route_reason=data.get('execution_route_reason',''),
             model_request=data.get('model_selection'), model_data_dir=get_settings(request).data_dir))
         return {'task': result['tasks'][0], 'created': result['created']}
+
+    @app.get('/api/projects/{slug}/tasks/{task_id}/reference-files')
+    def reference_files_api(request: Request, slug: str, task_id: int):
+        from .conversation_context import conversation_files
+        repo, project, store, task = runtime_task(request, slug, task_id)
+        return {'reference_files': conversation_files(repo.connection, project['id'], task.get('conversation_id'))}
+
+    @app.post('/api/projects/{slug}/tasks/{task_id}/inherit-attachments')
+    async def inherit_attachments_api(request: Request, slug: str, task_id: int):
+        from .conversation_context import inherit_attachments
+        repo, project, store, task = runtime_task(request, slug, task_id)
+        data = await json_object(request)
+        return checked(lambda: inherit_attachments(repo, task, task['assigned_device_id'], data))
 
     @app.post('/api/projects/{slug}/tasks/{task_id}/handoff/question')
     async def handoff_question_api(request: Request, slug: str, task_id: int):

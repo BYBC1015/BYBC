@@ -62,7 +62,7 @@ def test_live_public_progress_replaced_by_one_final_reply_preserves_draft_and_re
             assert original_top > 0
             progress = page.locator(f'[data-ws-progress="{task["id"]}"]')
             publish(live_hub, task, run, headers, 1, 'status', '正在核对素材')
-            playwright.expect(progress.locator('.ws-progress-status')).to_have_text('正在核对素材', timeout=8000)
+            playwright.expect(progress.locator('.ws-progress-status')).to_have_text('最近报告：正在核对素材', timeout=8000)
             publish(live_hub, task, run, headers, 2, 'assistant', '收到，我正在逐项处理。')
             playwright.expect(progress.locator('[data-ws-message-body]')).to_have_text('收到，我正在逐项处理。', timeout=8000)
             publish(live_hub, task, run, headers, 3, 'assistant', '收到，我正在逐项处理。\n\n第一项已经完成，你可以继续补充。')
@@ -119,6 +119,43 @@ def test_progress_never_crosses_conversations_during_live_updates(live_hub, repo
             playwright.expect(page.locator(f'[data-ws-progress="{second_task["id"]}"]')).to_contain_text('继续更新')
             assert page.locator(f'[data-ws-progress="{first_task["id"]}"]').count() == 0
             assert '第一场对话的公开回复' not in page.locator('[data-ws-live]').inner_text()
+        finally:
+            browser.close()
+
+
+def test_progress_age_updates_without_new_packets_and_preserves_reading(live_hub, repo, monkeypatch):
+    import time
+    import codex_hub.execution_progress as progress_module
+    monkeypatch.setattr(progress_module, 'ACTIVITY_CLOCK_SECONDS', 1)
+    data = seed_workspace(repo, room_messages=70)
+    task, run, headers = running_task(repo, data)
+    publish(live_hub, task, run, headers, 1, 'assistant', '已收到，正在处理原有工作。')
+    publish(live_hub, task, run, headers, 2, 'status', '正在执行工具')
+    with playwright.sync_playwright() as runtime:
+        browser = runtime.chromium.launch(headless=True)
+        page = browser.new_page(viewport={'width':1440,'height':960})
+        try:
+            login_page(page, live_hub)
+            open_room(page, live_hub, data['conversation_id'])
+            page.locator('[data-ws-input]').fill('计时更新期间继续编辑的草稿')
+            scroll = page.locator('[data-ws-scroll]')
+            scroll.evaluate('el => { el.scrollTop=300; el.dispatchEvent(new Event("scroll")); }')
+            original_top = scroll.evaluate('el => el.scrollTop')
+            indicator = page.locator(f'[data-ws-progress="{task["id"]}"]')
+            version = indicator.get_attribute('data-ws-entry-version')
+            page.wait_for_function('([id, version]) => document.querySelector(`[data-ws-progress="${id}"]`)?.dataset.wsEntryVersion !== version',
+                arg=[task['id'],version],timeout=8000)
+            playwright.expect(indicator.locator('[data-ws-progress-timing]')).to_contain_text('距上次进度约')
+            playwright.expect(indicator.locator('[data-ws-message-body]')).to_have_text('已收到，正在处理原有工作。')
+            assert repo.connection.execute('SELECT sequence FROM hub_execution_progress WHERE task_id=?',(task['id'],)).fetchone()[0] == 2
+            assert page.locator('[data-ws-input]').input_value() == '计时更新期间继续编辑的草稿'
+            assert abs(scroll.evaluate('el => el.scrollTop')-original_top) < 4
+            repo.connection.execute('UPDATE hub_task_executions SET lease_until=? WHERE task_id=?',(time.time()-1,task['id']))
+            repo.connection.commit()
+            playwright.expect(indicator).to_contain_text('执行状态待核对',timeout=8000)
+            playwright.expect(indicator.locator('[data-ws-progress-timing]')).to_contain_text('任务联系已过期')
+            assert page.locator('[data-ws-input]').input_value() == '计时更新期间继续编辑的草稿'
+            assert abs(scroll.evaluate('el => el.scrollTop')-original_top) < 4
         finally:
             browser.close()
 

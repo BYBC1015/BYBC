@@ -26,6 +26,8 @@ def initialize_execution_schema(db) -> None:
       );
       CREATE INDEX IF NOT EXISTS hub_execution_task ON hub_task_executions(task_id,generation DESC);
     ''')
+    if 'input_manifest_json' not in {row['name'] for row in db.execute('PRAGMA table_info(hub_task_executions)')}:
+        db.execute("ALTER TABLE hub_task_executions ADD COLUMN input_manifest_json TEXT NOT NULL DEFAULT ''")
     db.commit()
     from .execution_progress import initialize_progress_schema
     initialize_progress_schema(db)
@@ -48,6 +50,8 @@ def guard_legacy_task_write(db, task: dict | None, device_id: int | None) -> Non
 
 def require_execution_fence(db, task: dict, device_id: int, execution: dict | None,
                             *, allow_unleased: bool = True) -> dict | None:
+    if task.get('controller_read_only'):
+        raise ExecutionConflict('当前是只读追问，仅可查看和回答；不能委派、调整工作或改变其他任务。')
     current = latest_execution(db, task['id'])
     if not current and allow_unleased:
         if task['status'] in {'done', 'cancelled'}:
@@ -65,8 +69,9 @@ def require_execution_fence(db, task: dict, device_id: int, execution: dict | No
 
 
 class ExecutionStore:
-    def __init__(self, repo, *, clock=time.time, lease_seconds: int = 150):
+    def __init__(self, repo, *, clock=time.time, lease_seconds: int = 150, files_root=None):
         self.repo, self.db, self.clock = repo, repo.connection, clock
+        self.files_root=files_root
         self.lease_seconds = max(30, min(600, lease_seconds))
 
     @contextmanager
@@ -150,13 +155,15 @@ class ExecutionStore:
             resource_conflict(self.db,task,self.clock())
             from .work_delivery import inherit_dependency_artifacts
             inherit_dependency_artifacts(self.db,task)
+            from .revision_inputs import task_input_manifest
+            input_manifest=json.dumps(task_input_manifest(self.repo,task),ensure_ascii=False) if task.get('wait_for_task_id') else ''
             from .execution_progress import clear_progress
             clear_progress(self.db,task_id)
             self.db.execute('''INSERT INTO hub_task_executions
-                (task_id,generation,run_key,device_id,state,task_version,lease_until,created_at,detail)
-                VALUES (?,?,?,?,'prepared',?,?,?,?)''',
+                (task_id,generation,run_key,device_id,state,task_version,lease_until,created_at,detail,input_manifest_json)
+                VALUES (?,?,?,?,'prepared',?,?,?,?,?)''',
                 (task_id, generation, run_key, device_id, task['status_version'],
-                 self.clock() + self.lease_seconds, self.clock(), '尚未授权启动工作进程。'))
+                 self.clock() + self.lease_seconds, self.clock(), '尚未授权启动工作进程。',input_manifest))
             return self._reply(task_id, latest_execution(self.db, task_id))
 
     def start(self, task_id, device_id, generation, run_key):
@@ -257,4 +264,10 @@ class ExecutionStore:
             self.db.execute("""UPDATE hub_task_executions SET state='completed',completed_at=?,
                 result_digest=?,result_entry_id=?,task_version=?,detail=? WHERE id=?""",
                 (self.clock(), digest, entry['id'], updated['status_version'], '结果、经验与工作记录已原子保存。', record['id']))
+            from .revision_inputs import refresh_waiting_revisions
+            refresh_waiting_revisions(self.repo,task_id)
+            from .task_board import archive_completed_delivery
+            archive_completed_delivery(self.repo,task_id,self.files_root)
+            from .completion_followups import safely_queue_completion_followup
+            safely_queue_completion_followup(self.repo,task_id)
             return {**self._reply(task_id, latest_execution(self.db, task_id)), 'accepted': True, 'replayed': False}

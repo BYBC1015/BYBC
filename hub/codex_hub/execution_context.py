@@ -97,6 +97,8 @@ def execution_identity(context: dict[str, Any]) -> dict:
         'execution_scope': context.get('execution_scope', {}),
         'experiences': context.get('experiences', []),
         'attachments': context.get('attachments', []),
+        'attachment_plan': context.get('attachment_plan', {}),
+        'conversation_brief': context.get('conversation_brief', {}),
     }
 
 

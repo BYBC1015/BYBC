@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import tempfile
 import unicodedata
 import zipfile
 import zlib
@@ -11,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from xml.etree import ElementTree
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from .client import HubClientError
 
@@ -19,6 +20,8 @@ MAX_FILE_BYTES = 50 * 1024 * 1024
 MAX_TOTAL_BYTES = 100 * 1024 * 1024
 MAX_FILES = 12
 MAX_IMAGE_PIXELS = 40_000_000
+MAX_IMAGE_DECODE_PIXELS = 80_000_000
+IMAGE_INPUT_MAX_EDGE = 4096
 TEXT_SUFFIXES = {'.txt', '.md', '.csv', '.tsv', '.json', '.yaml', '.yml', '.toml', '.ini',
                  '.log', '.xml', '.html', '.htm', '.css', '.js', '.ts', '.py', '.sql', '.rst'}
 IMAGE_SUFFIXES = {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff'}
@@ -124,23 +127,58 @@ def _text_preview(path: Path, root: Path) -> tuple[Path | None, str]:
 
 
 def _image_input(path: Path, root: Path) -> tuple[Path, str]:
+    temporary = None
     try:
         with Image.open(path) as image:
-            if image.width * image.height > MAX_IMAGE_PIXELS:
-                raise AttachmentPreparationError('图片像素超过 4000 万，请缩小图片后重新上传。')
+            original_size = image.size
+            large = image.width * image.height > MAX_IMAGE_PIXELS
             image_format = image.format
             image.verify()
-        if image_format in {'PNG', 'JPEG', 'WEBP'}:
+        if not large and image_format in {'PNG', 'JPEG', 'WEBP'}:
             return path, ''
-        # The original remains intact; uncommon raster formats receive a
-        # first-frame preview that the CLI can attach reliably.
-        target = _contained(path.with_name(path.name + '.preview.png'), root)
+        # Keep verified originals available for production. Vision receives a
+        # bounded derivative instead of rejecting ordinary high-resolution art.
+        # Do not disable Pillow's independent decompression-bomb guard.
         with Image.open(path) as image:
             image.seek(0)
-            image.convert('RGB').save(target, format='PNG')
-        return target, '视觉输入是第一帧预览；原文件保留在 local_path。'
-    except (OSError, ValueError, Image.DecompressionBombError):
+            if large and image_format == 'JPEG':
+                scale = min(1.0, IMAGE_INPUT_MAX_EDGE / max(image.size))
+                image.draft('RGB', tuple(max(1, round(edge * scale)) for edge in image.size))
+            if image.width * image.height > MAX_IMAGE_DECODE_PIXELS:
+                raise AttachmentPreparationError('图片解码所需内存超过当前处理上限；原图已保留，尚未交给执行者。')
+            if large:
+                image.thumbnail((IMAGE_INPUT_MAX_EDGE, IMAGE_INPUT_MAX_EDGE), Image.Resampling.LANCZOS)
+            else:
+                image.load()
+            with ImageOps.exif_transpose(image) as oriented:
+                transparent = 'A' in oriented.getbands() or 'transparency' in oriented.info
+                mode = 'RGBA' if transparent else 'RGB'
+                with oriented.convert(mode) as visual:
+                    suffix = '.preview.png' if transparent or not large else '.preview.jpg'
+                    target = _contained(path.with_name(path.name + suffix), root)
+                    with tempfile.NamedTemporaryFile(dir=target.parent, prefix=target.name + '.', suffix='.part', delete=False) as handle:
+                        temporary = Path(handle.name)
+                    visual.save(temporary, format='PNG' if suffix.endswith('.png') else 'JPEG', quality=90)
+                    visual_size = visual.size
+        try:
+            temporary.replace(target)
+        except PermissionError:
+            # Windows readers can briefly hold the target while another task
+            # publishes the same derivative. Reuse only byte-identical output.
+            if not target.is_file() or _digest(target) != _digest(temporary):
+                raise
+        note = f'视觉输入为自动适配的读取副本（原图 {original_size[0]}×{original_size[1]}，副本 {visual_size[0]}×{visual_size[1]}）；' if large else '视觉输入是第一帧预览；'
+        if large and image_format in {'GIF', 'TIFF', 'WEBP', 'PNG'}:
+            note += '仅包含第一帧；'
+        return target, note + '原图未修改，完整文件保留在 local_path，可用于制作或按需读取局部细节。'
+    except (OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning):
         raise AttachmentPreparationError('图片无法安全解码，未交给执行者。') from None
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def prepare_task_attachments(client, config, project_slug: str, task_id: int,

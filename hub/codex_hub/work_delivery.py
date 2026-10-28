@@ -52,11 +52,14 @@ def artifact_links(db, task_id, generation, body, url_prefix):
         text_preview = PurePosixPath(row['original_filename']).suffix.lower() in {'.md','.txt','.csv','.json','.log'}
         suffix=PurePosixPath(row['original_filename']).suffix.lower()
         url=f"{url_prefix}/{row['id']}" + ('/preview' if text_preview or suffix=='.pdf' else '?inline=true' if suffix in {'.png','.jpg','.jpeg','.webp','.gif','.avif','.mp4'} else '')
-        aliases[ref]=url
-        aliases['/'+ref.lstrip('/')]=url
+        aliases[ref]=(url,f"{url_prefix}/{row['id']}")
+        aliases['/'+ref.lstrip('/')]=(url,f"{url_prefix}/{row['id']}")
     def replace(match):
         ref=unquote(match.group(2).strip('<>')).replace('\\','/')
-        return '['+match.group(1)+']('+aliases.get(ref,match.group(2))+')'
+        options=aliases.get(ref)
+        download=bool(re.search(r'下载|download|保存(?:原图|文件)',match.group(1),re.I))
+        target=options[1 if download else 0] if options else match.group(2)
+        return '['+match.group(1)+']('+target+')'
     return re.sub(r'\[([^\]]+)\]\(([^\n)]+)\)',replace,body)
 
 
@@ -124,6 +127,8 @@ def revise_task(repo, source, device_id, payload):
             [r['attachment_id'] for r in db.execute('SELECT attachment_id FROM hub_task_attachments WHERE task_id=? AND attachment_id NOT IN (SELECT attachment_id FROM hub_task_attachments WHERE task_id=?)',(source['id'],next_task['id']))],source_task_id=source['id'])
         row_id=db.execute('INSERT INTO hub_task_amendments(source_task_id,target_task_id,next_task_id,request_key,payload_hash,instruction,mode,created_at) VALUES (?,?,?,?,?,?,?,?)',
             (source['id'],target_id,next_task['id'],key,digest,instruction,mode,now())).lastrowid
+        from .revision_inputs import refresh_revision_inputs
+        refresh_revision_inputs(db,repo.get_task(next_task['id']))
         db.execute('UPDATE hub_work_assignments SET task_id=? WHERE task_id=?', (next_task['id'],target_id))
         return dict(db.execute('SELECT * FROM hub_task_amendments WHERE id=?',(row_id,)).fetchone())
 
@@ -139,15 +144,5 @@ def dependency_ready(db, task):
 
 def inherit_dependency_artifacts(db, task):
     """Resolve outputs at execution time: a queued revision may predate them."""
-    dependency = task.get('wait_for_task_id')
-    if not dependency:
-        return
-    parent = db.execute('SELECT project_id FROM tasks WHERE id=?', (dependency,)).fetchone()
-    if not parent or parent['project_id'] != task['project_id']:
-        raise ExecutionConflict('接续任务的原工程不一致，不能接入成果')
-    db.execute('''INSERT OR IGNORE INTO hub_task_attachments(task_id,attachment_id,source_task_id)
-        SELECT ?,ar.attachment_id,? FROM hub_task_artifacts ar
-        JOIN attachments a ON a.id=ar.attachment_id
-        WHERE ar.task_id=? AND a.project_id=?
-        AND ar.generation=(SELECT MAX(e.generation) FROM hub_task_executions e WHERE e.task_id=?)''',
-        (task['id'],dependency,dependency,task['project_id'],dependency))
+    from .revision_inputs import refresh_revision_inputs
+    refresh_revision_inputs(db,task)

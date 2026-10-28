@@ -235,4 +235,7 @@ def test_failed_artifact_delivery_never_reruns_execution(repo,tmp_path,monkeypat
     assert task['status']==('blocked' if permanent else 'review')
     assert '<hub-artifacts>' not in task['result_summary']
     assert len(executor.calls)==1
-    assert repo.connection.execute('SELECT COUNT(*) FROM entries WHERE task_id=?',(client.task_id,)).fetchone()[0]==1
+    # The execution result remains unique; an independent server delivery receipt
+    # may also be present when no controller is configured.
+    assert repo.connection.execute("SELECT COUNT(*) FROM entries WHERE task_id=? AND kind='markdown'",(client.task_id,)).fetchone()[0]==1
+    assert repo.connection.execute("SELECT COUNT(*) FROM entries WHERE task_id=? AND metadata_json LIKE '%completion_notice%'",(client.task_id,)).fetchone()[0]==1

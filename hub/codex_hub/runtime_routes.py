@@ -22,7 +22,7 @@ def register_execution_routes(app: FastAPI) -> None:
         project = require_project(repo, slug)
         require_device_write(repo, project, device)
         require_project_task(repo, project, task_id)
-        return ExecutionStore(repo), device['id']
+        return ExecutionStore(repo,files_root=get_settings(request).files_dir), device['id']
 
     def checked(call):
         try:

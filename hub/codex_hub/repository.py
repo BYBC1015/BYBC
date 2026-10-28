@@ -1013,7 +1013,7 @@ class Repository:
                 from .handoffs import block_unanswered_handoff
                 block_unanswered_handoff(self,task_id)
             if task and status in {'open','claimed','in_progress'} and task['status']!=status:
-                self.connection.execute("UPDATE tasks SET board_state='auto' WHERE id=?",(task_id,))
+                self.connection.execute("UPDATE tasks SET board_state='auto',board_archive_reason='' WHERE id=?",(task_id,))
             if task and status in {'done','cancelled'}:
                 self.connection.execute("""UPDATE tasks SET status='cancelled',status_version=status_version+1,
                     result_summary='原工作已结束，交接无需继续。',updated_at=?
@@ -2037,6 +2037,8 @@ class Repository:
         if task.get("assigned_agent_id"):
             agent = AgentStore(self.connection).get(project["id"], task["assigned_agent_id"])
             task = dict(task, assigned_agent_kind=agent["kind"])
+        if task.get('work_stage')=='delivery_summary':
+            return AgentStore(self.connection).prompt(task)
         entries = self.list_entries(project["id"], task_id=task_id)
         return render_task_prompt_markdown(
             project=project,

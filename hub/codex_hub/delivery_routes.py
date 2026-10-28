@@ -60,8 +60,9 @@ def register_delivery_routes(app):
                             VALUES (?,?,?,?,?,?,?,?,?)''',(project['id'],record['result_entry_id'],stored['original_filename'],stored['stored_relpath'],stored['content_type'],stored['byte_size'],stored['sha256'],device['id'],now())).lastrowid
                         db.execute('INSERT INTO hub_task_artifacts VALUES (?,?,?,?,?)',(task_id,record['generation'],key,reference,attachment_id))
                         db.execute('INSERT OR IGNORE INTO hub_task_attachments VALUES (?,?,NULL)',(task_id,attachment_id))
-                        db.execute('INSERT OR IGNORE INTO hub_task_attachments SELECT id,?,? FROM tasks WHERE wait_for_task_id=?',(attachment_id,task_id,task_id))
                     if record['result_entry_id']:
+                        from .revision_inputs import refresh_waiting_revisions
+                        refresh_waiting_revisions(repo,task_id)
                         prefix=app_path(request,f'/projects/{slug}/attachments')
                         entry=db.execute('SELECT body_markdown FROM entries WHERE id=?',(record['result_entry_id'],)).fetchone()
                         db.execute('UPDATE entries SET body_markdown=?,updated_at=? WHERE id=?',
@@ -69,6 +70,10 @@ def register_delivery_routes(app):
                         task_summary=db.execute('SELECT result_summary FROM tasks WHERE id=?',(task_id,)).fetchone()[0]
                         db.execute('UPDATE tasks SET result_summary=?,updated_at=? WHERE id=?',
                             (artifact_links(db,task_id,record['generation'],task_summary,prefix),now(),task_id))
+                        from .task_board import archive_completed_delivery
+                        archive_completed_delivery(repo,task_id,get_settings(request).files_dir)
+                        from .completion_followups import safely_queue_completion_followup
+                        safely_queue_completion_followup(repo,task_id)
                     # Mark the stored file retained only after commit succeeds.
                 keep=not bool(old)
                 return {'attachment_id':attachment_id,'url':app_path(request,f'/projects/{slug}/attachments/{attachment_id}'),'replayed':bool(old)}

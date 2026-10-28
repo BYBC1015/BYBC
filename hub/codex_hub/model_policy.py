@@ -102,7 +102,9 @@ def select_model(db, agent, data_dir, requested=None, *, task=None):
     if agent.get('kind') == 'controller':
         description = ((task or {}).get('description') or (task or {}).get('title') or '').strip()
         effort = 'high'
-        if any(word in description for word in ('深度优化', '深度审查', '架构设计', '复杂故障', '极高')):
+        if (task or {}).get('controller_read_only'):
+            effort = 'medium'
+        elif any(word in description for word in ('深度优化', '深度审查', '架构设计', '复杂故障', '极高')):
             effort = 'xhigh'
         elif len(description) < 100 and any(word in description for word in ('进度', '怎么样了', '收到', '你好', '状态', '谢谢')):
             effort = 'medium'

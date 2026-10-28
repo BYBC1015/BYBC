@@ -160,9 +160,10 @@ def test_verification_scanner_and_other_owner_cannot_confirm(client, email_owner
     now = utc_now()
     cursor = db.execute("INSERT INTO users(username,password_hash,role,created_at,updated_at) VALUES(?,?,'owner',?,?)", ("other-owner", hash_password("password"), now, now))
     db.commit()
-    session = repo.create_session(cursor.lastrowid)
-    client.cookies.set(settings.session_cookie_name, session.raw)
-    client.cookies.set(settings.csrf_cookie_name, session.csrf)
+    # Sign in through the real route so the new browser session has one
+    # correctly scoped CSRF cookie, including any session renewal response.
+    client.cookies.clear()
+    assert client.post('/login', data={'username': 'other-owner', 'password': 'password'}).status_code == 200
     assert client.get("/notifications/email/verify?token=" + created["token"]).status_code == 400
     assert client.post("/notifications/email/verify", data={**csrf(client, settings), "token": created["token"]}).status_code == 400
     assert store.inspect_verification(created["token"])

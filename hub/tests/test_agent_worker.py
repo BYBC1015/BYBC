@@ -106,7 +106,7 @@ def test_worker_cleanup_does_not_convert_unexpected_exit_to_user_stop(tmp_path,m
     monkeypatch.setattr('codex_bridge.task_pool.DurableTaskPool',Pool)
     stop=threading.Event()
     assert main(['--config',str(path)],stop_event=stop,log_callback=lambda _:None)==0
-    assert events==['heartbeat-start','pool-close','heartbeat-close']
+    assert events==['heartbeat-start','pool-close','pool-close','heartbeat-close']
     assert not stop.is_set()
 
 
@@ -144,4 +144,4 @@ def test_stop_during_startup_never_launches_execution_lanes(tmp_path,monkeypatch
         def close(self):events.append('pool-close')
     monkeypatch.setattr('codex_bridge.task_pool.DurableTaskPool',Pool)
     assert main(['--config',str(path)],stop_event=stop,log_callback=lambda _:None)==0
-    assert events==['pool-close','heartbeat-close']
+    assert events==['pool-close','pool-close','heartbeat-close']

@@ -1890,13 +1890,13 @@
 {% block extra_scripts %}
 <script src="{{ app_path('/static/composer-routing.js') }}?v=20260911-routing1" defer></script>
 <script src="{{ app_path('/static/agent-workspace.js') }}?v=20261027-workspace1" defer></script>
-{% if entries %}<script src="{{ app_path('/static/codex-markdown.js') }}?v=20260812-page-features1" defer></script>{% endif %}
+{% if entries %}<script src="{{ app_path('/static/codex-markdown.js') }}?v=20261029-download1" defer></script>{% endif %}
 {% if media_library|selectattr('is_inline_video')|list %}<script src="{{ app_path('/static/codex-video-reader.js') }}?v=20260812-page-features1" defer></script>{% endif %}
 <script
   src="{{ app_path('/static/deferred-features.js') }}?v=20260817-image-gallery2"
   data-image-viewer-src="{{ app_path('/static/image-viewer.js') }}?v=20260817-image-gallery2"
   data-voice-session-src="{{ app_path('/static/hub-voice.js') }}?v=20260812-page-features1"
-  data-markdown-src="{{ app_path('/static/codex-markdown.js') }}?v=20260812-page-features1"
+  data-markdown-src="{{ app_path('/static/codex-markdown.js') }}?v=20261029-download1"
   data-video-reader-src="{{ app_path('/static/codex-video-reader.js') }}?v=20260812-page-features1"
   defer></script>
 <script src="{{ app_path('/static/reading-experience.js') }}?v=20260811-scroll-stability1" defer></script>

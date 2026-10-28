@@ -51,7 +51,12 @@ class CodexExecRunner:
         cancel_event: threading.Event | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> CodexExecResult:
-        if (execution_context or {}).get('execution_route') == 'project':
+        context = execution_context or {}
+        continuous_chat = (context.get('execution_route') == 'chat'
+                           and context.get('assigned_agent_kind') == 'controller'
+                           and context.get('conversation_id')
+                           and not context.get('controller_read_only'))
+        if context.get('execution_route') == 'project' or continuous_chat:
             result = self._run_project(project_slug, project_path, prompt_path, prompt,
                                        execution_preferences, image_paths, execution_context, cancel_event, progress_callback)
         else:
@@ -105,8 +110,9 @@ class CodexExecRunner:
                         error=self._redact(result.error)[:65536], output_path=result.output_path)
                 return result
         except ProjectSessionError as exc:
+            label = '总控对话' if execution_context.get('execution_route') == 'chat' else '本地工程会话'
             return self._failed(command=[], output_path=self._output_path(project_slug, prompt_path),
-                                error='本地工程会话暂未继续：' + str(exc))
+                                error=label + '暂未继续：' + str(exc))
 
     def _run(
         self,
@@ -215,7 +221,8 @@ class CodexExecRunner:
                 completed = self._run_cancellable(command, prompt, timeout, process_options,
                     cancel_event if cancel_event is not None else threading.Event(),
                     on_unstarted=project_session.abort_unstarted if project_session else None,
-                    progress_callback=progress_callback)
+                    progress_callback=progress_callback,
+                    event_callback=project_session.observe_jsonl if project_session else None)
             else:
                 completed = self.process_runner.run(
                     command, input=prompt, capture_output=True, text=True,
@@ -285,10 +292,10 @@ class CodexExecRunner:
         return tree_stopped
 
     def _run_cancellable(self, command, prompt, timeout, process_options, cancel_event,
-                         on_unstarted=None, progress_callback=None):
-        if progress_callback is not None:
+                         on_unstarted=None, progress_callback=None, event_callback=None):
+        if progress_callback is not None or event_callback is not None:
             return self._run_streaming(command, prompt, timeout, process_options, cancel_event,
-                                       on_unstarted, progress_callback)
+                                       on_unstarted, progress_callback or (lambda *_: None), event_callback)
         if cancel_event.is_set():
             if on_unstarted:
                 on_unstarted()
@@ -328,7 +335,7 @@ class CodexExecRunner:
                     first_input = None
 
     def _run_streaming(self, command, prompt, timeout, process_options, cancel_event,
-                       on_unstarted, progress_callback):
+                       on_unstarted, progress_callback, event_callback=None):
         if cancel_event.is_set():
             if on_unstarted:
                 on_unstarted()
@@ -347,11 +354,17 @@ class CodexExecRunner:
         dispatcher = ProgressDispatcher(progress_callback)
         progress = VisibleCodexProgress(dispatcher.publish, self._redact)
         stdout_parts, stderr_parts = [], []
+        event_errors = []
 
         def read_stdout():
             try:
                 for line in process.stdout:
                     stdout_parts.append(line)
+                    if event_callback is not None and not event_errors:
+                        try:
+                            event_callback(line)
+                        except Exception as exc:
+                            event_errors.append(exc)
                     try:
                         progress.feed(line)
                     except Exception:
@@ -404,6 +417,8 @@ class CodexExecRunner:
             for thread in [writer, *readers]:
                 thread.join(timeout=2)
             stdout, stderr = ''.join(stdout_parts), ''.join(stderr_parts)
+            if event_errors:
+                raise event_errors[0]
             if expired and not cancelled:
                 raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr)
             if cancelled:

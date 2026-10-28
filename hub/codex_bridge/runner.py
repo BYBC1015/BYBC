@@ -774,6 +774,8 @@ class BridgeRunner:
             current_task = agent_context.get('task') or {}
             context.update(execution_route=current_task.get('execution_route', task.get('execution_route', 'direct')),
                            conversation_id=current_task.get('conversation_id', task.get('conversation_id')),
+                           assigned_agent_kind=(agent_context.get('agent') or {}).get('kind', task.get('assigned_agent_kind')),
+                           controller_read_only=bool(current_task.get('controller_read_only', task.get('controller_read_only', False))),
                            assigned_agent_id=(agent_context.get('agent') or {}).get('id', task.get('assigned_agent_id')),
                            device_id=current_task.get('assigned_device_id', task.get('assigned_device_id')),
                            project_path=str(self._resolve_project_path(receipt['target_project'])))
@@ -869,6 +871,10 @@ class BridgeRunner:
             f"总控调度通道请直接使用：{command} --request-json '<JSON对象>'，不需写请求文件。\n"
             "总控运行于独立调度目录；实际项目文件修改必须委派执行者。不得绕过目录限制修改原项目。\n"
             '查看当前身份、经验、团队和任务：{"action":"inspect"}。\n'
+            '查看同一对话已提供的原始资料：{"action":"reference_files"}。'
+            '需接续阅读或交给执行者时：{"action":"inherit_attachments","attachment_ids":[实际附件编号]}。'
+            '该接口校验同一项目和对话，返回已下载的本地文件路径；必须实际读取才能声称读过，'
+            '接续后的附件可用 delegate 的 attachment_ids 指定传递。不要让用户重复上传同一对话已有资料。\n'
             '执行者交接提问：{"action":"ask_handoff","question":"具体疑问、缺少的细节或发现的不合理点","request_key":"stable-question-key"}。'
             '提问成功后结束本次执行，不等待、不模拟总控、不继续做依赖答复的操作；系统保留原任务，答复后再唤醒你。'
             '总控答复：{"action":"answer_handoff","handoff_id":实际交接编号,"answer":"具体答复和取舍"}。'
@@ -909,11 +915,10 @@ class BridgeRunner:
 
     def _save_agent_result(self, project_slug: str, task_id: int, execution: CodexExecResult) -> None:
         body, reflection, complete = extract_reflection(execution.last_message or execution.summary, ok=execution.ok)
-        summary = body or reflection["summary"] or execution.summary
+        summary = body or (reflection["summary"] if complete else "") or "执行已结束，暂未提供可展示的结果。"
         if not execution.ok:
-            summary = "自动执行失败：" + execution.summary + "\n" + body
-        if not complete:
-            summary += "\n结构化复盘尚未生成，已保留执行结果供后续补充。"
+            error_body, _, _ = extract_reflection(execution.summary, ok=False)
+            summary = "自动执行失败：" + (body or error_body or "执行未完成。")
         receipt = self.state.set_task_delivery(project_slug, task_id, "agent_result",
                                                detail="执行已结束，正在回传结果与经验。")
         receipt.update({"result_summary": summary[:MAX_HUB_RESULT_CHARS], "reflection": reflection,

@@ -158,17 +158,51 @@ REFLECTION_RE = re.compile(r"<hub-reflection>\s*(.*?)\s*</hub-reflection>\s*$", 
 
 
 def extract_reflection(text: str, *, ok: bool) -> tuple[str, dict[str, str], bool]:
-    """Treat absent/invalid reflection as missing evidence, never as a learned success."""
-    match = REFLECTION_RE.search(text)
-    body = text.strip()
+    """Separate private reflection from delivery, even when its format is broken."""
+    # A malformed or unfinished block is still private. Do not make removing it
+    # conditional on JSON validation, or leak it when another public block follows.
+    parts, payloads = [], []
+    cursor, start, depth, openings = 0, 0, 0, 0
+    malformed = False
+    for marker in re.finditer(r"<(/?)hub-reflection\b[^>]*>", text, re.I):
+        if not marker.group(1):
+            openings += 1
+            if depth == 0:
+                parts.append(text[cursor:marker.start()])
+                start = marker.end()
+            depth += 1
+        elif depth:
+            depth -= 1
+            if depth == 0:
+                payloads.append(text[start:marker.start()])
+                cursor = marker.end()
+        else:
+            parts.append(text[cursor:marker.start()])
+            cursor = marker.end()
+            malformed = True
+    if depth:
+        # A later standalone artifact declaration still belongs to the delivery
+        # protocol. Keep it for the uploader, without displaying the private tail.
+        parts.extend(re.findall(r"^[ \t]*(<hub-artifacts>.*?</hub-artifacts>)",
+                                text[start:], re.M | re.S))
+    else:
+        parts.append(text[cursor:])
+    body = "".join(parts).strip()
+    tail_start = body.rfind("<")
+    if tail_start >= 0:
+        tail = body[tail_start:].lower()
+        if (tail.startswith(("<hub-reflection", "</hub-reflection")) or
+                (tail.startswith(("<hub-", "</hub-")) and
+                 any(marker.startswith(tail) for marker in ("<hub-reflection>", "</hub-reflection>")))):
+            body = body[:tail_start].rstrip()
+            malformed = True
     data = None
-    if match and text.count("<hub-reflection>") == 1:
+    if openings == 1 and len(payloads) == 1 and not depth and not malformed:
         try:
-            candidate = json.loads(match.group(1))
+            candidate = json.loads(payloads[0])
             if isinstance(candidate, dict) and all(isinstance(candidate.get(key), str)
                     for key in ("summary", "worked", "failed", "next_time")):
                 data = candidate
-                body = text[:match.start()].strip()
         except (TypeError, ValueError):
             pass
     if data is None:
@@ -216,6 +250,47 @@ def run_agent_request(arguments: argparse.Namespace) -> dict[str, Any]:
         return {"context": context,
                 "agents": client._json("GET", f"/api/projects/{arguments.project}/agents"),
                 "tasks": client._json("GET", f"/api/projects/{arguments.project}/tasks")}
+    if action == 'reference_files':
+        return client._json('GET', f'/api/projects/{arguments.project}/tasks/{arguments.task_id}/reference-files')
+    if action == 'inherit_attachments':
+        if context['agent'].get('kind') != 'controller':
+            raise ValueError('接续对话附件需要当前总控身份')
+        if (os.environ.get('CODEX_HUB_EXECUTION_TASK_ID') != str(arguments.task_id) or
+                os.environ.get('CODEX_HUB_EXECUTION_PROJECT') != arguments.project):
+            raise ValueError('接续附件需要当前总控执行记录')
+        generation = os.environ.get('CODEX_HUB_EXECUTION_GENERATION', '')
+        run_key = os.environ.get('CODEX_HUB_EXECUTION_RUN_KEY', '')
+        if not generation.isdigit() or len(generation) > 10 or not re.fullmatch(r'[A-Za-z0-9_.-]{16,100}', run_key):
+            raise ValueError('当前执行记录无效')
+        from .agent_worker import controller_config
+        from .task_pool import task_config
+        from .attachments import prepare_task_attachments
+        from dataclasses import replace
+        task = dict(context['task'], id=arguments.task_id, project_slug=arguments.project,
+                    assigned_agent_kind='controller')
+        controller = controller_config(config)
+        runtime = task_config(controller, task)
+        workspace = runtime.projects[arguments.project].resolve()
+        current = Path.cwd().resolve()
+        legacy_workspace = controller.projects.get(arguments.project)
+        if legacy_workspace is None and controller.project_root is not None:
+            legacy_workspace = controller.project_root / arguments.project
+        legacy_workspace = legacy_workspace.resolve() if legacy_workspace is not None else None
+        if current == legacy_workspace:
+            # A running pre-conversation worker can use an updated helper
+            # without being restarted. Accept only its exact configured root,
+            # never another conversation beneath that root.
+            workspace = legacy_workspace
+            runtime = replace(runtime, projects={arguments.project: workspace}, project_root=workspace)
+        elif current != workspace and workspace not in current.parents:
+            raise ValueError('请从当前总控工作目录接续附件，不能写入其他工程')
+        client._json('POST', f'/api/projects/{arguments.project}/tasks/{arguments.task_id}/inherit-attachments', {
+            'attachment_ids': request.get('attachment_ids'),
+            'execution': {'generation': int(generation), 'run_key': run_key}})
+        prepared = prepare_task_attachments(client, runtime, arguments.project, arguments.task_id, workspace)
+        return {'files': prepared.files,
+                'note': '附件已下载并校验到本轮工作目录。请实际读取 local_path 或用图像读取工具打开 image_path；'
+                        '下载成功不代表已经阅读。现在可用 attachment_id 将必要材料交给执行者。'}
     if action in {'ask_handoff','answer_handoff'}:
         expected='worker' if action=='ask_handoff' else 'controller'
         if context['agent'].get('kind')!=expected:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -94,7 +95,7 @@ def image_dimensions(path: Path) -> tuple[int | None, int | None]:
             width, height = image.size
         if width > 0 and height > 0:
             return int(width), int(height)
-    except (OSError, ValueError):
+    except (OSError, ValueError, Image.DecompressionBombError):
         pass
     return None, None
 
@@ -170,18 +171,42 @@ def thumbnail_path(
     target = root / ".derived" / safe_sha[:2] / f"{safe_sha}-{variant}.webp"
     if target.is_file():
         return target
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_suffix(".tmp.webp")
+    temporary = None
     try:
+        target.parent.mkdir(parents=True, exist_ok=True)
         with Image.open(original) as source:
             source.seek(0)
-            image = ImageOps.exif_transpose(source)
-            image.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
-            if image.mode not in {"RGB", "RGBA"}:
-                image = image.convert("RGBA" if "transparency" in image.info else "RGB")
-            image.save(temporary, format="WEBP", quality=84, method=5)
-        temporary.replace(target)
+            # Let JPEG decode at a reduced resolution before any operation
+            # loads/copies its pixels. Keep Pillow's source-size guard intact.
+            if source.format == "JPEG":
+                source.draft("RGB", (max_dimension, max_dimension))
+            source.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+            with ImageOps.exif_transpose(source) as oriented:
+                has_alpha = "A" in oriented.getbands() or "a" in oriented.getbands() or "transparency" in oriented.info
+                image = oriented if oriented.mode in {"RGB", "RGBA"} else oriented.convert("RGBA" if has_alpha else "RGB")
+                try:
+                    # Concurrent requests must never write into the same partial
+                    # file. Readers only see the final atomically replaced file.
+                    with tempfile.NamedTemporaryFile(prefix=f".{target.stem}-", suffix=".tmp.webp",
+                                                     dir=target.parent, delete=False) as handle:
+                        temporary = Path(handle.name)
+                    image.save(temporary, format="WEBP", quality=84, method=5)
+                finally:
+                    if image is not oriented:
+                        image.close()
+        try:
+            temporary.replace(target)
+        except OSError:
+            # Another request may have just published this immutable preview.
+            # Windows can briefly refuse replacing that already-open target.
+            if not target.is_file():
+                raise
         return target
-    except (OSError, ValueError):
-        temporary.unlink(missing_ok=True)
+    except (OSError, ValueError, Image.DecompressionBombError):
         return None
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass

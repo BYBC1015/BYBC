@@ -94,7 +94,7 @@ def _task_views(repo, project_id: int, *, conversation_id: int | None = None,
     # Exclude large context packs and bound the previews at the database boundary.
     rows = repo.connection.execute(f"""SELECT t.id,t.project_id,t.title,t.status,t.priority,
         t.assigned_agent_id,t.assigned_device_id,t.conversation_id,t.created_at,t.updated_at,
-        t.status_version,t.route_engine,t.route_reason,t.wait_for_task_id,t.coordination_state,t.execution_mode,t.board_state,
+        t.status_version,t.route_engine,t.route_reason,t.wait_for_task_id,t.coordination_state,t.execution_mode,t.board_state,t.board_archive_reason,
         t.execution_route,t.execution_route_reason,
         NOT {active_sql()} AS in_history,substr(t.description,1,2000) AS description,
         substr(t.result_summary,1,2000) AS result_summary,
@@ -117,6 +117,10 @@ def _task_views(repo, project_id: int, *, conversation_id: int | None = None,
         from .execution_leases import latest_execution
         task['archive_eligible']=can_archive(task,latest_execution(repo.connection,task['id']))
         task['board_label']='已回复' if task['assigned_agent_kind']=='controller' and task['status']=='review' else ''
+        if task['board_state']=='archived' and task['board_archive_reason']=='delivered' and task['status']=='review':
+            task['board_label']='已交付 · 未验收'
+        elif task['board_state']=='archived' and task['board_archive_reason'].startswith('superseded:'):
+            task['board_label']='后续工作已接续'
     return result
 
 
@@ -271,10 +275,11 @@ def build_workspace_context(request: Request, user: dict, project: dict, *,
 
     workspace_url = page_link()
     from .execution_progress import active_progress
-    conversation_progress=active_progress(repo.connection,project['id'],conversation_id=conversation_id) if room else []
+    conversation_progress=active_progress(repo.connection,project['id'],conversation_id=conversation_id,include_expired=True) if room else []
     for progress in conversation_progress:
         progress['detail_url']=app_path(request,f"/projects/{project['slug']}/tasks/{progress['task_id']}")
-        progress['view_version']=f"{progress['generation']}:{progress['sequence']}"
+        progress['view_version']=':'.join(str(progress[key]) for key in ('generation','sequence','timing_bucket',
+            'lease_until','last_agent_seen_at','execution_contact_valid','device_contact_recent'))
     return {
         'project': project, 'user': user, 'projects': projects, 'projectlist': projects,
         'durable_agents': agents, 'agent_conversations': conversations,

@@ -44,6 +44,34 @@
     else tokens.push({ type: "text", text: text });
   }
 
+  function attachmentLink(raw, label, baseUrl) {
+    try {
+      const base = new URL(baseUrl);
+      let value = raw;
+      const project = base.pathname.match(/^(.*\/projects\/[^/]+)(?:\/|$)/);
+      // Older results stored task-relative links. They must also work when
+      // rendered on the project root rather than /tasks/id or /conversations/id.
+      if (project && /^\.\.\/attachments\/\d+(?:[/?#]|$)/.test(value)) {
+        value = project[1] + '/' + value.slice(3);
+      }
+      const parsed = new URL(value, base);
+      if (parsed.origin !== base.origin || !/\/projects\/[^/]+\/attachments\/\d+(?:\/preview)?$/.test(parsed.pathname)) return null;
+      const download = /下载|download|保存(?:原图|文件)/i.test(label);
+      if (download) {
+        parsed.pathname = parsed.pathname.replace(/\/preview$/, '');
+        parsed.searchParams.delete('inline');
+        parsed.searchParams.delete('size');
+      }
+      return {href: parsed.href, download};
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function inlineText(tokens) {
+    return (tokens || []).map(token => token.text == null ? inlineText(token.children) : token.text).join('');
+  }
+
   function parseInline(source, baseUrl) {
     const text = String(source == null ? "" : source);
     const tokens = [];
@@ -311,7 +339,8 @@
       if (!tag) return;
       const element = documentRef.createElement(tag);
       if (token.type === "link") {
-        element.setAttribute("href", token.href);
+        const attachment = attachmentLink(token.href, inlineText(token.children), documentRef.baseURI);
+        element.setAttribute("href", attachment ? attachment.href : token.href);
         if (token.title) element.setAttribute("title", token.title);
         let external = false;
         try {
@@ -319,7 +348,10 @@
         } catch (_error) {
           external = true;
         }
-        if (external) {
+        if (attachment && attachment.download) {
+          element.setAttribute('download', '');
+          element.setAttribute('data-hub-download', 'true');
+        } else if (external || attachment) {
           element.setAttribute("target", "_blank");
           element.setAttribute("rel", "noopener noreferrer");
         }
@@ -509,6 +541,7 @@
   }
 
   return {
+    attachmentLink,
     enhanceMarkdown,
     init,
     parseInline,

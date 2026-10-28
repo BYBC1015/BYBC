@@ -17,6 +17,7 @@ STATUS_LIMIT = 300
 SSE_MAX_SECONDS = 55
 SSE_POLL_SECONDS = 1
 SSE_HEARTBEAT_SECONDS = 15
+ACTIVITY_CLOCK_SECONDS = 15
 
 
 def initialize_progress_schema(db):
@@ -108,8 +109,34 @@ def clear_progress(db,task_id):
     db.execute('DELETE FROM hub_execution_progress WHERE task_id=?',(task_id,))
 
 
-def active_progress(db,project_id,*,conversation_id=None,task_ids=None,limit=12,clock=time.time):
-    params=[project_id,clock()]
+def _duration(seconds):
+    seconds=max(0,int(seconds))
+    if seconds<60:return f'{seconds} 秒'
+    if seconds<3600:return f'{seconds//60} 分 {seconds%60} 秒'
+    return f'{seconds//3600} 小时 {(seconds%3600)//60} 分'
+
+
+def annotate_progress_timing(row, at):
+    """Age actual reports; neither heartbeats nor time imply new tool progress."""
+    from .main import (parse_iso_datetime, AGENT_WORKER_ONLINE_WINDOW_SECONDS,
+                       DEVICE_ONLINE_WINDOW_SECONDS)
+    sampled=int(at//ACTIVITY_CLOCK_SECONDS)*ACTIVITY_CLOCK_SECONDS
+    row['timing_bucket']=int(at//ACTIVITY_CLOCK_SECONDS)
+    row['run_age_label']=_duration(sampled-row['started_at']) if row.get('started_at') else '尚未确认'
+    row['report_age_label']=_duration(sampled-row['updated_at'])
+    row['execution_contact_valid']=row['lease_until']>at
+    seen=parse_iso_datetime(str(row.get('last_agent_seen_at') or ''))
+    window=AGENT_WORKER_ONLINE_WINDOW_SECONDS if row['agent_tasks_only'] else DEVICE_ONLINE_WINDOW_SECONDS
+    row['device_contact_recent']=bool(seen and 0<=at-seen.timestamp()<=window)
+    row['device_contact_age_label']=_duration(sampled-seen.timestamp()) if seen else '尚未收到'
+    return row
+
+
+def active_progress(db,project_id,*,conversation_id=None,task_ids=None,limit=12,clock=time.time,include_expired=False):
+    at=clock()
+    params=[project_id]
+    lease_clause='' if include_expired else ' AND r.lease_until>?'
+    if not include_expired:params.append(at)
     clause=''
     if conversation_id is not None:
         clause+=' AND t.conversation_id=?';params.append(conversation_id)
@@ -118,11 +145,13 @@ def active_progress(db,project_id,*,conversation_id=None,task_ids=None,limit=12,
         if not ids:return []
         clause+=' AND t.id IN ('+','.join('?' for _ in ids)+')';params.extend(ids)
     params.append(max(1,min(160,limit)))
-    return [dict(row) for row in db.execute('''SELECT p.task_id,r.generation,p.sequence,p.status_text,
-        p.assistant_text,p.updated_at,t.assigned_agent_id,t.execution_route,a.name AS agent_name,a.kind AS agent_kind
+    return [annotate_progress_timing(dict(row),at) for row in db.execute('''SELECT p.task_id,r.generation,p.sequence,p.status_text,
+        p.assistant_text,p.updated_at,r.started_at,r.lease_until,t.assigned_agent_id,t.execution_route,
+        a.name AS agent_name,a.kind AS agent_kind,d.label AS device_label,d.last_agent_seen_at,
+        EXISTS(SELECT 1 FROM hub_agent_connections c WHERE c.device_id=d.id) AS agent_tasks_only
         FROM hub_execution_progress p JOIN hub_task_executions r ON r.id=p.execution_id
-        JOIN tasks t ON t.id=p.task_id JOIN hub_agents a ON a.id=t.assigned_agent_id
-        WHERE t.project_id=? AND r.lease_until>? AND r.state='running' AND t.status='in_progress'
+        JOIN tasks t ON t.id=p.task_id JOIN hub_agents a ON a.id=t.assigned_agent_id JOIN devices d ON d.id=r.device_id
+        WHERE t.project_id=? '''+lease_clause+''' AND r.state='running' AND t.status='in_progress'
         AND r.task_version=t.status_version AND r.device_id=t.assigned_device_id
         AND r.generation=(SELECT MAX(last.generation) FROM hub_task_executions last WHERE last.task_id=t.id)
         '''+clause+' ORDER BY p.updated_at,p.task_id LIMIT ?',params)]
@@ -177,11 +206,16 @@ def project_event_version(db,project_id):
     presence=[(m['device_id'],m['presence_mode']) for m in members]
     # Expired presence and expired draft leases change the view even when no
     # process can write another row to notify us of its disappearance.
-    live=db.execute('''SELECT COUNT(*) FROM hub_execution_progress p
+    at=time.time()
+    activity=db.execute('''SELECT COUNT(*) AS count,SUM(r.lease_until>?) AS live FROM hub_execution_progress p
       JOIN hub_task_executions r ON r.id=p.execution_id JOIN tasks t ON t.id=p.task_id
-      WHERE t.project_id=? AND r.state='running' AND r.lease_until>?
-      AND t.status='in_progress' AND r.task_version=t.status_version''',(project_id,time.time())).fetchone()[0]
-    suffix=hashlib.sha256(json.dumps([presence,live],sort_keys=True).encode()).hexdigest()[:12]
+      WHERE t.project_id=? AND r.state='running' AND r.device_id=t.assigned_device_id
+      AND t.status='in_progress' AND r.task_version=t.status_version
+      AND r.generation=(SELECT MAX(e.generation) FROM hub_task_executions e WHERE e.task_id=t.id)''',(at,project_id)).fetchone()
+    # Existing SSE/polling redraws only the age metadata. This is not a new
+    # progress packet and does not write storage or invoke a model.
+    activity_clock=int(at//ACTIVITY_CLOCK_SECONDS) if activity['count'] else None
+    suffix=hashlib.sha256(json.dumps([presence,activity['live'] or 0,activity_clock],sort_keys=True).encode()).hexdigest()[:12]
     return f'{version}.{suffix}'
 
 

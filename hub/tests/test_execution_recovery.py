@@ -113,7 +113,8 @@ def test_unknown_complete_ack_recovers_without_inbox_or_duplicate_work(repo, tmp
     recovered = restart(runner, client, executor)
     recovered.process_once()
     assert len(executor.calls) == client.start_calls == client.complete_calls == 1
-    assert repo.connection.execute('SELECT COUNT(*) FROM entries WHERE task_id=?', (client.task_id,)).fetchone()[0] == 1
+    assert repo.connection.execute("SELECT COUNT(*) FROM entries WHERE task_id=? AND kind='markdown'", (client.task_id,)).fetchone()[0] == 1
+    assert repo.connection.execute("SELECT COUNT(*) FROM entries WHERE task_id=? AND metadata_json LIKE '%completion_notice%'", (client.task_id,)).fetchone()[0] == 1
     assert recovered.state.get_task_delivery('agent-test', client.task_id) is None
 
 
@@ -130,7 +131,8 @@ def test_worker_crash_after_cli_completion_uses_native_receipt_without_inbox(rep
     recovered.process_once()
     assert repo.get_task(client.task_id)['status'] == 'review'
     assert len(executor.calls) == client.start_calls == 1
-    assert repo.connection.execute('SELECT COUNT(*) FROM entries WHERE task_id=?', (client.task_id,)).fetchone()[0] == 1
+    assert repo.connection.execute("SELECT COUNT(*) FROM entries WHERE task_id=? AND kind='markdown'", (client.task_id,)).fetchone()[0] == 1
+    assert repo.connection.execute("SELECT COUNT(*) FROM entries WHERE task_id=? AND metadata_json LIKE '%completion_notice%'", (client.task_id,)).fetchone()[0] == 1
 
 
 @pytest.mark.parametrize('drop_mapping',[False,True])
@@ -165,7 +167,8 @@ def test_crash_between_project_receipt_and_worker_completion_recovers_without_cl
     recovered.process_once()
     assert repo.get_task(client.task_id)['status']=='review'
     assert calls==[1] and client.start_calls==1
-    assert repo.connection.execute('SELECT COUNT(*) FROM entries WHERE task_id=?',(client.task_id,)).fetchone()[0]==1
+    assert repo.connection.execute("SELECT COUNT(*) FROM entries WHERE task_id=? AND kind='markdown'",(client.task_id,)).fetchone()[0]==1
+    assert repo.connection.execute("SELECT COUNT(*) FROM entries WHERE task_id=? AND metadata_json LIKE '%completion_notice%'",(client.task_id,)).fetchone()[0]==1
 
 
 def test_cancelled_result_stays_local_and_never_overwrites_human_state(repo, tmp_path):

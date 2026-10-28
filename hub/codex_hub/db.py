@@ -476,3 +476,5 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
     initialize_handoff_schema(connection)
     from .task_board import initialize_task_board_schema
     initialize_task_board_schema(connection)
+    from .completion_followups import initialize_completion_followups
+    initialize_completion_followups(connection)

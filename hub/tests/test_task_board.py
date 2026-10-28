@@ -1,8 +1,10 @@
 import pytest
-from codex_hub.task_board import organize_task
+from codex_hub.task_board import organize_task,archive_completed_delivery
 from codex_hub.execution_leases import ExecutionStore,ExecutionConflict
 from codex_hub.workspace import _task_views
-from test_execution_leases import lease_task,start
+from test_execution_leases import lease_task,start,RESULT
+from test_work_delivery import upload_result,controller_source
+from test_agents import token_headers
 from test_workspace_shell import login
 from workspace_fixture import seed_workspace
 
@@ -96,3 +98,107 @@ def test_web_action_requires_owner_session_csrf_and_correct_project(client,repo)
     assert response.status_code==200 and response.json()['board_state']=='archived'
     other=repo.create_project('other-project','Other')
     assert client.post(f'/projects/other-project/tasks/{task["id"]}/organize',data={'action':'restore','_csrf':csrf}).status_code==404
+
+
+def test_real_completion_auto_archives_hosted_delivery_and_keeps_chat_preview(client,repo,lease_task):
+    d=lease_task;store=ExecutionStore(repo);run=start(store,d)
+    uploaded=upload_result(client,repo,d,run)
+    assert uploaded.status_code==200
+    response=client.post(f"/api/projects/{d['project']['slug']}/tasks/{d['task']['id']}/execution/complete",
+        headers=token_headers(repo,d['device']),json={**RESULT,**run,'body':'[实际交付](output/report.md)'})
+    assert response.status_code==200,response.text
+    task=repo.get_task(d['task']['id'])
+    assert task['status']=='review' and task['board_state']=='archived' and task['board_archive_reason']=='delivered'
+    assert task['id'] not in {t['id'] for t in _task_views(repo,d['project']['id'],board='active')}
+    history=_task_views(repo,d['project']['id'],board='history')
+    assert next(t for t in history if t['id']==task['id'])['board_label']=='已交付 · 未验收'
+    login(client)
+    room=client.get(f"/projects/{d['project']['slug']}/conversations/{task['conversation_id']}")
+    assert '实际交付' in room.text
+    assert client.get(uploaded.json()['url']+'/preview').status_code==200
+
+
+def test_late_artifact_archives_once_but_explicit_restore_survives_retry(client,repo,settings,lease_task):
+    d=lease_task;store=ExecutionStore(repo,files_root=settings.files_dir);run=start(store,d)
+    store.complete(d['task']['id'],d['device']['id'],run['generation'],run['run_key'],**RESULT)
+    assert repo.get_task(d['task']['id'])['board_state']=='auto'
+    assert upload_result(client,repo,d,run).status_code==200
+    assert repo.get_task(d['task']['id'])['board_state']=='archived'
+    organize_task(repo,d['project']['id'],d['task']['id'],'restore')
+    assert upload_result(client,repo,d,run).status_code==200
+    replay=store.complete(d['task']['id'],d['device']['id'],run['generation'],run['run_key'],**RESULT)
+    assert replay['replayed'] and repo.get_task(d['task']['id'])['board_state']=='active'
+    assert repo.get_task(d['task']['id'])['board_archive_reason']==''
+    # A real new execution cycle, rather than another render/retry, reenables auto organization.
+    repo.update_task_status(d['task']['id'],'open','新增修改')
+    new=store.acquire(d['task']['id'],d['device']['id'],'next-delivery-generation-001')['execution']
+    store.start(d['task']['id'],d['device']['id'],new['generation'],new['run_key'])
+    assert upload_result(client,repo,d,new).status_code==200
+    store.complete(d['task']['id'],d['device']['id'],new['generation'],new['run_key'],**RESULT)
+    assert repo.get_task(d['task']['id'])['board_state']=='archived'
+
+
+@pytest.mark.parametrize('failure',['missing_file','missing_root','waiting','in_progress','uncertain','old_generation'])
+def test_auto_archive_requires_current_complete_visible_delivery(client,repo,settings,lease_task,failure):
+    d=lease_task;store=ExecutionStore(repo);run=start(store,d)
+    response=upload_result(client,repo,d,run);assert response.status_code==200
+    if failure not in {'in_progress','uncertain'}:
+        store.complete(d['task']['id'],d['device']['id'],run['generation'],run['run_key'],**RESULT)
+    if failure=='missing_file':
+        path=repo.connection.execute('SELECT stored_relpath FROM attachments WHERE id=?',(response.json()['attachment_id'],)).fetchone()[0]
+        (settings.files_dir/path).unlink()
+    if failure=='waiting':
+        repo.connection.execute("UPDATE tasks SET coordination_state='waiting' WHERE id=?",(d['task']['id'],));repo.connection.commit()
+    if failure=='uncertain':
+        repo.connection.execute("UPDATE hub_task_executions SET state='uncertain' WHERE task_id=?",(d['task']['id'],));repo.connection.commit()
+    if failure=='old_generation':
+        repo.update_task_status(d['task']['id'],'open','new work')
+        new=store.acquire(d['task']['id'],d['device']['id'],'new-generation-no-files')['execution']
+        store.start(d['task']['id'],d['device']['id'],new['generation'],new['run_key'])
+        store.complete(d['task']['id'],d['device']['id'],new['generation'],new['run_key'],**RESULT)
+    with repo.connection:
+        repo.connection.execute('BEGIN IMMEDIATE')
+        assert archive_completed_delivery(repo,d['task']['id'],None if failure=='missing_root' else settings.files_dir)==[]
+    assert repo.get_task(d['task']['id'])['board_state']=='auto'
+
+
+@pytest.mark.parametrize('restored',[False,True])
+def test_only_explicit_successor_retires_old_block_without_accepting_it(client,repo,settings,lease_task,restored):
+    from codex_hub.work_delivery import revise_task
+    d=lease_task;store=ExecutionStore(repo,files_root=settings.files_dir);run=start(store,d)
+    source,control_run=controller_source(repo,d)
+    amendment=revise_task(repo,source,d['device']['id'],{'target_task_id':d['task']['id'],
+        'instruction':'接续修复原目标','request_key':'board-followup-work-001','execution':control_run})
+    successor=repo.get_task(amendment['next_task_id'])
+    store.complete(d['task']['id'],d['device']['id'],run['generation'],run['run_key'],
+        **{**RESULT,'status':'blocked','summary':'保留原问题'})
+    if restored:organize_task(repo,d['project']['id'],d['task']['id'],'restore')
+    unrelated=repo.create_task(d['project']['id'],d['task']['title'],status='blocked',assigned_agent_id=d['worker']['id'])
+    next_data={**d,'task':successor};new=start(store,next_data,'successor-delivery-001')
+    assert upload_result(client,repo,next_data,new).status_code==200
+    store.complete(successor['id'],d['device']['id'],new['generation'],new['run_key'],**RESULT)
+    old=repo.get_task(d['task']['id'])
+    assert old['status']=='blocked' and old['result_summary']=='保留原问题'
+    assert old['board_state']==('active' if restored else 'archived')
+    assert old['board_archive_reason']==('' if restored else 'superseded:'+str(successor['id']))
+    assert repo.get_task(unrelated['id'])['board_state']=='auto'
+
+
+def test_task_list_reads_have_no_implicit_database_writes(repo):
+    d=seed_workspace(repo,room_messages=2)
+    before=repo.connection.total_changes
+    for board in ('active','history','all'):
+        _task_views(repo,d['project']['id'],board=board)
+    assert repo.connection.total_changes==before
+
+
+def test_board_reason_migration_retains_explicit_restore_and_existing_records(repo):
+    from codex_hub.task_board import initialize_task_board_schema
+    d=seed_workspace(repo,room_messages=2);task=d['tasks'][1]
+    organize_task(repo,d['project']['id'],task['id'],'restore')
+    count=repo.connection.execute('SELECT COUNT(*) FROM tasks').fetchone()[0]
+    repo.connection.execute('ALTER TABLE tasks DROP COLUMN board_archive_reason');repo.connection.commit()
+    initialize_task_board_schema(repo.connection);initialize_task_board_schema(repo.connection)
+    assert repo.connection.execute('SELECT COUNT(*) FROM tasks').fetchone()[0]==count
+    task=repo.get_task(task['id'])
+    assert task['board_state']=='active' and task['board_archive_reason']=='' and task['status']=='blocked'

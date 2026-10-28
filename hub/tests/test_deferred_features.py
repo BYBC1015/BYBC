@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 import pytest
 
@@ -26,8 +27,12 @@ def test_page_features_are_scoped_and_cache_versioned():
     assert "data-voice-session-src" in project
     assert "data-markdown-src" in project
     assert "data-video-reader-src" in project
-    assert project.count("20260812-page-features1") == 5
-    assert project.count("20260817-image-gallery2") == 2
+    for feature, references in (("codex-markdown.js", 2), ("codex-video-reader.js", 2),
+                                ("hub-voice.js", 1), ("image-viewer.js", 1),
+                                ("deferred-features.js", 1)):
+        versions = re.findall(re.escape(feature) + r"'\)\s*}}\?v=([^\"\s]+)", project)
+        assert len(versions) == references
+        assert len(set(versions)) == 1  # Eager and deferred loaders share one revision.
     assert "{% if entries %}<script" in project
     assert "media_library|selectattr('is_inline_video')|list" in project
 

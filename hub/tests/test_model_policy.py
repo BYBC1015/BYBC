@@ -34,6 +34,17 @@ def test_manual_choice_wins_over_controller_and_has_audit(repo, settings):
     assert repo.connection.execute('SELECT COUNT(*) FROM hub_model_policy_events').fetchone()[0] == 1
 
 
+def test_short_followup_uses_medium_unless_user_explicitly_overrides(repo, settings):
+    project, device, store, controller, worker, models = setup_team(repo, settings)
+    task = {'description': '你还需要什么吗', 'controller_read_only': 1}
+    choice = select_model(repo.connection, controller, settings.data_dir, task=task)
+    assert choice['model'] == 'gpt-6-astra' and choice['reasoning_effort'] == 'medium'
+    save_policy(repo.connection, controller, settings.data_dir, mode='manual',
+                model='gpt-6-astra', reasoning_effort='high', actor='user')
+    choice = select_model(repo.connection, controller, settings.data_dir, task=task)
+    assert choice['source'] == 'user' and choice['reasoning_effort'] == 'high'
+
+
 def test_controller_choice_and_default_preference_use_reported_capabilities(repo, settings):
     project, device, store, controller, worker, models = setup_team(repo, settings)
     assert select_model(repo.connection, worker, settings.data_dir)['model'] == 'gpt-6-sol'
