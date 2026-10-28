@@ -37,6 +37,14 @@ try {
     --workpath (Join-Path $BuildRoot "agent-runtime") --specpath $SpecDir `
     (Join-Path $PSScriptRoot "agent_runtime_main.py")
   if ($LASTEXITCODE -ne 0) { throw "HubAgentRuntime build failed" }
+  uv run --with pyinstaller --with "pywebview==6.2.1" python -m PyInstaller `
+    --noconfirm --clean --onefile --windowed --name HubDesktop `
+    --collect-all webview --icon $IconPath `
+    --add-data "$AssetsDir;codex_bridge/assets" `
+    --paths $RepoRoot --distpath $DistDir `
+    --workpath (Join-Path $BuildRoot "desktop-window") --specpath $SpecDir `
+    (Join-Path $PSScriptRoot "hub_desktop_main.py")
+  if ($LASTEXITCODE -ne 0) { throw "HubDesktop build failed" }
 } finally {
   Pop-Location
 }

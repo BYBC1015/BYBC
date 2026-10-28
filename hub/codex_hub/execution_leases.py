@@ -27,6 +27,8 @@ def initialize_execution_schema(db) -> None:
       CREATE INDEX IF NOT EXISTS hub_execution_task ON hub_task_executions(task_id,generation DESC);
     ''')
     db.commit()
+    from .execution_progress import initialize_progress_schema
+    initialize_progress_schema(db)
 
 
 def latest_execution(db, task_id: int) -> dict | None:
@@ -148,6 +150,8 @@ class ExecutionStore:
             resource_conflict(self.db,task,self.clock())
             from .work_delivery import inherit_dependency_artifacts
             inherit_dependency_artifacts(self.db,task)
+            from .execution_progress import clear_progress
+            clear_progress(self.db,task_id)
             self.db.execute('''INSERT INTO hub_task_executions
                 (task_id,generation,run_key,device_id,state,task_version,lease_until,created_at,detail)
                 VALUES (?,?,?,?,'prepared',?,?,?,?)''',
@@ -223,6 +227,8 @@ class ExecutionStore:
             if (record['state'] not in {'running','uncertain'} or task['status_version'] != record['task_version']
                     or task['status'] not in {'in_progress','blocked'}):
                 raise ExecutionConflict('任务已取消、结束或被更新；迟到结果保留本地，不覆盖当前状态。')
+            from .execution_progress import clear_progress
+            clear_progress(self.db,task_id)
             handoff=self.db.execute('SELECT * FROM hub_task_handoffs WHERE task_id=? AND generation=?',(task_id,generation)).fetchone()
             if handoff:
                 # complete is sent only after the child process exits (including

@@ -1,0 +1,18 @@
+.ws-live-indicator { color:#a7c7b8; font-size:12px; display:inline-flex; align-items:center; gap:7px; }
+.ws-live-indicator::before { content:""; width:6px; height:6px; border-radius:50%; background:#95bda9; box-shadow:0 0 0 4px #95bda914; }
+.ws-progress-status { color:#aab8b6; font-size:12px; line-height:1.7; margin:10px 0 3px; }
+.ws-message-progress .ws-message-content { min-width:0; }
+.ws-local-projects { border:1px solid #ffffff1c; border-radius:999px; padding:7px 11px; background:#ffffff05; color:#ced7d8; font:inherit; font-size:12px; cursor:pointer; white-space:nowrap; }
+.ws-local-projects:hover { background:#ffffff0d; }
+.ws-local-dialog { width:min(460px,calc(100vw - 32px)); box-sizing:border-box; border:1px solid #56605d; border-radius:22px; color:#e1e6e5; background:#232a2b; padding:25px; box-shadow:0 22px 90px #0007; }
+.ws-local-dialog::backdrop { background:#070c0fb3; backdrop-filter:blur(5px); }
+.ws-local-dialog h2 { margin:0 0 9px; font-size:20px; }
+.ws-local-dialog p { color:#aab8b6; font-size:13px; line-height:1.7; }
+.ws-local-dialog header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.ws-local-dialog button { color:inherit; font:inherit; cursor:pointer; }
+.ws-local-close { border:0; border-radius:50%; background:#ffffff09; width:30px; height:30px; }
+.ws-local-list { display:grid; gap:8px; margin-top:18px; }
+.ws-local-project { border:1px solid #ffffff17; border-radius:12px; background:#ffffff05; padding:14px; text-align:left; }
+.ws-local-project:hover { border-color:#a8bbad; background:#ffffff0a; }
+.ws-local-project:disabled { opacity:.5; cursor:default; }
+@media(max-width:600px) { .ws-local-projects { font-size:11px; padding:6px 8px; } }

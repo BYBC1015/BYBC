@@ -29,6 +29,19 @@ def test_reply_parent_is_sent_as_structured_field(monkeypatch):
     assert json.loads(requests[0].data)["reply_to_entry_id"] == 303
 
 
+def test_execution_progress_sends_only_scoped_generation_and_public_update(monkeypatch):
+    requests = []
+    monkeypatch.setattr(client_module, 'urlopen', lambda request, timeout: (requests.append(request) or FakeResponse(b'{}')))
+    client = HubClient('https://hub.example/hub', 'token')
+    client.publish_execution_progress('project-one', 9,
+        {'generation': 3, 'run_key': 'stable-run-key', 'private_field': 'not transmitted'},
+        4, 'assistant', '正在处理本轮任务。')
+    assert requests[0].full_url == 'https://hub.example/hub/api/projects/project-one/tasks/9/execution/progress'
+    assert requests[0].method == 'POST'
+    assert json.loads(requests[0].data) == {'generation': 3, 'run_key': 'stable-run-key',
+        'sequence': 4, 'kind': 'assistant', 'text': '正在处理本轮任务。'}
+
+
 @pytest.mark.parametrize("reply_id", [303, None])
 def test_task_reply_preserves_parent_and_initial_task_does_not_invent_one(monkeypatch, reply_id):
     requests = []

@@ -48,6 +48,13 @@ def main(argv: list[str] | None = None) -> int:
 
     instance = SingleInstance()
     if not instance.acquire():
+        if not (args.start or args.once or args.cli or args.ui):
+            from .desktop_window import launch_desktop
+            try:
+                if launch_desktop(args.config):
+                    return 0
+            except (OSError, RuntimeError):
+                pass
         if not args.start:
             notify_already_running()
         return 0

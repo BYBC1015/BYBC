@@ -711,20 +711,68 @@
     renderRecipients();
     etag = ''; // Recovery must fetch fresh status rather than accept a 304.
   }
+  let eventSource = null;
+  let eventHealthy = false;
+  let eventRefreshPending = false;
+  let eventSessionExpired = false;
+  let loginRequired = false;
+  let lastRefreshAt = 0;
+  const refreshInterval = () => loginRequired ? 30000 : eventHealthy && !pendingSubmission ? 10000 : 2000;
+  function showLoginRequired() {
+    loginRequired = true; eventSessionExpired = true; closeEventStream(); saveDraft();
+    const sync = shell.querySelector('[data-ws-sync]');
+    const link = document.createElement('a');
+    link.href = new URL(shell.dataset.projectUrl, location.href).pathname.split('/projects/')[0] + '/login';
+    link.target = '_blank'; link.rel = 'noopener'; link.textContent = '重新登录';
+    sync.replaceChildren(document.createTextNode('登录已过期 · '), link);
+    errors.textContent = '登录已过期，当前文字和附件仍保留。重新登录后可继续发送。'; errors.hidden = false;
+    presenceUnconfirmed();
+  }
+  function scheduleEventRefresh(delay = 350) {
+    eventRefreshPending = true;
+    if (refreshController) return;
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(refresh, Math.max(delay, 500 - (Date.now() - lastRefreshAt)));
+  }
+  function closeEventStream() {
+    eventSource?.close(); eventSource = null; eventHealthy = false;
+  }
+  function connectEventStream() {
+    if (eventSource || eventSessionExpired || document.hidden || !navigator.onLine || !window.EventSource || !shell.dataset.eventsUrl) return;
+    eventSource = new EventSource(shell.dataset.eventsUrl);
+    eventSource.addEventListener('open', () => { eventHealthy = true; });
+    eventSource.addEventListener('workspace', event => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.version && data.version !== shell.dataset.eventVersion) scheduleEventRefresh();
+      } catch { scheduleEventRefresh(); }
+    });
+    eventSource.addEventListener('error', () => { eventHealthy = false; scheduleEventRefresh(1000); });
+    eventSource.addEventListener('session-expired', () => {
+      eventSessionExpired = true; closeEventStream(); etag = ''; scheduleEventRefresh(50);
+    });
+  }
   async function refresh() {
     clearTimeout(refreshTimer);
     if (pendingSubmission && !submitting && !document.hidden) { await checkReceipt(); if (committed) return; }
     if (document.hidden || submitting) { refreshTimer = setTimeout(refresh, 2000); return; }
     if (refreshController) return;
+    eventRefreshPending = false;
+    lastRefreshAt = Date.now();
     refreshController = new AbortController();
     const timeout = setTimeout(() => refreshController?.abort(), 12000);
     try {
       const response = await fetch(shell.dataset.workspaceUrl || location.href, { headers:etag ? { "If-None-Match":etag } : {}, credentials:"same-origin", signal:refreshController.signal });
+      if (response.status === 401 || (response.redirected && new URL(response.url).pathname.endsWith('/login'))) { showLoginRequired(); return; }
       if (response.status === 304) { shell.querySelector("[data-ws-sync]").textContent = "已同步"; return; }
       if (!response.ok) throw new Error();
       const page = new DOMParser().parseFromString(await response.text(), "text/html");
       const freshShell = page.querySelector("[data-ws-shell]");
       if (!freshShell || freshShell.dataset.conversation !== shell.dataset.conversation || !updateCsrf(freshShell)) throw new Error();
+      if (loginRequired || eventSessionExpired) {
+        loginRequired = false; eventSessionExpired = false; errors.hidden = true; connectEventStream();
+      }
+      shell.dataset.eventVersion = freshShell.dataset.eventVersion || '';
       refreshPresence(freshShell);
       const nextEtag = response.headers.get("ETag") || "";
       const positionBeforeRefresh = captureReadingPosition();
@@ -751,7 +799,7 @@
           // New replies must not evict their focused message at the 40-message boundary.
           if (!followBottom && incoming.querySelector('.ws-load-records')) {
             const incomingIds = new Set(children.filter(node => node.dataset.wsEntry).map(node => node.dataset.wsEntry));
-            const older = Array.from(previous.values());
+            const older = Array.from(previous.values()).filter(node => !node.hasAttribute('data-ws-progress'));
             const firstShared = older.findIndex(node => incomingIds.has(node.dataset.wsEntry));
             const keep = firstShared > 0 ? older.slice(0, firstShared).slice(-40) : [];
             const firstMessage = children.findIndex(node => node.dataset.wsEntry);
@@ -780,12 +828,15 @@
     } catch (error) {
       presenceUnconfirmed();
       shell.querySelector("[data-ws-sync]").textContent = error.name === "AbortError" ? "连接超时 · 正在重试" : "等待连接";
-    } finally { clearTimeout(timeout); refreshController = null; refreshTimer = setTimeout(refresh, 2000); }
+    } finally { clearTimeout(timeout); refreshController = null; refreshTimer = setTimeout(refresh, eventRefreshPending ? 350 : refreshInterval()); }
   }
   refreshTimer = setTimeout(refresh, 2000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) { etag = ""; clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 300); } });
-  window.addEventListener('online', () => { etag = ''; clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 50); });
-  window.addEventListener('offline', presenceUnconfirmed);
+  connectEventStream();
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { etag = ""; connectEventStream(); scheduleEventRefresh(300); } else closeEventStream(); });
+  window.addEventListener('online', () => { etag = ''; connectEventStream(); scheduleEventRefresh(50); });
+  window.addEventListener('offline', () => { closeEventStream(); presenceUnconfirmed(); });
+  window.addEventListener('pagehide', closeEventStream);
+  window.addEventListener('pageshow', connectEventStream);
   setInterval(() => { if (!document.hidden) formatTimes(); }, 60000);
   shell.dataset.wsReady = "true";
 })();

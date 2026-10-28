@@ -29,6 +29,8 @@ def sha(path):
 
 
 def main():
+    if tuple(int(part) for part in __version__.split('.')[:2]) >= (1, 1):
+        raise SystemExit('Desktop releases use tools/hub-suite/build_desktop.py; the legacy tool pins must not downgrade current components.')
     parser = argparse.ArgumentParser()
     parser.add_argument("--kling-dir", type=Path, required=True)
     parser.add_argument("--reuse-payload", action="store_true", help="Resume packaging an already verified payload")
@@ -92,6 +94,14 @@ def build_bridge(stage):
         "--workpath", str(stage.parent / "agent-runtime"), "--specpath", str(stage.parent),
         str(ROOT / "tools/agent_runtime_main.py"),
     ], cwd=ROOT, check=True)
+    subprocess.run([
+        sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--windowed",
+        "--name", "HubDesktop", "--collect-all", "webview", "--icon", str(ROOT / "codex_bridge/assets/codex-owl.ico"),
+        "--add-data", str(ROOT / "codex_bridge/assets") + ";codex_bridge/assets",
+        "--paths", str(ROOT), "--distpath", str(stage),
+        "--workpath", str(stage.parent / "desktop-window"), "--specpath", str(stage.parent),
+        str(ROOT / "tools/hub_desktop_main.py"),
+    ], cwd=ROOT, check=True)
 
 
 def copy_music(stage):
@@ -124,7 +134,7 @@ def copy_color(stage):
         shutil.copy2(source / relative, target)
 
 
-def package(stage):
+def package(stage, *, components=None, release_dir=None):
     installer = Path(__file__).with_name("installer.py")
     common = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--windowed",
               "--icon", str(ROOT / "codex_bridge/assets/codex-owl.ico"), "--hidden-import", "win32com.client",
@@ -135,7 +145,10 @@ def package(stage):
     shutil.copy2(Path(__file__).with_name("README.md"), stage / "使用说明.md")
     files = [{"path": p.relative_to(stage).as_posix(), "bytes": p.stat().st_size, "sha256": sha(p)}
              for p in sorted(stage.rglob("*")) if p.is_file() and p.name != "bundle-manifest.json" and not system_runtime_file(p, stage)]
-    manifest = {"version": __version__, "components": {"bridge": __version__, "video-freeze": "1.0.1", "kling-batch": "1.1.1", "beat-workshop": "0.5.0", "color-workshop": "1.0.1"}, "files": files}
+    component_versions = components or {"bridge": __version__, "video-freeze": "1.0.1", "kling-batch": "1.1.1", "beat-workshop": "0.5.0", "color-workshop": "1.0.1"}
+    if (stage / 'HubDesktop.exe').is_file():
+        component_versions = {**component_versions, 'desktop': __version__}
+    manifest = {"version": __version__, "components": component_versions, "files": files}
     manifest["minimum_os"] = "Windows 10 x64"
     manifest["system_runtime"] = "Use the Universal C Runtime supplied by Windows 10/11; do not install a private system CRT."
     (stage / "bundle-manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -143,13 +156,15 @@ def package(stage):
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as z:
         for relative in [item["path"] for item in files] + ["bundle-manifest.json"]:
             z.write(stage / relative, relative)
+    release_dir = Path(release_dir) if release_dir else ROOT / 'dist/suite'
     subprocess.run(common + ["--name", f"CodexHub-Setup-v{__version__}", "--add-data", str(archive) + ";.",
-                            "--distpath", str(ROOT / "dist/suite"), "--workpath", str(stage.parent / "setup-build"), str(installer)], check=True)
-    release = ROOT / f"dist/suite/CodexHub-Setup-v{__version__}.exe"
+                            "--distpath", str(release_dir), "--workpath", str(stage.parent / "setup-build"), str(installer)], check=True)
+    release = release_dir / f"CodexHub-Setup-v{__version__}.exe"
     manifest.update(installer=str(release), bytes=release.stat().st_size, sha256=sha(release))
     (release.parent / "release.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     (release.parent / "SHA256SUMS.txt").write_text(f"{sha(release)}  {release.name}\n", encoding="utf-8")
     print(json.dumps({k: manifest[k] for k in ("installer", "bytes", "sha256", "components")}, ensure_ascii=False))
+    return release
 
 
 if __name__ == "__main__":

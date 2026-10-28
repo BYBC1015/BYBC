@@ -792,10 +792,18 @@ class BridgeRunner:
             self._publish_agent_result(slug,task_id,result)
             return
         with ExecutionRenewal(self.client, slug, task_id, receipt['execution']) as renewal:
+            publish = getattr(self.client, 'publish_execution_progress', None)
+            sequence = 0
+            def progress_callback(kind, text):
+                nonlocal sequence
+                sequence += 1
+                publish(slug, task_id, receipt['execution'], sequence, kind,
+                        text[:24000 if kind == 'assistant' else 300])
             exec_result = self._execute_codex(receipt['target_project'], prompt_path,
                 prompt_path.read_text(encoding='utf-8'), execution_preferences=receipt.get('model_selection'),
                 image_paths=[Path(p) for p in receipt['image_paths']], execution_context=context,
-                cancel_event=renewal.cancelled)
+                cancel_event=renewal.cancelled,
+                progress_callback=progress_callback if callable(publish) else None)
         result.executed_codex.append(exec_result)
         self._save_agent_result(slug, task_id, exec_result)
         self._publish_agent_result(slug, task_id, result)
@@ -1276,6 +1284,7 @@ class BridgeRunner:
         image_paths: list[Path] | None = None,
         execution_context: dict | None = None,
         cancel_event: threading.Event | None = None,
+        progress_callback=None,
     ) -> CodexExecResult:
         project_path = self._resolve_project_path(project_slug)
         if not project_path:
@@ -1304,6 +1313,8 @@ class BridgeRunner:
                 options['execution_context'] = execution_context
             if cancel_event is not None:
                 options['cancel_event'] = cancel_event
+            if progress_callback is not None:
+                options['progress_callback'] = progress_callback
             return self.executor.run(
                 project_slug,
                 project_path,

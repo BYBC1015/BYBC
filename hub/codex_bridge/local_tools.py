@@ -51,6 +51,18 @@ def tool_path(key: str, root: Path | None = None) -> Path:
     return (root or install_root()) / tool.relative_exe
 
 
+def installed_tool_version(tool: LocalTool, root: Path | None = None) -> str:
+    package = tool_path(tool.key, root).parent / 'package.json'
+    if tool.key in {'beat-workshop', 'color-workshop'} and package.is_file():
+        try:
+            version = json.loads(package.read_text(encoding='utf-8-sig')).get('version')
+            if isinstance(version, str) and 0 < len(version) < 30:
+                return version
+        except (OSError, ValueError, AttributeError):
+            pass
+    return tool.version
+
+
 def launch_tool(key: str, root: Path | None = None) -> subprocess.Popen:
     path = tool_path(key, root)
     if not path.is_file():
@@ -119,7 +131,7 @@ def populate_tools(parent: ttk.Frame) -> dict[str, ttk.Button]:
               wraplength=650).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 16))
     buttons = {}
     for index, tool in enumerate(TOOLS):
-        card = ttk.LabelFrame(parent, text=f"{tool.name}  ·  {tool.version}", padding=12)
+        card = ttk.LabelFrame(parent, text=f"{tool.name}  ·  {installed_tool_version(tool)}", padding=12)
         card.grid(row=2+index//2, column=index%2, sticky="nsew", padx=(0, 10), pady=(0, 12))
         card.columnconfigure(0, weight=1)
         ttk.Label(card, text=tool.description, wraplength=275).grid(row=0, column=0, sticky="nw")

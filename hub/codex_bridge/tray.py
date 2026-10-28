@@ -39,11 +39,11 @@ class BridgeTray:
         try:
             image = Image.open(self.icon_path).convert("RGBA")
             menu = pystray.Menu(
-                pystray.MenuItem("Show window", self._call(self.show_window), default=True),
-                pystray.MenuItem("Start listener", self._call(self.start_bridge)),
-                pystray.MenuItem("Stop listener", self._call(self.stop_bridge)),
-                pystray.MenuItem("Open Hub", self._call(self.open_hub)),
-                pystray.MenuItem("Exit", self._call(self.exit_app)),
+                pystray.MenuItem("打开 Hub", self._call(self.open_hub), default=True),
+                pystray.MenuItem("连接与设置", self._call(self.show_window)),
+                pystray.MenuItem("启动后台工作", self._call(self.start_bridge)),
+                pystray.MenuItem("暂停接收工作", self._call(self.stop_bridge)),
+                pystray.MenuItem("安全退出", self._call(self.exit_app)),
             )
             self.icon = pystray.Icon("codex_bridge", image, self.title, menu)
             self.icon.run_detached()

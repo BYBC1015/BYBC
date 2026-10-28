@@ -10,6 +10,28 @@ from test_model_policy import setup_team
 from test_agents import token_headers
 
 
+def test_controller_chat_real_model_plan_api_skips_paid_decider(client, repo, settings, tmp_path):
+    project, device, store, controller, worker, models = setup_team(repo, settings)
+    task = repo.create_task(project['id'], '你好，现在进度怎么样了？', assigned_agent_id=controller['id'])
+    headers = token_headers(repo, device)
+    methods = []
+    class APIClient:
+        hub = 'https://hub.example/hub'
+        def _json(self, method, path, data=None):
+            methods.append(method)
+            response = client.request(method, path, headers=headers, json=data)
+            assert response.status_code == 200, response.text
+            return response.json()
+    def forbidden_decider(*args):
+        raise AssertionError('ordinary controller chat must not start another paid model planner')
+    config = SimpleNamespace(codex_exec_output_dir=tmp_path)
+    first = allocate_task_model(config, APIClient(), project['slug'], task['id'], decider=forbidden_decider)
+    repeated = allocate_task_model(config, APIClient(), project['slug'], task['id'], decider=forbidden_decider)
+    assert first == repeated
+    assert first['model'] == 'gpt-6-astra' and first['reasoning_effort'] == 'medium'
+    assert methods == ['GET', 'GET']
+
+
 def test_each_task_can_receive_different_controller_model_and_retry_is_stable(client, repo, settings):
     project, device, store, controller, worker, models = setup_team(repo, settings)
     headers = token_headers(repo, device)

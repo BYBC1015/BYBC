@@ -82,6 +82,10 @@ class BridgeApp:
             self.root.after(300, self.start)
         elif self.agent_service.configured:
             self.root.after(300, self.agent_service.start)
+        # The packaged application opens the full workspace; connection controls
+        # remain available from its tray instead of occupying the main window.
+        if getattr(sys, 'frozen', False) and Path(sys.executable).with_name('HubDesktop.exe').is_file():
+            self.root.after(500, self._open_desktop_workspace)
 
     def _init_variables(self) -> None:
         codex_binding = find_binding(self.config, "codex")
@@ -748,8 +752,21 @@ class BridgeApp:
         self.controller.run_all_once_safely()
         self.refresh_ui()
 
-    def open_hub(self) -> None:
+    def open_hub(self) -> bool:
+        from .desktop_window import launch_desktop
+        try:
+            launched = launch_desktop(self.config_path, hub_override=self.hub_var.get() or self.config.hub)
+            if launched:
+                return True
+        except (OSError, RuntimeError) as exc:
+            self.append_log('桌面窗口暂未启动，已打开网页工作区：' + str(exc)[:250])
         webbrowser.open(hub_workspace_url(self.hub_var.get() or self.config.hub))
+        return False
+
+    def _open_desktop_workspace(self) -> None:
+        opened = self.open_hub()
+        if opened and self.tray.is_running:
+            self.root.withdraw()
 
     def open_toolbox(self) -> None:
         from .local_tools import launch_toolbox
@@ -1212,6 +1229,11 @@ class BridgeApp:
             self.root.after(250, self._finish_exit)
             return
         self.tray.stop()
+        try:
+            from .desktop_window import request_desktop_close
+            request_desktop_close(self.config_path)
+        except (OSError, RuntimeError):
+            pass
         self.root.destroy()
 
     def run(self) -> int:

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from .codex_stream import ProgressCallback, ProgressDispatcher, VisibleCodexProgress
 from .subprocess_utils import hidden_subprocess_kwargs
 from .tool_locator import resolve_codex_cli_path
 
@@ -48,13 +49,15 @@ class CodexExecRunner:
         image_paths: list[Path] | None = None,
         execution_context: dict | None = None,
         cancel_event: threading.Event | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> CodexExecResult:
         if (execution_context or {}).get('execution_route') == 'project':
             result = self._run_project(project_slug, project_path, prompt_path, prompt,
-                                       execution_preferences, image_paths, execution_context, cancel_event)
+                                       execution_preferences, image_paths, execution_context, cancel_event, progress_callback)
         else:
             result = self._run(project_slug, project_path, prompt_path, prompt,
-                               execution_preferences, image_paths, execution_context, cancel_event)
+                               execution_preferences, image_paths, execution_context, cancel_event,
+                               progress_callback=progress_callback)
         if execution_context:
             # Persist the actual process outcome before returning to the worker.
             # A last-message file alone is not evidence that the process exited.
@@ -73,7 +76,7 @@ class CodexExecRunner:
         return result
 
     def _run_project(self, project_slug, project_path, prompt_path, prompt,
-                     execution_preferences, image_paths, execution_context, cancel_event):
+                     execution_preferences, image_paths, execution_context, cancel_event, progress_callback=None):
         from .project_sessions import ProjectSessionStore, ProjectSessionError
 
         options = getattr(self.config, 'backend_options', {}) or {}
@@ -92,7 +95,8 @@ class CodexExecRunner:
                         output_path=Path(cached.get('output_path') or self._output_path(project_slug, prompt_path)),
                         error=cached.get('error') or '')
                 result = self._run(project_slug, project_path, prompt_path, prompt,
-                    execution_preferences, image_paths, execution_context, cancel_event, project_session=session)
+                    execution_preferences, image_paths, execution_context, cancel_event,
+                    project_session=session, progress_callback=progress_callback)
                 if session.started:
                     output = result.stdout.decode('utf-8', errors='replace') if isinstance(result.stdout, bytes) else result.stdout
                     session.observe_jsonl(output)
@@ -115,6 +119,7 @@ class CodexExecRunner:
         execution_context: dict | None = None,
         cancel_event: threading.Event | None = None,
         project_session=None,
+        progress_callback: ProgressCallback | None = None,
     ) -> CodexExecResult:
         cli_path = getattr(self.config, "codex_cli_path", None)
         if not cli_path:
@@ -175,6 +180,8 @@ class CodexExecRunner:
             if project_session.session_id:
                 command.append('resume')
             command.append('--json')
+        elif execution_context or progress_callback:
+            command.append('--json')
         if bool(getattr(self.config, "codex_exec_ignore_user_config", True)):
             command.append("--ignore-user-config")
         for image_path in image_paths or []:
@@ -204,10 +211,11 @@ class CodexExecRunner:
                                     error='Hub 已撤销本次执行许可，工作进程未启动。')
             if project_session:
                 project_session.start()
-            if self.process_runner is subprocess and (cancel_event is not None or project_session):
+            if self.process_runner is subprocess and (cancel_event is not None or project_session or progress_callback):
                 completed = self._run_cancellable(command, prompt, timeout, process_options,
                     cancel_event if cancel_event is not None else threading.Event(),
-                    on_unstarted=project_session.abort_unstarted if project_session else None)
+                    on_unstarted=project_session.abort_unstarted if project_session else None,
+                    progress_callback=progress_callback)
             else:
                 completed = self.process_runner.run(
                     command, input=prompt, capture_output=True, text=True,
@@ -276,7 +284,11 @@ class CodexExecRunner:
             process.kill()
         return tree_stopped
 
-    def _run_cancellable(self, command, prompt, timeout, process_options, cancel_event, on_unstarted=None):
+    def _run_cancellable(self, command, prompt, timeout, process_options, cancel_event,
+                         on_unstarted=None, progress_callback=None):
+        if progress_callback is not None:
+            return self._run_streaming(command, prompt, timeout, process_options, cancel_event,
+                                       on_unstarted, progress_callback)
         if cancel_event.is_set():
             if on_unstarted:
                 on_unstarted()
@@ -314,6 +326,94 @@ class CodexExecRunner:
                     # communicate retains its input/output buffers across timeouts;
                     # retry without resending stdin and without blocking on reads.
                     first_input = None
+
+    def _run_streaming(self, command, prompt, timeout, process_options, cancel_event,
+                       on_unstarted, progress_callback):
+        if cancel_event.is_set():
+            if on_unstarted:
+                on_unstarted()
+            return subprocess.CompletedProcess(command, -1, '', 'ERROR: Hub 已撤销本次执行许可，工作进程未启动。')
+        options = dict(process_options)
+        if os.name != 'nt':
+            options['start_new_session'] = True
+        try:
+            process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                       text=True, encoding='utf-8', errors='replace', **options)
+        except OSError:
+            if on_unstarted:
+                on_unstarted()
+            raise
+
+        dispatcher = ProgressDispatcher(progress_callback)
+        progress = VisibleCodexProgress(dispatcher.publish, self._redact)
+        stdout_parts, stderr_parts = [], []
+
+        def read_stdout():
+            try:
+                for line in process.stdout:
+                    stdout_parts.append(line)
+                    try:
+                        progress.feed(line)
+                    except Exception:
+                        # Malformed/unknown progress must not lose the raw JSONL
+                        # needed to validate the project session receipt later.
+                        pass
+            finally:
+                process.stdout.close()
+
+        def read_stderr():
+            try:
+                while True:
+                    chunk = process.stderr.read(65536)
+                    if not chunk:
+                        return
+                    stderr_parts.append(chunk)
+            finally:
+                process.stderr.close()
+
+        def write_prompt():
+            try:
+                process.stdin.write(prompt)
+                process.stdin.flush()
+            except (BrokenPipeError, OSError):
+                pass
+            finally:
+                try:
+                    process.stdin.close()
+                except (BrokenPipeError, OSError):
+                    pass
+
+        readers = [threading.Thread(target=read_stdout, name='hub-cli-stdout', daemon=True),
+                   threading.Thread(target=read_stderr, name='hub-cli-stderr', daemon=True)]
+        writer = threading.Thread(target=write_prompt, name='hub-cli-stdin', daemon=True)
+        for thread in readers:
+            thread.start()
+        writer.start()
+        progress.started()
+        deadline = time.monotonic() + timeout
+        cancelled = expired = tree_stopped = False
+        try:
+            while process.poll() is None or any(thread.is_alive() for thread in readers):
+                cancelled = cancel_event.is_set()
+                expired = time.monotonic() >= deadline
+                if cancelled or expired:
+                    tree_stopped = self._stop_owned_process_tree(process)
+                    break
+                cancel_event.wait(min(.05, max(.001, deadline - time.monotonic())))
+            process.wait(timeout=10)
+            for thread in [writer, *readers]:
+                thread.join(timeout=2)
+            stdout, stderr = ''.join(stdout_parts), ''.join(stderr_parts)
+            if expired and not cancelled:
+                raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr)
+            if cancelled:
+                detail = ('本次 CLI 及其子进程已停止。' if tree_stopped else
+                          '本次 CLI 已停止，子进程状态需核对；不会重跑任务。')
+                stderr += '\nERROR: Hub 已明确撤销本次执行许可，' + detail
+                return subprocess.CompletedProcess(command, process.returncode or -1, stdout, stderr)
+            return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+        finally:
+            dispatcher.close()
 
     def _redact(self, value: str | bytes | None) -> str:
         if isinstance(value, bytes):

@@ -124,6 +124,12 @@ class HubClient:
         return self._json('POST', f'/api/projects/{slug}/tasks/{task_id}/execution/renew',
                           {key:execution[key] for key in ('generation','run_key')})
 
+    def publish_execution_progress(self, slug: str, task_id: int, execution: dict,
+                                   sequence: int, kind: str, text: str) -> dict:
+        return self._json('POST', f'/api/projects/{slug}/tasks/{task_id}/execution/progress',
+                          {key:execution[key] for key in ('generation','run_key')} |
+                          {'sequence': sequence, 'kind': kind, 'text': text})
+
     def reconcile_task_execution(self, slug: str, task_id: int) -> dict:
         return self._json('POST', f'/api/projects/{slug}/tasks/{task_id}/execution/reconcile', {})
 

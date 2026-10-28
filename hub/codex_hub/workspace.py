@@ -106,7 +106,13 @@ def _task_views(repo, project_id: int, *, conversation_id: int | None = None,
         LEFT JOIN hub_task_model_choices mc ON mc.task_id=t.id
         WHERE t.project_id=?{clause} ORDER BY t.id DESC LIMIT ?""", params)
     result = [dict(row) for row in rows]
+    from .execution_progress import active_progress
+    progress_by_task={row['task_id']:row for row in active_progress(repo.connection,project_id,
+        task_ids=[task['id'] for task in result],limit=160)}
     for task in result:
+        progress=progress_by_task.get(task['id'])
+        task['execution_progress']={key:progress[key] for key in
+            ('generation','sequence','status_text','assistant_text','updated_at')} if progress else None
         task['model_selection'] = json.loads(task.pop('model_selection_json') or 'null')
         from .execution_leases import latest_execution
         task['archive_eligible']=can_archive(task,latest_execution(repo.connection,task['id']))
@@ -181,6 +187,8 @@ def build_workspace_context(request: Request, user: dict, project: dict, *,
     from .main import annotate_membership_presence, app_path, get_repo
 
     repo = get_repo(request)
+    from .execution_progress import project_event_version
+    workspace_event_version=project_event_version(repo.connection,project['id'])
     store = AgentStore(repo.connection)
     room = None
     if conversation_id is not None:
@@ -262,6 +270,11 @@ def build_workspace_context(request: Request, user: dict, project: dict, *,
         return page_url + ('?' + urlencode(query) if query else '')
 
     workspace_url = page_link()
+    from .execution_progress import active_progress
+    conversation_progress=active_progress(repo.connection,project['id'],conversation_id=conversation_id) if room else []
+    for progress in conversation_progress:
+        progress['detail_url']=app_path(request,f"/projects/{project['slug']}/tasks/{progress['task_id']}")
+        progress['view_version']=f"{progress['generation']}:{progress['sequence']}"
     return {
         'project': project, 'user': user, 'projects': projects, 'projectlist': projects,
         'durable_agents': agents, 'agent_conversations': conversations,
@@ -274,6 +287,9 @@ def build_workspace_context(request: Request, user: dict, project: dict, *,
         'task_active_url':page_link(task_history=None,tasks_before=None),
         'older_tasks_url':page_link(task_history='1',tasks_before=tasks[-1]['id']) if more_history else '',
         'entries': entries, 'conversation_entries': entries,
+        'conversation_progress':conversation_progress,
+        'workspace_events_url':app_path(request,f"/projects/{project['slug']}/events"),
+        'workspace_event_version':workspace_event_version,
         'default_agent_id': default_agent_id, 'selected_agent': selected_agent,
         'role_routing_enabled': any(a.get('role_key') == 'controller' for a in agents),
         'dispatch_key': dispatch_key, 'dispatch_draft': draft, 'dispatch_error': dispatch_error,
