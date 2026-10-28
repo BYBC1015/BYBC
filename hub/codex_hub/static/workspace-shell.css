@@ -406,3 +406,8 @@ html body.workspace-screen .ws-composer:focus-within { border-color:#b6aa97; box
 @media(max-width:899px) { .ws-head-actions { gap:12px; } }
 @media(max-width:540px) { .ws-head-feedback>span { display:none; } .ws-head-feedback { padding:7px 3px; } .ws-head-actions { gap:9px; } .ws-chat-title p { max-width:160px; } .ws-recipient-status { font-size:12px; } }
 @media(max-height:720px) { .ws-project-switch { margin-bottom:18px; } .ws-team { margin-bottom:17px; } .ws-room-search { margin-bottom:16px; } .ws-sidebar-bottom { margin-top:10px; padding-top:8px; } .ws-sidebar-bottom footer { margin-top:10px; } .ws-agent-state { margin-top:1px; } }
+
+/* Local outbox stays compact above the composer at narrow and short sizes. */
+[data-ws-other-queues] { max-height:100px; overflow:auto; }
+[data-ws-other-queues] a { overflow-wrap:anywhere; margin-top:4px; color:inherit; }
+@media (max-width:599px) { .ws-pending-submission { flex-wrap:wrap; gap:7px; } .ws-pending-submission>div { flex-basis:100%; } [data-ws-other-queues] { max-height:76px; } }

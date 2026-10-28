@@ -207,20 +207,7 @@ def register_routes(app: FastAPI) -> None:
             )
         session = repo.create_session(user["id"])
         response = redirect_to(request, "/projects")
-        response.set_cookie(
-            settings.session_cookie_name,
-            session.raw,
-            httponly=True,
-            samesite="lax",
-            secure=is_secure_request(request),
-        )
-        response.set_cookie(
-            settings.csrf_cookie_name,
-            session.csrf,
-            httponly=True,
-            samesite="lax",
-            secure=is_secure_request(request),
-        )
+        persist_session_cookies(request, response, session.raw, session.csrf)
         return response
 
     @app.post("/logout")
@@ -1666,7 +1653,8 @@ def render(
     csrf = csrf_token(request)
     new_csrf: str | None = None
     raw_session = request.cookies.get(get_settings(request).session_cookie_name, "")
-    if raw_session and current_user(request):
+    authenticated = bool(raw_session and current_user(request))
+    if authenticated:
         if not csrf or not get_repo(request).session_matches_csrf(raw_session, csrf):
             new_csrf = get_repo(request).rotate_session_csrf(raw_session)
             csrf = new_csrf or ""
@@ -1681,15 +1669,21 @@ def render(
         context,
         status_code=response_status_code,
     )
-    if new_csrf:
-        response.set_cookie(
-            get_settings(request).csrf_cookie_name,
-            new_csrf,
-            httponly=True,
-            samesite="lax",
-            secure=is_secure_request(request),
-        )
+    if authenticated and csrf:
+        # Existing desktop/browser logins are upgraded on a normal page refresh;
+        # cookie expiry stays bounded by the original server-side session expiry.
+        persist_session_cookies(request, response, raw_session, csrf)
     return response
+
+
+def persist_session_cookies(request: Request, response, raw_session: str, csrf: str) -> None:
+    max_age = get_repo(request).session_cookie_max_age(raw_session)
+    if max_age <= 0:
+        return
+    settings = get_settings(request)
+    for name, value in ((settings.session_cookie_name, raw_session), (settings.csrf_cookie_name, csrf)):
+        response.set_cookie(name, value, max_age=max_age, httponly=True,
+                            samesite="lax", secure=is_secure_request(request))
 
 
 def current_user(request: Request) -> dict[str, Any] | None:

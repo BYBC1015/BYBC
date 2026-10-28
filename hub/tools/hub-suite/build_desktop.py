@@ -15,7 +15,7 @@ import zipfile
 import build
 
 ROOT = build.ROOT
-OUTPUT = ROOT.parent / 'output/hub-desktop-20261029'
+OUTPUT = ROOT.parent / 'output/hub-local-first-20261029'
 COMPONENTS = {'bridge': build.__version__, 'agent-runtime': build.__version__, 'desktop': build.__version__,
               'video-freeze': '1.1.1', 'kling-batch': '1.2.1', 'beat-workshop': '0.5.0', 'color-workshop': '1.0.1'}
 VIDEO_SHA256 = 'cdd3c65b18a8cd5684b2f36c4580960d8e5446920faea555c6d020fc5ce5ea71'

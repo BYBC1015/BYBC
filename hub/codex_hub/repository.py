@@ -289,6 +289,26 @@ class Repository:
         ).fetchone()
         return _row_to_dict(row)
 
+    def session_cookie_max_age(self, raw_session: str) -> int:
+        """Persist the browser cookie only until this session's fixed expiry.
+
+        This read never renews the database session or creates a sliding login.
+        """
+        if not raw_session:
+            return 0
+        row = self.connection.execute(
+            "SELECT expires_at FROM sessions WHERE session_hash = ?",
+            (hash_token(raw_session),),
+        ).fetchone()
+        if row is None:
+            return 0
+        try:
+            expires = datetime.fromisoformat(row["expires_at"])
+            remaining = int((expires - datetime.now(timezone.utc)).total_seconds())
+        except (TypeError, ValueError):
+            return 0
+        return max(0, min(14 * 24 * 60 * 60, remaining))
+
     def session_matches_csrf(self, raw_session: str, raw_csrf: str) -> bool:
         if not raw_session or not raw_csrf:
             return False

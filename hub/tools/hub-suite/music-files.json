@@ -1,0 +1,379 @@
+{
+  "version": "0.5.0",
+  "source": "tools/davinci-beat-workshop",
+  "requires": "DaVinci Resolve Studio 21.1 (not bundled)",
+  "files": [
+    {
+      "path": "package.json",
+      "sha256": "52a24a1d62ec20fcfbc078d594a7c467a278e31c99d2034b3e09f85116aa2087"
+    },
+    {
+      "path": "manifest.xml",
+      "sha256": "12a279e2e117e9792f162aaa551b3e72cbb73e411ac6eb824392aa8ef896b691"
+    },
+    {
+      "path": "main.js",
+      "sha256": "50b17eca286261e8278bbb3516db0733fa2fa8593392fc6101d1d222ea6dc598"
+    },
+    {
+      "path": "preload.js",
+      "sha256": "4bf4d5ebf58175f237f57d0fea57b3eda8cb43fef99fafb5d69012ed0970da08"
+    },
+    {
+      "path": "engine.js",
+      "sha256": "8cec519db3805b8eb3de97548e56462b5deca63569d0c28733ade9594e003139"
+    },
+    {
+      "path": "ui.js",
+      "sha256": "b8f61ac181255266689135fcd5ef8bf7adb1376e9576f76c00e7913bdc03db60"
+    },
+    {
+      "path": "index.html",
+      "sha256": "45f2cc227fe163ad4fcb8dcecd309be9e798cc2d34fbe4ec68b242ba112971d8"
+    },
+    {
+      "path": "style.css",
+      "sha256": "3f82acb06fc6d1cad510921a475ae551c99636b4a6de67c17ea6308d88b21fb5"
+    },
+    {
+      "path": "resolve_bridge.py",
+      "sha256": "71a4a2e35117fd378826af10daa0dbeef5eb4fdefb2aa81d41134e19abeefe70"
+    },
+    {
+      "path": "launch.ps1",
+      "sha256": "8fe7bcb6bf3984438aa7960847dfa9de76a4de5ec7437f86704782930428a28c"
+    },
+    {
+      "path": "README.md",
+      "sha256": "2c4af1dc7e4d5e6d8bd865bea94cec27016a4702513bcd6320fc62d56adda941"
+    },
+    {
+      "path": "sample_renderer.py",
+      "sha256": "9d463f1a7898f32515469549099f16d7bba29630c8302f5a5aa4a34d66f25a46"
+    },
+    {
+      "path": "instruments.js",
+      "sha256": "9762363a5aeacf072d715d26f9581cb277990334828b9850a5e12e3944f3743c"
+    },
+    {
+      "path": "ensemble-ui.js",
+      "sha256": "4adfefc2916ca5c7c17b70bd198d6ace2bbdecaf3c1c22a5417d6b5322a7a10d"
+    },
+    {
+      "path": "ensemble.css",
+      "sha256": "9cdc1a710d3663d5d663b9a9dbaa8ce73696b7a2e4316f5b95a1826d7b6049c6"
+    },
+    {
+      "path": "compact.css",
+      "sha256": "372db9260d2a764b4a69bc4de4f894740c1384d818ef4a502d14682db70fa214"
+    },
+    {
+      "path": "storage.js",
+      "sha256": "bb81edaad30629a5d3960a914e55583fbadca858a6ef3654d3bb6ca40e0e7ab6"
+    },
+    {
+      "path": "project.js",
+      "sha256": "46712ea5d96fcdee08415cb5433682d776e1d09f547bf805757fc6d73a4362c7"
+    },
+    {
+      "path": "render-worker.js",
+      "sha256": "9d80c3843a30dbb938663c06664f68a058055ea13c11c745337cd41baf4bd983"
+    },
+    {
+      "path": "render-service.js",
+      "sha256": "28628c3a227bac5457026fc1f88e6b7f68d2f7dae254d2f624815ab393396fbc"
+    },
+    {
+      "path": "audio-ui.js",
+      "sha256": "0d2fd6be13ab592b1987e8de81228776ed1aeb09437650a6b198fce255014cae"
+    },
+    {
+      "path": "enhancements.js",
+      "sha256": "32c8a6d987a31e97a8034db8835bc248ea3c390c565ca05bc8acb82a9a26ba9f"
+    },
+    {
+      "path": "enhancements.css",
+      "sha256": "5eaf8ba8672d2629c6da00ba5d4b187fb7c06e1a9f05f5195a7f5c4a516ce040"
+    },
+    {
+      "path": "INSTRUMENTS.md",
+      "sha256": "2ccde97a32353c6db20787b9911cd851f97fcf3c9154bd48c2f20dd8389f5706"
+    },
+    {
+      "path": "VALIDATION.md",
+      "sha256": "9b72ab854f211442c92c5372d366796637d7592a4eb567d319bcb19fd24c201f"
+    },
+    {
+      "path": "nature.js",
+      "sha256": "873b51773f961f63b7f7a463daff66b2e38bf555073cc1ecdc96b44e59f42773"
+    },
+    {
+      "path": "nature-ui.js",
+      "sha256": "bc01285a1a9ecc80f3ac3e898588c56e67cb83be0c20f62f1269fa292aff6592"
+    },
+    {
+      "path": "nature-renderer.js",
+      "sha256": "ec1b5c6d0d2f32a35c6f622d7a6d839e845d23ceca6c7b04070829fcad5c8a37"
+    },
+    {
+      "path": "nature.css",
+      "sha256": "05bd828f7bec0094575ac9f07c047e8f1b7cfa4c6cef0c57ed60926570f1566f"
+    },
+    {
+      "path": "host-state.js",
+      "sha256": "d436e1fc15b678406de66942a3ec59611ca40641a4ef82f3728cad2ecb42ad29"
+    },
+    {
+      "path": "audio-files.js",
+      "sha256": "0b72f120988784429caf86c6c59daa582d540f52c3d027ec063f378f3b78dba4"
+    },
+    {
+      "path": "ai-api.js",
+      "sha256": "da996c4fd0e1df4f865fcdedf036d3c9351e3b287a540de8b7af862011f3d7f5"
+    },
+    {
+      "path": "ai-cli.js",
+      "sha256": "6006223f920148bdcfded8a0c3255142f77b2f9cb5e54e9351a9a5b0bc5a9673"
+    },
+    {
+      "path": "ai.ps1",
+      "sha256": "00ded457e4e35ee2db5cbfdc6e7c5aa8a166bf0a630442c992df34d93efbc763"
+    },
+    {
+      "path": "AI-CREATION.md",
+      "sha256": "088b2703c8b9bd6d7765ff81ed035eee499cd08bca5f660ee8676e9591888700"
+    },
+    {
+      "path": "COMPOSITION-GUIDE.md",
+      "sha256": "86c927ed4559660d8dc9d68b10687370ef13fc296ce55df8d78ce2b4dc6ac29f"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/bin/fluidsynth.exe",
+      "sha256": "557b9e98d860a6df6a927e58f6cc274d6451a046da780a1011810d9d00db133d"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/bin/libfluidsynth-3.dll",
+      "sha256": "d2819955444d4b44217be9c431f2b7e38fd4062ef71341de8725eed4e31c4957"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/bin/SDL3.dll",
+      "sha256": "2dfe1c60557c3e054ddda61bf7f29fdfd462c10faddf04dc6864961f43960df6"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/bin/sndfile.dll",
+      "sha256": "4e3bd2de8e1485110eaebef8e1239471f73d608773831c323bf528e05645655e"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/audio.h",
+      "sha256": "7533c47eb83cf2c7d219aaa71c9003cc3badcd73aaabc2914fbd4cb8d289377a"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/event.h",
+      "sha256": "36f4195a9fd12c42207c06b98deb563c6a48b61f4c76e84999ace79d7bd8479a"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/gen.h",
+      "sha256": "f8487b4eb2eaa0057de7d33bd01e6ca93de75e00e7091cecf07cd805956b7136"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/ladspa.h",
+      "sha256": "7045101deaa1d43a557f33959c70ec83aaae4003f0e2b9570022c858f460caa2"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/log.h",
+      "sha256": "d35798e1991c66749965211e91c776c10c45d8ba73a3bb8fd2fae2d32a6d1ed6"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/midi.h",
+      "sha256": "126a941a4a7c598a0f8f58c7317a29a29d27906ba5573508719421c2003aa5c0"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/misc.h",
+      "sha256": "b214f54217f519e5caf1df334462093116b1016daeca769634c78749b14ee49c"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/mod.h",
+      "sha256": "14ea8d09b608e24e4466540bc7575b3188d1c3b7c34dd706ccfb1b6fef90796b"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/seq.h",
+      "sha256": "0fe198fbcb56ee3c1c46db54a972525d9fff655d6c8a28a3b0d9e62ec42c165e"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/seqbind.h",
+      "sha256": "d073f24841d5e8becf28ee4250d2cab9de30347585a513d69c660c9a47638176"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/settings.h",
+      "sha256": "d8a7bad37c4c53b325fca7cdef5f98504f1e2a8aa0dc7eb9861070b26927e496"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/sfont.h",
+      "sha256": "f31201b86ff0bb0df79f6076c4d077946e7b127164b53fc0ff5c2f2a9486d4be"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/shell.h",
+      "sha256": "970646629660beb2c25d5f74ccfe32a30142e6b51f04fe8209491c57ccca3225"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/synth.h",
+      "sha256": "3bfdad38cb2e776e6695f52ce64266397e2c030380efe5130a11d44191a4db3f"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/types.h",
+      "sha256": "17ad4c678f4d8d78398331c61818c2b6c9fd497e79077377f84cc4b320e26e75"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/version.h",
+      "sha256": "7fa5e9e61fc85132bf26cefd9edba1874365b6459fb5b8fda2037a93330329a2"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth/voice.h",
+      "sha256": "ab8fe0270e12395b8acfaec9234b9502f6f630c0e2b972b6cff56e960cb2c5d6"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/include/fluidsynth.h",
+      "sha256": "08c06f91b4d5d2524696d2e4c713d8d590c5b2ac5442c23cec5d17d1431928ed"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/lib/cmake/fluidsynth/FluidSynth-shared-targets-release.cmake",
+      "sha256": "be8255ea634ff1220543e7c3c5ae624034f1145b46405d3eefe3eae74ed8d4c3"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/lib/cmake/fluidsynth/FluidSynth-shared-targets.cmake",
+      "sha256": "88ea095c31136013aa3af7ad716af3b7e50ef680d22474dcae8d5dc1dd279336"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/lib/cmake/fluidsynth/FluidSynthConfig.cmake",
+      "sha256": "443b2536364b8cdb7649a3a1a5a406a0755666ee8258c89ba9ceea46d29044d1"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/lib/cmake/fluidsynth/FluidSynthConfigVersion.cmake",
+      "sha256": "d3994d2506ebda2f137ecbd3ea3a70a390767806d3dfbbcb74d8d00838ffcaf8"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/lib/libfluidsynth-3.lib",
+      "sha256": "50d3a03276f76a62b8e0ee513e97b33899760f6f25f7ad6b29d5fc0fb40ffcad"
+    },
+    {
+      "path": "assets/fluidsynth/fluidsynth-v2.6.1-win10-x64-cpp11/lib/pkgconfig/fluidsynth.pc",
+      "sha256": "7731fa3bdf71124a169a46063687384b11cd661ae62a8b1e48561d27437205c9"
+    },
+    {
+      "path": "assets/FluidSynth-LICENSE.txt",
+      "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+    },
+    {
+      "path": "assets/fluidsynth.zip",
+      "sha256": "fab7a2e4b85675b66970f97a39bbc239729c5e0f237198b5922a6a73cbc8677c"
+    },
+    {
+      "path": "assets/GeneralUser-GS.sf2",
+      "sha256": "9575028c7a1f589f5770fccc8cff2734566af40cd26ed836944e9a5152688cfe"
+    },
+    {
+      "path": "assets/GeneralUser-LICENSE.txt",
+      "sha256": "7b32efefdf95ce38a043799f0659853ddc00fbaa14d8c50f0aca16b9b8b405be"
+    },
+    {
+      "path": "assets/GeneralUser-README.md",
+      "sha256": "fb23217ca2a9cf199e04aed1b04a7e81e024330411941c3638302e081584c151"
+    },
+    {
+      "path": "assets/nature/birds.wav",
+      "sha256": "710bf21a50babce5506c4c7cd3740b7801275960d2edab8fbeab5ccf09c8e78f"
+    },
+    {
+      "path": "assets/nature/catalog.json",
+      "sha256": "3e17e0d48f388ff30fe3948aaaaf86989e5171e2a9cbae291cb8b72b51a2a6c2"
+    },
+    {
+      "path": "assets/nature/CC-BY-4.0.txt",
+      "sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411"
+    },
+    {
+      "path": "assets/nature/CC0-1.0.txt",
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+    },
+    {
+      "path": "assets/nature/CREDITS.md",
+      "sha256": "cea018dbfcca8613266e2babcfbd912c597f9721f325d63f30f4fd7f84d64e6c"
+    },
+    {
+      "path": "assets/nature/fireplace.wav",
+      "sha256": "6f8530c8f5a92b23d43d7a8bfe68e5c7216f7cb33a61bb628e9fbc891b56961d"
+    },
+    {
+      "path": "assets/nature/originals/birds.ogg",
+      "sha256": "e59b19c2a377d5835d07e7ec8f8c876b9f40ae7f703738b55d616ef96a1638b2"
+    },
+    {
+      "path": "assets/nature/originals/fireplace.ogg",
+      "sha256": "a6395379a32c2dc30dd870c4571ded4a5311435aacfe354b3a82a9b3ab98620b"
+    },
+    {
+      "path": "assets/nature/originals/rain.ogg",
+      "sha256": "b84c1daf259a24283be40b7663656d17676df4eb60c1e0332820570db891848a"
+    },
+    {
+      "path": "assets/nature/originals/storm.ogg",
+      "sha256": "7e2a9bee62273b1deb169b6f7a308b70ead6ae450d3f6c75b854a44e4bef7b5a"
+    },
+    {
+      "path": "assets/nature/originals/stream.ogg",
+      "sha256": "ce372c5db561168636647dd7d4aac39ef1785ae5d415ad0e589186ce1b7c5796"
+    },
+    {
+      "path": "assets/nature/originals/summer-night.ogg",
+      "sha256": "2eb2efb8f5c6733e74dc8546f2ecfac40407e8242a9eed96a72e0fc68790ac6f"
+    },
+    {
+      "path": "assets/nature/originals/waves.ogg",
+      "sha256": "20e1aec7c7542f71645275871650881ea33bc92bd9816b243ea920bb1daa51a0"
+    },
+    {
+      "path": "assets/nature/originals/wind.ogg",
+      "sha256": "cfdc81be69cd5f434ebfeb708bdf094725f3052d76691f550ff0e10eee3e32d2"
+    },
+    {
+      "path": "assets/nature/rain.wav",
+      "sha256": "5f1aea2f8c2f92387ebe627c4551f12e95b6d1ec50434a9585840034bfe06d3c"
+    },
+    {
+      "path": "assets/nature/storm.wav",
+      "sha256": "192e6b43c4deaf546e61a6157a966d7cbfa3d67b1f7e44cc2193b8636235b043"
+    },
+    {
+      "path": "assets/nature/stream.wav",
+      "sha256": "8a0775a69505c28e4a3c7896db52f5603a52074935776f78272c7c9bc62cae10"
+    },
+    {
+      "path": "assets/nature/summer-night.wav",
+      "sha256": "65e6765c231c2fa67d8cfd355e797388b6686957b5d3fe8187dcba1f6a58dcd5"
+    },
+    {
+      "path": "assets/nature/UPSTREAM-LICENSES.md",
+      "sha256": "e6c7aa889704bb8c5fb762ce2f6ceb0eef27e8317bec68066df40ea8a785327d"
+    },
+    {
+      "path": "assets/nature/waves.wav",
+      "sha256": "681386458968c8b6b02daccb2288bdd519944f9fec44b4cb01488a69b52bd361"
+    },
+    {
+      "path": "assets/nature/wind.wav",
+      "sha256": "a869e054e4704a80bac99d631280647a7b87a189db0b83241c448abd616642d0"
+    },
+    {
+      "path": "assets/sources.json",
+      "sha256": "3f0bfd2d0cc5ead2aff5fdba7e48deca495811e369031ccbfc1def8467dd1d41"
+    },
+    {
+      "path": "curve-editor.js",
+      "sha256": "ff776b9e6cae838b1edfe5a0134f836218ed504060b01558255a0441efe45144"
+    },
+    {
+      "path": "curve-editor.css",
+      "sha256": "e933f921a2afc7f25f10ccc84fa7204bb7e5493c418aa5b8a2bf713873f38b43"
+    }
+  ]
+}

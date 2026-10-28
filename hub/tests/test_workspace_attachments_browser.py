@@ -101,7 +101,7 @@ def test_attachment_error_retry_actual_dispatch_and_file_only(live_hub, repo, wi
             browser.close()
 
 
-def test_attachment_drop_paste_limits_and_reload_notice(live_hub, repo):
+def test_attachment_drop_paste_limits_and_reload_restores_bytes(live_hub, repo):
     seed_workspace(repo, room_messages=1)
     with playwright.sync_playwright() as runtime:
         browser = runtime.chromium.launch(headless=True)
@@ -135,9 +135,17 @@ def test_attachment_drop_paste_limits_and_reload_notice(live_hub, repo):
             before_reload = request_key(page)
             page.reload()
             assert page.locator('[data-ws-input]').input_value() == '这份文字在刷新后仍然保留。'
-            playwright.expect(page.locator('[data-ws-attachment]')).to_have_count(0)
-            playwright.expect(page.locator('[data-ws-attachment-error]')).to_contain_text('附件需要重新添加')
-            assert request_key(page) != before_reload
+            playwright.expect(page.locator('[data-ws-attachment]')).to_have_count(2)
+            playwright.expect(page.locator('[data-ws-attachment-error]')).to_be_hidden()
+            assert request_key(page) == before_reload
+            recovered = page.evaluate("""async () => {
+                const s=document.querySelector('[data-ws-shell]').dataset;
+                const {draft}=await CodexWorkspaceStore.read(`${s.user}.${s.project}.${s.conversation}`);
+                return Promise.all(draft.files.map(async item => ({name:item.file.name, size:item.file.size, bytes:Array.from(new Uint8Array(await item.file.arrayBuffer()))})));
+            }""")
+            assert recovered[0]['bytes'] == list(PNG)
+            assert recovered[1]['bytes'] == list(b'dropped input')
+            for _ in range(2): page.locator('[data-ws-attachment-remove]').first.click()
             page.locator('[data-ws-input]').fill('')
             playwright.expect(page.locator('[data-ws-send]')).to_be_disabled()
         finally:
@@ -200,17 +208,14 @@ def test_attachment_unknown_response_ime_multiagent_and_compact_height(live_hub,
             assert request_key(page) == original_key
             assert page.locator('[data-ws-input]').input_value() == description
             assert page.locator('[data-ws-input]').get_attribute('readonly') is not None
-            playwright.expect(page.locator('[data-ws-attachment]')).to_have_count(0)
-            playwright.expect(page.locator('[data-ws-send]')).to_be_disabled()
-            page.locator('[data-ws-attachment-input]').set_input_files({'name':'不是原附件.txt', 'mimeType':'text/plain', 'buffer':b'reference data'})
-            playwright.expect(page.locator('[data-ws-attachment-error]')).to_contain_text('与原任务附件不匹配')
-            assert request_key(page) == original_key
-            # Same metadata, different bytes must not silently create new work.
-            page.locator('[data-ws-attachment-input]').set_input_files({'name':long_name, 'mimeType':'text/plain', 'buffer':b'changed bytes!'})
-            page.locator('[data-ws-send]').click()
-            playwright.expect(page.locator('[data-ws-dispatch-error]')).to_contain_text('内容与原请求不一致')
-            assert request_key(page) == original_key
-            playwright.expect(page.locator('[data-ws-attachment]')).to_have_count(0)
+            playwright.expect(page.locator('[data-ws-attachment]')).to_have_count(1)
+            playwright.expect(page.locator('[data-ws-attach]')).to_be_disabled()
+            # Original bytes survive reload; an uncertain request stays immutable.
+            assert page.evaluate("""async () => {
+                const s=document.querySelector('[data-ws-shell]').dataset;
+                const {job}=await CodexWorkspaceStore.read(`${s.user}.${s.project}.${s.conversation}`);
+                return await job.payload.files[0].file.text();
+            }""") == 'reference data'
             assert len(repo.list_tasks(data['project']['id'])) == count + 2
             page.unroute('**/workspace-dispatch/*')
             with page.expect_navigation(wait_until='domcontentloaded'):
@@ -226,7 +231,7 @@ def test_attachment_unknown_response_ime_multiagent_and_compact_height(live_hub,
             browser.close()
 
 
-def test_pending_unreceived_upload_reselects_original_order_with_same_key(live_hub, repo):
+def test_pending_unreceived_upload_restores_original_order_and_resumes_same_key(live_hub, repo):
     data = seed_workspace(repo, room_messages=1)
     with playwright.sync_playwright() as runtime:
         browser = runtime.chromium.launch(headless=True)
@@ -246,19 +251,11 @@ def test_pending_unreceived_upload_reselects_original_order_with_same_key(live_h
             playwright.expect(page.locator('[data-ws-pending]')).to_be_visible()
             playwright.expect(page.locator('[data-ws-pending-message]')).to_contain_text('暂未查到')
             assert len(repo.list_tasks(data['project']['id'])) == count
+            # Reload automatically resumes the explicitly submitted queue with
+            # the original byte order and request key; no re-selection is needed.
             page.reload()
-            playwright.expect(page.locator('[data-ws-pending-message]')).to_contain_text('暂未查到')
-            assert request_key(page) == key
-            picker = page.locator('[data-ws-attachment-input]')
-            picker.set_input_files(original[1])
-            playwright.expect(page.locator('[data-ws-send]')).to_be_disabled()
-            picker.set_input_files(original[0])
-            assert request_key(page) == key
-            assert page.locator('[data-ws-attachment] strong').all_text_contents() == ['先读说明.txt', '再看数据.txt']
-            playwright.expect(page.locator('[data-ws-send]')).to_be_enabled()
-            assert_composer_visible(page, 700)
-            with page.expect_navigation(wait_until='domcontentloaded'):
-                page.locator('[data-ws-send]').click()
+            page.wait_for_url('**/conversations/*')
+            playwright.expect(page.locator('[data-ws-input]')).to_have_value('')
             tasks = repo.list_tasks(data['project']['id'])
             assert len(tasks) == count + 1
             task = max(tasks, key=lambda item:item['id'])
@@ -310,21 +307,17 @@ def test_attachment_retry_after_login_in_another_tab_keeps_files(live_hub, repo)
             assert len(created) == 1
             assert len(repo.list_task_attachments(data['project']['id'], created[0]['id'])) == 1
 
-            # An initial, non-pending stale-token submission is rejected, updates
-            # only CSRF, and keeps the File available for the next click.
+            # Initial sends now verify the same account and fetch fresh CSRF
+            # before POST, so a session rotation succeeds in one explicit click.
             page.locator('[data-ws-input]').fill('首次发送遇到旧登录凭据也可以恢复。')
             page.locator('[data-ws-attachment-input]').set_input_files({'name':'凭据恢复.txt', 'mimeType':'text/plain', 'buffer':b'csrf-recovery'})
             playwright.expect(page.locator('[data-ws-attachment]')).to_have_count(1)
             old_token = page.locator('[data-ws-dispatch] [name="_csrf"]').input_value()
             new_token = rotate_login()
             page.locator('[data-ws-dispatch] [name="_csrf"]').evaluate('(el, value) => { el.value = value; }', old_token)
-            page.locator('[data-ws-send]').click()
-            playwright.expect(page.locator('[data-ws-dispatch-error]')).to_contain_text('登录凭据已更新')
-            assert page.locator('[data-ws-dispatch] [name="_csrf"]').input_value() == new_token
-            playwright.expect(page.locator('[data-ws-attachment]')).to_have_count(1)
-            playwright.expect(page.locator('[data-ws-send]')).to_be_enabled()
             with page.expect_navigation(wait_until='domcontentloaded'):
                 page.locator('[data-ws-send]').click()
+            assert page.locator('[data-ws-dispatch] [name="_csrf"]').input_value() == new_token
             created = [task for task in repo.list_tasks(data['project']['id']) if task['description'] == '首次发送遇到旧登录凭据也可以恢复。']
             assert len(created) == 1 and len(repo.list_task_attachments(data['project']['id'], created[0]['id'])) == 1
         finally:

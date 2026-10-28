@@ -12,10 +12,13 @@ $BuildDir = Join-Path $BuildRoot "codex-bridge"
 $SpecDir = $BuildRoot
 $DistDir = Join-Path $RepoRoot "dist"
 $AssetsDir = Join-Path $RepoRoot "codex_bridge\assets"
+$WebAssetsDir = Join-Path $RepoRoot "codex_hub\static"
 $IconPath = Join-Path $AssetsDir "codex-owl.ico"
 
 Push-Location $RepoRoot
 try {
+  uv run python -c "from pathlib import Path; from codex_bridge.desktop_assets import write_asset_manifest; write_asset_manifest(Path('codex_hub/static'), Path('codex_hub/templates'))"
+  if ($LASTEXITCODE -ne 0) { throw "Desktop asset manifest generation failed" }
   uv run --with pyinstaller --with pillow --with pystray --with "pywinauto>=0.6.9" python -m PyInstaller `
     --noconfirm `
     --clean `
@@ -41,6 +44,7 @@ try {
     --noconfirm --clean --onefile --windowed --name HubDesktop `
     --collect-all webview --icon $IconPath `
     --add-data "$AssetsDir;codex_bridge/assets" `
+    --add-data "$WebAssetsDir;codex_hub/static" `
     --paths $RepoRoot --distpath $DistDir `
     --workpath (Join-Path $BuildRoot "desktop-window") --specpath $SpecDir `
     (Join-Path $PSScriptRoot "hub_desktop_main.py")

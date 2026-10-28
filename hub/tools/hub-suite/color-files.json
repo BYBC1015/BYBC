@@ -1,0 +1,240 @@
+{
+  "version": "1.0.1",
+  "files": [
+    {
+      "path": "package.json",
+      "bytes": 192,
+      "sha256": "6d4a4d3186d9a29fededa2e4f12771a3f8315257130ec46e02573c2ce39947bf"
+    },
+    {
+      "path": "catalog.json",
+      "bytes": 2941,
+      "sha256": "cfddb0562c0367bac82ea4d42633fa2579b522a0d8324ac8eafbe52fcc3b8f6a"
+    },
+    {
+      "path": "color_math.py",
+      "bytes": 3214,
+      "sha256": "7dce45c31553e04374cf65fbb5df543a324b98760c89fe34a59521b3d07dacde"
+    },
+    {
+      "path": "resolve_bridge.py",
+      "bytes": 14273,
+      "sha256": "f7df5049cf788727243919dde31b89f2a93bc4b1daaf179413f2504f3f16a0d6"
+    },
+    {
+      "path": "operation_lock.py",
+      "bytes": 1267,
+      "sha256": "6ef4c30358c4964075a2b42cfab1e18c05e138e58ab350c66aa172ad37cd9bf7"
+    },
+    {
+      "path": "device.js",
+      "bytes": 1373,
+      "sha256": "72220e687bf001f9fb6c385b43471a2ced48bccf0db071fb9c56f0b0924bbc96"
+    },
+    {
+      "path": "preset_library.js",
+      "bytes": 1242,
+      "sha256": "1f066500cf0ad6597c30b5b2e46706d5e3461426a7ed28c9d3f51949631978df"
+    },
+    {
+      "path": "store.js",
+      "bytes": 3750,
+      "sha256": "2ec7f3f567c09b5820378d431740749b03aeaf9b58154c537c9aa4ac8348b932"
+    },
+    {
+      "path": "bridge_client.js",
+      "bytes": 1867,
+      "sha256": "4e52e3fb4dbb157a535aba14f1e4d93a04023abe4512e3b317b595f626ab8d68"
+    },
+    {
+      "path": "main.js",
+      "bytes": 5114,
+      "sha256": "dcf5001e7a7ec5706f185ab8930b6f8ceb7636e1e735456c4f63cc8b56524c97"
+    },
+    {
+      "path": "preload.js",
+      "bytes": 428,
+      "sha256": "3f003c9d201a23524fe7cac21023bb7f9e91d3338f96db2cfd0b94388a4692f4"
+    },
+    {
+      "path": "index.html",
+      "bytes": 3130,
+      "sha256": "9867001fb0e337eb7af7837847977bc67308616920f95b334d7c22d014a798b9"
+    },
+    {
+      "path": "style.css",
+      "bytes": 4957,
+      "sha256": "ea32f0c81a68e8578d9efb598ea989939b21ec36d6ca812e9241f623db9ef9fa"
+    },
+    {
+      "path": "ui.js",
+      "bytes": 6786,
+      "sha256": "87096d17c823ebde72066a3a854525813f59bc5d6c0141c3f37d7ad2d53cc547"
+    },
+    {
+      "path": "ui_logic.js",
+      "bytes": 2032,
+      "sha256": "c12741f2c9efed418e8b0171fb5f9ed72db818d26a9c146e91821e814e94f658"
+    },
+    {
+      "path": "launch.ps1",
+      "bytes": 2069,
+      "sha256": "34de84ea692f28b254485d9ec38d5115d21e2c2496687e7e2b6fbc8e35dc8c31"
+    },
+    {
+      "path": "PRESETS.md",
+      "bytes": 5863,
+      "sha256": "6ce1e874a0b448eaa8a409929eb34b9a0da94248b4bddc907fc5a3c4390f26bd"
+    },
+    {
+      "path": "MIGRATION.md",
+      "bytes": 3605,
+      "sha256": "580b2f60ad3d14e97cc20143ec084c7fef2a7dae56c1e90415b6d0e79b4a2a44"
+    },
+    {
+      "path": "assets/base.drx",
+      "bytes": 40853,
+      "sha256": "594831086f46a26ff44693ae9c8ee7965a4f7cdb6b16a1341abb8d317ac99fc3"
+    },
+    {
+      "path": "presets/amber-period.drx",
+      "bytes": 13682,
+      "sha256": "fa5126f2a4a5d888852eb6b9eb1336716e849303311abc84f793aecdabb5ed21"
+    },
+    {
+      "path": "presets/cool-noir.drx",
+      "bytes": 13592,
+      "sha256": "3b3a086d30158dc1c6e1af2e2e3eb698a3284be48e3cd23d317474f6c29a6e22"
+    },
+    {
+      "path": "presets/foundation.drx",
+      "bytes": 13774,
+      "sha256": "ed5a1d94dd1019e771512b05b47f413778b4593d342e94dc698b4f60eec48bb4"
+    },
+    {
+      "path": "presets/mono-silver.drx",
+      "bytes": 11630,
+      "sha256": "f5a8e084cc3bbe84a46028d647e0cedf6cce2ce66419cf950aaf5b71483b0d55"
+    },
+    {
+      "path": "presets/silk-soft.drx",
+      "bytes": 13604,
+      "sha256": "d709d3f841ff47e6ce04bda34c2109b6acbab8b3770ca7b7bfc237cba8ca3406"
+    },
+    {
+      "path": "presets/silver-screen.drx",
+      "bytes": 13686,
+      "sha256": "3ba7344f25e75b001ab4f581e84e4a605661af82863ee11d8619b6e658d03eac"
+    },
+    {
+      "path": "presets/warm-cool.drx",
+      "bytes": 13824,
+      "sha256": "961cca6a68faed77f36a78e14842c725aae45a639d1b60489373e1a55f19da13"
+    },
+    {
+      "path": "luts/amber-period-look-3ffe08f5e633c706.cube",
+      "bytes": 1186054,
+      "sha256": "8a25addeafdfee46df98a28c02139b747cc3d80c5f56c1f5f1c54429175db253"
+    },
+    {
+      "path": "luts/amber-period-palette-b7493d964b312093.cube",
+      "bytes": 1186057,
+      "sha256": "75ee2c5729e9eaebac0733f230612c6b163ac63f3b9862941a0387c7a046474a"
+    },
+    {
+      "path": "luts/amber-period-tone-11d41a7f06d153f3.cube",
+      "bytes": 1186054,
+      "sha256": "c8e432159087634252c89f1e46ca23edf9beaece78b0dd621fe5f9a989c77703"
+    },
+    {
+      "path": "luts/cool-noir-look-d7c134865fc713dc.cube",
+      "bytes": 1186051,
+      "sha256": "dd452ff5a4de2d6b28f35f48237e00ff4630de6aa9a227c7d814d00630891702"
+    },
+    {
+      "path": "luts/cool-noir-palette-5e361cabec632be3.cube",
+      "bytes": 1186054,
+      "sha256": "cfa128440ed539c0115755c0f6a9f4ac443399d07330d79518f78c409d8e63d4"
+    },
+    {
+      "path": "luts/cool-noir-tone-b7f696e934e85aee.cube",
+      "bytes": 1186051,
+      "sha256": "69f9e560919a713893059bfd8bb0d6946e8742187825f95d71c19d8ad6632dca"
+    },
+    {
+      "path": "luts/foundation-look-f586c064ea96abe2.cube",
+      "bytes": 1186052,
+      "sha256": "67da7157007cef7dcf96ada245d79409e074bddf9109e930208f64926d40bce5"
+    },
+    {
+      "path": "luts/foundation-palette-098596f38fb28bb1.cube",
+      "bytes": 1186055,
+      "sha256": "aa7b505274a9e85c87811ac2ae9020f8a1d41ac2d7b91bbe32867237e94cb31c"
+    },
+    {
+      "path": "luts/foundation-tone-70aef8d63d974817.cube",
+      "bytes": 1186052,
+      "sha256": "a312ac24e867277845764290c8b8c10e84a5e415da5a2e10c036bd77141111a2"
+    },
+    {
+      "path": "luts/mono-silver-look-9e59fbe5094cc123.cube",
+      "bytes": 1186053,
+      "sha256": "5bef6d469a7d83f370cbe84c6b9222640afb1995439ab45686f16c595007f890"
+    },
+    {
+      "path": "luts/mono-silver-palette-ea7904b00abef4ad.cube",
+      "bytes": 1186056,
+      "sha256": "4fcff5a1a43765d7ed2114479b418dac839209f46afa6de3d0bf305710294ae0"
+    },
+    {
+      "path": "luts/mono-silver-tone-e8051292ec73fbe6.cube",
+      "bytes": 1186053,
+      "sha256": "cd3c93c9420fc8d38cff711d8c1c0a8d98bca4dfa538ad4995dc4149ac992453"
+    },
+    {
+      "path": "luts/silk-soft-look-c9f62526a1c72b9f.cube",
+      "bytes": 1186051,
+      "sha256": "8c1421f7781b6b9dcf69989741a19bc4ebadc67b36718ee7329e10878cac5062"
+    },
+    {
+      "path": "luts/silk-soft-palette-6459179254df88ae.cube",
+      "bytes": 1186054,
+      "sha256": "2fa023fcaf792dfd8e3dbd95053927a6d1efb9218e86541b45ad35663600f77d"
+    },
+    {
+      "path": "luts/silk-soft-tone-0fa6e29cc6816fc3.cube",
+      "bytes": 1186051,
+      "sha256": "df301c5368a3237b18760b9ebbeea7f1c92435e3e22bd33bddae72bd34d4331a"
+    },
+    {
+      "path": "luts/silver-screen-look-e8f42871e3fd14e8.cube",
+      "bytes": 1186055,
+      "sha256": "12f48eeef63b04b04cceada9b73e797521836d90bbf382d3be5a9de1619ba832"
+    },
+    {
+      "path": "luts/silver-screen-palette-e0df1b7b7ddfa396.cube",
+      "bytes": 1186058,
+      "sha256": "49119231a4a0962b92eca26d4ec56de1b8b9e104e803af4ecaab0ab4d7ea5d3b"
+    },
+    {
+      "path": "luts/silver-screen-tone-552c879b715e27d3.cube",
+      "bytes": 1186055,
+      "sha256": "991703eafde21000236e6c1f31e864a23717019738656bdc675af65709e19c0c"
+    },
+    {
+      "path": "luts/warm-cool-look-06eb4ead80d8f1d3.cube",
+      "bytes": 1186051,
+      "sha256": "ba27e9d413bc9f75af751bce3f6daf3afb1ae5ec1f5139dfa8cf1486d285a7c0"
+    },
+    {
+      "path": "luts/warm-cool-palette-3c9b157ddd879bcb.cube",
+      "bytes": 1186054,
+      "sha256": "ba53f1e67493d9e3db65f3d9253c09961914608ebc38c15593a2f043cc4dd15a"
+    },
+    {
+      "path": "luts/warm-cool-tone-e04c071ab0be2ef0.cube",
+      "bytes": 1186051,
+      "sha256": "ec8e69669cd949fa30365235aec52b163b86cf302c7e21c0ae53bec7b70807ce"
+    }
+  ]
+}

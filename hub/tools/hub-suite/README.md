@@ -1,8 +1,10 @@
-# BYBC Hub 1.1.0
+# BYBC Hub 1.2.0
 
 本版新增独立桌面工作区：同一窗口使用 Hub 聊天、智能体、附件和成果预览。启动后直接进入工作区；原控制台从系统托盘“连接与设置”打开。桌面窗口使用独立、持久化的网页登录状态，首次登录一次；关闭窗口后，后台工作继续运行，需要完全停止时选择托盘“安全退出”。
 
-正在执行的公开回复和实际阶段会随进度更新；网络中断时保留输入与记录，恢复后重新同步。点击聊天顶部“本机工程”可打开已经绑定的工程目录。Windows 10/11 需要 Microsoft Edge WebView2 Runtime。
+界面资源随桌面程序安装，版本匹配时直接从本机加载。已访问的工作区可在断网后查看本机快照，页面明确标记离线；未访问内容和成果附件预览仍需联网。文字草稿与选中的文件保存到本机，只有点击发送的内容才进入待发队列。恢复连接时先确认登录账号和发送回执，再使用原请求编号续发。关闭窗口期间，本机未发送内容不会由后台执行器发送；重新打开相关对话后继续。
+
+正在执行的公开回复和实际阶段会随进度更新；联网后重新同步真实状态。点击聊天顶部“本机工程”可打开已经绑定的工程目录。Windows 10/11 需要 Microsoft Edge WebView2 Runtime。
 
 本版更新“达芬奇调色 · 节点预设”1.0.1：修复满额配方导入导出、配置损坏启动、旧确认残留和异常恢复，增加跨进程写入互斥及逐阶段目标校验。保留基础八节点及六种风格、独立调色版本、强度调整和设备检测。面向已还原的 Rec.709 SDR；人物／衣物泛绿由独立局部节点按镜头处理，不自动抠像。详见工具目录 PRESETS.md 和 MIGRATION.md。
 
@@ -37,6 +39,6 @@ Windows 10/11 64 位统一安装包。Bridge 是主入口，安装后默认随 W
 
 桌面版构建：先将本版本 `CodexBridge.exe`、`HubAgentRuntime.exe`、`HubDesktop.exe` 构建到 `dist`，再运行 `uv run --extra desktop --with pyinstaller --with psutil python tools/hub-suite/build_desktop.py --kling-archive <可灵1.2.1已发布ZIP>`。脚本固定验证视频 1.1.1 与可灵 1.2.1 发布包的 SHA-256；音乐使用 `music-files.json`、调色使用 `color-files.json` 验证公开源码和资源，只复制清单内文件。不会读取已安装软件的用户配置、历史或未列入清单的文件。
 
-可先用 `--prepare-only` 准备公开组件，等本版三个 EXE 完成后再用 `--package-prepared` 打包。构建暂存及最终安装器位于项目 `output/hub-desktop-20261029/package-v1.1.0`，发布文件在其中 `release` 子目录；`prepared-public-files.json` 和 `native-inputs.json` 记录构建输入，`release.json` 与 `SHA256SUMS.txt` 记录交付校验。旧 `build.py` 保留历史构建支持，桌面版不能用其旧工具版本默认值重新发布。
+可先用 `--prepare-only` 准备公开组件，等本版三个 EXE 完成后再用 `--package-prepared` 打包。构建暂存及最终安装器位于项目 `output/hub-local-first-20261029/package-v1.2.0`，发布文件在其中 `release` 子目录；`prepared-public-files.json` 和 `native-inputs.json` 记录构建输入，`release.json` 与 `SHA256SUMS.txt` 记录交付校验。原生构建前自动生成静态资源路径、查询版本与 SHA-256 清单；不匹配的资源仍走服务器，防止旧桌面覆盖新版网页脚本。旧 `build.py` 保留历史构建支持，桌面版不能用其旧工具版本默认值重新发布。
 
-隔离验证：运行 `python tools/hub-suite/verify_desktop_package.py <安装器> --validation-dir <output/hub-desktop-20261029 下的新报告目录>`。报告保存在指定目录，配置、安装和解包都使用 Windows 临时目录下唯一的 `hub-installer-qa-*` 隔离目录，以免工作区继承权限影响原生安装程序。测试不创建系统快捷方式、注册或自启，不扫描现有安装，不修改任何目录权限；验证逐文件校验、配置继承、重装升级、个人文件保留和真实卸载程序。测试不会启动智能体或使用模型 API。
+隔离验证：运行 `python tools/hub-suite/verify_desktop_package.py <安装器> --validation-dir <output/hub-local-first-20261029 下的新报告目录>`。报告保存在指定目录，配置、安装和解包都使用 Windows 临时目录下唯一的 `hub-installer-qa-*` 隔离目录，以免工作区继承权限影响原生安装程序。测试不创建系统快捷方式、注册或自启，不扫描现有安装，不修改任何目录权限；验证逐文件校验、配置继承、重装升级、个人文件保留和真实卸载程序。测试不会启动智能体或使用模型 API。

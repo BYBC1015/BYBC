@@ -1,4 +1,4 @@
-(() => {
+(async () => {
   "use strict";
   const shell = document.querySelector("[data-ws-shell]");
   if (!shell) return;
@@ -20,6 +20,7 @@
   const uploadProgress = form.querySelector("[data-ws-upload-progress]");
   const pendingNotice = shell.querySelector("[data-ws-pending]");
   const receiptButton = shell.querySelector("[data-ws-receipt-check]");
+  const cancelQueueButton = shell.querySelector("[data-ws-queue-cancel]");
   const uploadLimits = { count:Number(form.dataset.maxFiles) || 12, file:Number(form.dataset.maxFileBytes) || 52428800, total:Number(form.dataset.maxTotalBytes) || 104857600 };
   const previewTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
   const attachments = [];
@@ -52,6 +53,52 @@
   let dragDepth = 0;
   let pendingSubmission = null;
   let receiptChecking = false;
+  const localStore = window.CodexWorkspaceStore;
+  const clientId = randomId();
+  const channel = window.BroadcastChannel ? new BroadcastChannel('codexHub.workspace.outbox.v1') : null;
+  let storageAvailable = Boolean(localStore);
+  let draftSave = Promise.resolve();
+  let draftRevision = 0;
+  let lastSavedKey = form.elements.request_key.value;
+  let deliveryRunning = false;
+  let localOffline = Boolean(window.__HUB_DESKTOP_OFFLINE__ || document.documentElement.dataset.hubOffline === 'true' || !navigator.onLine);
+  let deliveryRetryAt = 0;
+  function announce() { channel?.postMessage({scope}); }
+  function snapshot() {
+    return {key:form.elements.request_key.value, workspace_url:shell.dataset.workspaceUrl || location.href, description:input.value, title:form.elements.title.value,
+      conversation_id:form.elements.conversation_id.value, agent_ids:selectedRecipients().map(item => item.value),
+      files:attachments.map(item => ({id:item.storageId, file:item.file}))};
+  }
+  function storageFailed() {
+    storageAvailable = false;
+    shell.querySelector('[data-ws-draft-status]').textContent = '本机存储不可用 · 请保持此窗口打开';
+    attachmentError.textContent = '本机存储空间不足或不可用，当前文字和附件仅保留在此窗口。无法离线排队，请恢复连接后发送。';
+    attachmentError.hidden = false;
+  }
+  function draftSaved() {
+    if (!pendingSubmission && !committed) shell.querySelector('[data-ws-draft-status]').textContent = attachments.length ? `文字与 ${attachments.length} 个附件已保存在本机` : '文字草稿已保存在本机';
+  }
+  function adoptPayload(payload) {
+    input.value = payload.description || '';
+    form.elements.title.value = payload.title || '';
+    form.elements.request_key.value = payload.key;
+    const ids = new Set(payload.agent_ids.map(String));
+    recipients().forEach(item => { item.checked = ids.has(item.value); });
+    clearAttachments();
+    (payload.files || []).forEach((item, index) => {
+      if (!(item.file instanceof Blob)) return;
+      const file = item.file instanceof File ? item.file : new File([item.file], item.name, {type:item.type, lastModified:item.lastModified});
+      attachments.push({id:String(++attachmentSequence), storageId:item.id, pendingIndex:index, file, url:previewTypes.has(file.type) ? URL.createObjectURL(file) : null});
+    });
+    autosize(); renderAttachments();
+  }
+  function adoptJob(job) {
+    if (!job || !localStore.active(job)) return;
+    pendingSubmission = {key:job.key, files:job.payload.files.map(item => ({name:item.name || item.file?.name, size:item.size ?? item.file?.size, type:item.type || item.file?.type})),
+      state:job.state, attempted:job.attempted, uncertain:job.attempted, durable:true};
+    deliveryRetryAt = job.retryAt || 0;
+    adoptPayload(job.payload); syncSubmissionControls();
+  }
   // Following new work is a reader preference, not a measurement after an
   // unloaded image has just increased the page height.
   let followBottom = shell.dataset.conversation !== "new" && !(Number.isFinite(savedUi.scroll) && !savedUi.bottom);
@@ -66,25 +113,34 @@
   function recipients() { return Array.from(form.querySelectorAll("[data-ws-recipient]")); }
   function selectedRecipients() { return recipients().filter((item) => item.checked && (!item.disabled || item.dataset.uploadLocked === "true")); }
   function saveDraft() {
-    if (committed) return;
-    // Files stay in this page's memory. Persist only attachment counts and a
-    // pending request's name/size/type metadata; never bytes or local file paths.
-    write(draftKey, { description: input.value, agent_ids: selectedRecipients().map((item) => item.value), request_key: form.elements.request_key.value, attachment_count:pendingSubmission ? pendingSubmission.files.length : attachments.length, pending_submission:pendingSubmission });
+    if (committed) return draftSave;
+    const payload = snapshot();
+    if (!pendingSubmission && payload.key === lastSavedKey) return draftSave;
+    const revision = ++draftRevision;
+    const existing = read(draftKey);
+    if (!pendingSubmission?.durable || !existing.request_key || existing.request_key === payload.key) write(draftKey, {description:input.value, agent_ids:payload.agent_ids, request_key:payload.key,
+      attachment_count:pendingSubmission ? pendingSubmission.files.length : attachments.length, pending_submission:pendingSubmission});
+    if (!storageAvailable || pendingSubmission) return draftSave;
+    lastSavedKey = payload.key;
+    draftSave = draftSave.then(async () => {
+      if (revision !== draftRevision || committed || pendingSubmission) return;
+      if (await localStore.save(scope, payload)) draftSaved();
+    }).catch(storageFailed);
+    return draftSave;
   }
-  function renewRequestKey() {
-    if (crypto.randomUUID) form.elements.request_key.value = crypto.randomUUID();
-    else {
-      const bytes = crypto.getRandomValues(new Uint8Array(16));
-      bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
-      const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-      form.elements.request_key.value = `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
-    }
+  function randomId() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
   }
+  function renewRequestKey() { form.elements.request_key.value = randomId(); }
   function contentChanged() {
     if (pendingSubmission || submitting) return;
     renewRequestKey(); renderRecipients(); saveDraft();
     errors.hidden = true;
-    shell.querySelector("[data-ws-draft-status]").textContent = attachments.length ? `${attachments.length} 个附件 · 仅保留在当前页面` : "文字草稿已保存在此浏览器";
+    shell.querySelector("[data-ws-draft-status]").textContent = storageAvailable ? "正在保存到本机…" : "本机存储不可用 · 请保持此窗口打开";
   }
   function fileSize(bytes) {
     if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
@@ -126,7 +182,7 @@
       if (attachments.length >= uploadLimits.count) { rejected.push(`每次最多添加 ${uploadLimits.count} 个文件`); return; }
       if (file.size > uploadLimits.file) { rejected.push(`“${file.name}”超过单文件 ${fileSize(uploadLimits.file)} 的限制`); return; }
       if (total + file.size > uploadLimits.total) { rejected.push(`“${file.name}”未添加：附件总量不能超过 ${fileSize(uploadLimits.total)}`); return; }
-      attachments.push({ id:String(++attachmentSequence), file, pendingIndex, url:previewTypes.has(file.type) ? URL.createObjectURL(file) : null });
+      attachments.push({ id:String(++attachmentSequence), storageId:randomId(), file, pendingIndex, url:previewTypes.has(file.type) ? URL.createObjectURL(file) : null });
       total += file.size; added = true;
     });
     attachmentError.textContent = Array.from(new Set(rejected)).slice(0,3).join("；");
@@ -162,45 +218,95 @@
     attachmentList.querySelectorAll("button").forEach((button) => { button.disabled = locked; });
     pendingNotice.hidden = !pendingSubmission || submitting;
     receiptButton.disabled = submitting || receiptChecking;
+    cancelQueueButton.hidden = !pendingSubmission || !pendingSubmission.durable || pendingSubmission.attempted || pendingSubmission.state !== 'queued';
+    cancelQueueButton.disabled = submitting;
+    if (pendingSubmission?.state === 'queued' && !pendingSubmission.attempted) {
+      pendingNotice.querySelector('strong').textContent = '已保存在本机待发送';
+      pendingNotice.querySelector('[data-ws-pending-message]').textContent = localOffline || !navigator.onLine ? '此对话保持打开或稍后重新打开时，恢复连接并确认登录后自动发送。发送前可取消。' : '正在确认连接与登录，确认后自动发送。';
+    } else pendingNotice.querySelector('strong').textContent = '正在确认上一条工作的发送结果';
     if (pendingSubmission) {
       const missing = pendingSubmission.files.length - attachments.length;
-      shell.querySelector("[data-ws-draft-status]").textContent = missing ? `请重新选择 ${missing} 个原附件，再重试原任务` : "可检查发送结果，或原样重试任务";
+      shell.querySelector("[data-ws-draft-status]").textContent = missing ? `请重新选择 ${missing} 个原附件，再重试原任务` : pendingSubmission.state === "queued" && !pendingSubmission.attempted ? "已加入本机待发送队列" : "文字与附件已保留，正在确认发送结果";
     }
     send.setAttribute("aria-label", pendingSubmission ? "重试原任务" : "安排新任务");
     renderRecipients();
   }
-  function completeSubmission(url) {
-    remove(draftKey); committed = true; pendingSubmission = null;
+  async function completeSubmission(url) {
+    if (committed) return;
+    const key = pendingSubmission?.key;
+    if (key && storageAvailable && pendingSubmission.durable) {
+      try { await localStore.change(scope, key, null, {state:'sent', url, owner:null, leaseUntil:0}, {finish:true}); announce(); }
+      catch { storageFailed(); }
+    }
+    const saved = read(draftKey);
+    if (!key || saved.request_key === key) remove(draftKey);
+    committed = true; pendingSubmission = null;
     input.value = ""; clearAttachments();
     location.assign(url);
   }
   function updateCsrf(freshShell) {
-    if (!freshShell || freshShell.dataset.user !== shell.dataset.user || freshShell.dataset.project !== shell.dataset.project) return false;
+    if (!freshShell || freshShell.ownerDocument.documentElement.dataset.hubOffline === "true" || freshShell.dataset.user !== shell.dataset.user || freshShell.dataset.project !== shell.dataset.project || freshShell.dataset.conversation !== shell.dataset.conversation) return false;
     const token = freshShell.querySelector('[data-ws-dispatch] [name="_csrf"]')?.value;
     if (!token) return false;
-    form.elements._csrf.value = token;
+    // Offline snapshots remove all CSRF values. Restore every same-origin
+    // form after validating identity, including logout and identity settings.
+    document.querySelectorAll('form [name="_csrf"]').forEach(field => {
+      const action = new URL(field.form?.action || location.href, location.href);
+      if (action.origin === location.origin) field.value = token;
+    });
     return true;
   }
+  async function readReply(url, options) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    try {
+      const response = await fetch(url, {...options, signal:controller.signal});
+      return {response, text:await response.text()};
+    } finally { clearTimeout(timeout); }
+  }
   async function refreshCsrf() {
-    // A login in another tab rotates the session token without changing the
-    // conversation ETag. Fetch without its conditional header for this retry.
-    const response = await fetch(shell.dataset.workspaceUrl || location.href, { credentials:"same-origin", cache:"no-store", headers:{ "Accept":"text/html" } });
-    const page = new DOMParser().parseFromString(await response.text(), "text/html");
-    if (!response.ok || !updateCsrf(page.querySelector("[data-ws-shell]"))) throw new Error("请在另一页面登录原账号后重试，当前文字和附件仍保留。");
+    const {response, text} = await readReply(shell.dataset.workspaceUrl || location.href, {credentials:'same-origin', cache:'no-store', headers:{Accept:'text/html', 'X-Hub-Online-Probe':'1'}});
+    const page = new DOMParser().parseFromString(text, 'text/html');
+    const fresh = page.querySelector('[data-ws-shell]');
+    if (fresh && fresh.dataset.user !== shell.dataset.user) {
+      const error = new Error('当前登录账号已变化。请重新登录原账号后继续；原账号的文字与附件已保留，不会交给其他账号发送。');
+      error.auth = true; throw error;
+    }
+    if (!response.ok || !updateCsrf(fresh)) {
+      const error = new Error('请在另一页面登录原账号后继续，文字和附件已保留。');
+      error.auth = response.status === 401 || response.status === 403 || Boolean(page.querySelector('form[action$="/login"]'));
+      throw error;
+    }
+    await markOnline();
+    return fresh;
+  }
+  async function markOnline() {
+    if (window.pywebview?.api?.workspace_online) {
+      let verified = false;
+      for (const delay of [0, 50, 100, 200, 400]) {
+        if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+        const state = await window.pywebview.api.workspace_online(shell.dataset.user);
+        if (state?.online === true) { verified = true; break; }
+      }
+      if (!verified) throw new Error('正在确认本机连接，文字与附件已保留，稍后自动重试。');
+    } else if (window.__HUB_DESKTOP_OFFLINE__) {
+      throw new Error('桌面连接正在准备，文字与附件已保留，稍后自动重试。');
+    }
+    localOffline = false; window.__HUB_DESKTOP_OFFLINE__ = false; delete document.documentElement.dataset.hubOffline;
   }
   async function checkReceipt() {
     if (!pendingSubmission || receiptChecking) return null;
     const key = pendingSubmission.key;
     receiptChecking = true; syncSubmissionControls();
     try {
-      const response = await fetch(`${form.action}/${encodeURIComponent(key)}`, { credentials:"same-origin", cache:"no-store", headers:{ "Accept":"application/json" } });
+      const {response, text} = await readReply(`${form.action}/${encodeURIComponent(key)}`, { credentials:"same-origin", cache:"no-store", headers:{ "Accept":"application/json" } });
       if (!response.ok) throw new Error();
-      const receipt = await response.json();
+      const receipt = JSON.parse(text);
       if (!pendingSubmission || pendingSubmission.key !== key) return null;
       if (receipt.found && receipt.conversation_url) {
         const destination = new URL(receipt.conversation_url, location.href);
         if (destination.origin !== location.origin || !destination.pathname.startsWith(new URL(shell.dataset.projectUrl, location.href).pathname + "/conversations/")) throw new Error();
-        completeSubmission(destination.href); return true;
+        await completeSubmission(destination.href); return true;
       }
       if (receipt.found !== false) throw new Error();
       pendingNotice.querySelector("[data-ws-pending-message]").textContent = "暂未查到完成记录。原任务可能仍在处理，可稍后检查，或使用原内容重试；不会重复安排。";
@@ -305,9 +411,18 @@
       node.title = date.toLocaleString("zh-CN", { year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit", hour12:false, timeZoneName:"short" });
     });
   }
-  function restoreDraft() {
+  async function restoreDraft() {
     if (hasServerError) return;
+    let stored;
+    try { stored = await localStore.read(scope); }
+    catch { storageFailed(); }
+    if (localStore?.active(stored?.job) && (!stored.draft || stored.draft.key === stored.job.key || query.get('resume_pending') === stored.job.key)) { adoptJob(stored.job); return; }
     const saved = read(draftKey);
+    if (stored?.job && stored.job.key === saved.request_key && stored.job.state === 'sent') remove(draftKey);
+    if (stored?.draft && !inputEditedBeforeInit && !fileInput.files.length && !input.value) {
+      adoptPayload(stored.draft); lastSavedKey = stored.draft.key; draftSaved(); return;
+    }
+    if (stored?.job && stored.job.key === saved.request_key && ['sent', 'cancelled', 'rejected'].includes(stored.job.state)) return;
     if (saved.pending_submission && typeof saved.pending_submission.key === "string" && Array.isArray(saved.pending_submission.files)) pendingSubmission = saved.pending_submission;
     if (typeof saved.description === "string" && (!inputEditedBeforeInit || pendingSubmission)) input.value = saved.description;
     if (Array.isArray(saved.agent_ids) && (!query.has("assign_agent") || pendingSubmission)) {
@@ -406,9 +521,9 @@
     location.replace(shell.dataset.projectUrl + "?view=archive" + location.hash);
     return;
   }
-  restoreDraft(); autosize(); syncSubmissionControls(); formatTimes();
+  await restoreDraft(); autosize(); syncSubmissionControls(); formatTimes();
   if (inputEditedBeforeInit && !pendingSubmission) contentChanged();
-  if (pendingSubmission) void checkReceipt();
+  // Durable queued messages resume only after the entire page is initialized.
   if (query.has("agent") || query.has("assign_agent")) { selectedAgent = shell.dataset.initialAgent; activeTab = "agent"; }
   selectPanel(activeTab, activeTab === "agent" ? selectedAgent : selectedTask);
   syncDrawers();
@@ -465,7 +580,7 @@
     if (suggestion && !submitting && !pendingSubmission) { input.value = suggestion.dataset.wsSuggestion; autosize(); contentChanged(); input.focus(); }
     if (target.closest("[data-ws-create-agent]")) {
       if (drawer) closeDrawer(false, false);
-      queueMicrotask(() => document.querySelector("[data-agent-workspace] [data-agent-create-open]")?.click());
+      setTimeout(() => document.querySelector("[data-agent-workspace] [data-agent-create-open]")?.click(), 0);
     }
     if (target.closest("a")) { saveDraft(); saveUi(); }
   });
@@ -568,75 +683,152 @@
   }
   narrow.addEventListener("change", viewportChanged); small.addEventListener("change", viewportChanged);
 
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (submitting || receiptChecking || !form.reportValidity()) return;
-    if (!selectedRecipients().length) { errors.textContent = "请选择一位可分配工作的执行者。"; errors.hidden = false; recipientPicker.open = true; return; }
-    if (!input.value.trim() && !attachments.length) { errors.textContent = "写下工作目标，或添加图片和文件。"; errors.hidden = false; input.focus(); return; }
-    if (pendingSubmission && attachments.length !== pendingSubmission.files.length) { attachmentError.textContent = "请重新选择原任务的全部附件，再重试。"; attachmentError.hidden = false; return; }
-    if (pendingSubmission) {
-      setSubmitting(true);
-      try { await refreshCsrf(); }
-      catch (error) { errors.textContent = error.message; errors.hidden = false; setSubmitting(false); return; }
-      setSubmitting(false);
-    }
-    const data = new FormData(form);
-    // Temporarily locked recipients are deliberately disabled in the UI, but
-    // remain part of an identical retry's payload.
-    data.delete("agent_ids"); selectedRecipients().forEach((item) => data.append("agent_ids", item.value));
-    data.delete("attachments");
-    attachments.forEach((item) => data.append("attachments", item.file, item.file.name));
-    if (!pendingSubmission) {
-      pendingSubmission = { key:form.elements.request_key.value, files:attachments.map((item, index) => {
-        item.pendingIndex = index;
-        return { name:item.file.name, size:item.file.size, type:item.file.type };
-      }) };
-    }
-    saveDraft(); setSubmitting(true); errors.hidden = true; recipientPicker.open = false;
-    shell.querySelector("[data-ws-draft-status]").textContent = attachments.length ? "附件正在上传，请稍候…" : "正在安排工作…";
-    if (attachments.length) showUploadProgress(0, `正在上传 ${attachments.length} 个附件`);
-    try {
-      const response = await postWork(data);
-      const page = new DOMParser().parseFromString(response.html, "text/html");
-      const failure = page.querySelector("[data-ws-dispatch-error]")?.textContent.trim();
-      if (!response.ok || failure || !page.querySelector("[data-ws-shell]")) {
-        const error = new Error(failure || (response.status === 401 || page.querySelector('form[action$="/login"]') ? "登录状态已过期。文字和附件仍保留在当前页面，请在另一页面重新登录后重试。" : response.status === 413 ? "附件超过上传限制，请移除较大的文件后重试。文字和附件仍保留。" : "暂时未能安排工作，文字和附件仍保留在当前页面，请稍后重试。"));
-        error.definite = (response.status >= 400 && response.status < 500) || (response.status === 200 && Boolean(failure));
-        error.conflict = response.status === 409 || Boolean(failure?.includes("同一请求标识不能"));
-        error.refreshSession = response.status === 401 || response.status === 403;
-        error.retryKey = page.querySelector('[data-ws-dispatch] [name="request_key"]')?.value;
-        throw error;
+  async function deliverPending(manual = false) {
+    if (deliveryRunning || committed || !pendingSubmission || (!manual && Date.now() < deliveryRetryAt)) return;
+    if (!navigator.onLine) { localOffline = true; syncSubmissionControls(); return; }
+    if (attachments.length !== pendingSubmission.files.length) return;
+    deliveryRunning = true;
+    const key = pendingSubmission.key;
+    const run = async () => {
+      let leaseTimer;
+      if (pendingSubmission.durable) {
+        if (!await localStore.claim(scope, key, clientId)) return;
+        leaseTimer = setInterval(() => localStore.change(scope, key, clientId, {leaseUntil:Date.now()+45000}).catch(storageFailed), 10000);
       }
-      if (!response.redirected) throw new Error("未确认任务已安排，草稿已保留，请重试。重复提交不会重复创建任务。");
-      completeSubmission(response.url);
-    } catch (error) {
-      errors.textContent = error.message || "连接中断，文字和附件仍保留在当前页面。";
-      errors.hidden = false;
-      uploadProgress.hidden = true;
-      if (error.refreshSession) {
-        try { await refreshCsrf(); errors.textContent = "登录凭据已更新，文字和附件已保留，请重试。"; }
-        catch { /* The original session message remains visible until login. */ }
-      }
-      // A response may be lost after the server committed. Never rotate its key
-      // or unlock edits until checking the existing dispatch receipt.
-      setSubmitting(false);
-      if (error.definite && !error.conflict && !pendingSubmission.uncertain) {
-        pendingSubmission = null;
-        if (error.retryKey) form.elements.request_key.value = error.retryKey;
-        saveDraft(); syncSubmissionControls();
-      } else {
-        pendingSubmission.uncertain = true; saveDraft();
-        if (error.conflict) {
-          errors.textContent = "重选附件的内容与原请求不一致。正在检查原任务；不会另行派单。";
-          // A matching filename and size cannot prove identical bytes. If the
-          // server rejects its hash, allow the original files to be reselected.
-          clearAttachments();
+      try {
+        // Authentication is verified before every first send as well as recovery:
+        // another window may have logged into a different account meanwhile.
+        await refreshCsrf();
+        if (pendingSubmission?.key !== key || committed) return;
+        if (pendingSubmission.attempted || pendingSubmission.uncertain) {
+          const found = await checkReceipt();
+          if (found !== false || committed) { deliveryRetryAt = Date.now()+5000; return; }
         }
-        if (await checkReceipt()) return;
+        if (pendingSubmission.durable) {
+          const started = await localStore.change(scope, key, clientId, {state:'sending', attempted:true, leaseUntil:Date.now()+45000}, {start:true});
+          if (!started) { await syncLocalQueue(); return; }
+          announce();
+        }
+        pendingSubmission.state = 'sending'; pendingSubmission.attempted = true;
+        setSubmitting(true); errors.hidden = true; recipientPicker.open = false;
+        shell.querySelector('[data-ws-draft-status]').textContent = attachments.length ? '附件正在上传，请稍候…' : '正在安排工作…';
+        if (attachments.length) showUploadProgress(0, `正在上传 ${attachments.length} 个附件`);
+        const data = new FormData(form);
+        data.delete('agent_ids'); selectedRecipients().forEach(item => data.append('agent_ids', item.value));
+        data.delete('attachments'); attachments.forEach(item => data.append('attachments', item.file, item.file.name));
+        const response = await postWork(data);
+        const page = new DOMParser().parseFromString(response.html, 'text/html');
+        const failure = page.querySelector('[data-ws-dispatch-error]')?.textContent.trim();
+        if (!response.ok || failure || !page.querySelector('[data-ws-shell]')) {
+          const error = new Error(failure || (response.status === 401 || page.querySelector('form[action$="/login"]') ? '登录状态已过期，文字和附件已保留。请在另一页面重新登录原账号。' : response.status === 413 ? '附件超过上传限制，请移除较大的文件后重试。文字和附件已保留。' : '暂时未能安排工作，文字和附件已保留，恢复后会自动重试。'));
+          error.definite = (response.status >= 400 && response.status < 500) || (response.status === 200 && Boolean(failure));
+          error.conflict = response.status === 409 || Boolean(failure?.includes('同一请求标识不能'));
+          error.auth = response.status === 401 || response.status === 403 || Boolean(page.querySelector('form[action$="/login"]'));
+          throw error;
+        }
+        if (!response.redirected) throw new Error('未确认任务已安排，文字和附件已保留；正在检查结果，不会重复创建任务。');
+        const destination = new URL(response.url, location.href);
+        if (destination.origin !== location.origin || !destination.pathname.startsWith(new URL(shell.dataset.projectUrl, location.href).pathname + '/conversations/')) throw new Error('未确认工作对话，正在检查发送结果。');
+        await completeSubmission(destination.href);
+      } catch (error) {
+        if (committed || pendingSubmission?.key !== key) return;
+        errors.textContent = error.name === 'AbortError' ? '连接超时，文字与附件已保留；恢复后会自动重试。' : error.message || '连接中断，文字与附件已保留。'; errors.hidden = false;
+        uploadProgress.hidden = true; setSubmitting(false);
+        deliveryRetryAt = Date.now() + (error.auth ? 30000 : 5000);
+        if (error.definite && !error.conflict && !error.auth && !pendingSubmission.uncertain) {
+          if (pendingSubmission.durable) await localStore.change(scope, key, clientId, {state:'rejected', owner:null, leaseUntil:0});
+          pendingSubmission = null; renewRequestKey(); await saveDraft(); announce();
+        } else {
+          pendingSubmission.uncertain = Boolean(pendingSubmission.attempted);
+          pendingSubmission.state = pendingSubmission.attempted ? 'uncertain' : 'queued';
+          if (pendingSubmission.durable) await localStore.change(scope, key, clientId, {state:pendingSubmission.state, retryAt:deliveryRetryAt});
+          saveDraft();
+          if (error.conflict) { errors.textContent = '原请求内容存在冲突，保留同一请求编号等待核对，不会另行派单。'; deliveryRetryAt = Date.now()+30000; }
+          if (pendingSubmission.attempted && !error.auth) await checkReceipt();
+        }
+      } finally {
+        clearInterval(leaseTimer);
+        if (storageAvailable) await localStore.change(scope, key, clientId, {owner:null, leaseUntil:0}).catch(storageFailed);
+        setSubmitting(false); announce();
       }
-      if (!pendingSubmission) shell.querySelector("[data-ws-draft-status]").textContent = attachments.length ? "文字与附件已保留，可修改后重试" : "草稿已保留";
-      input.focus({ preventScroll:true });
+    };
+    try {
+      if (navigator.locks) await navigator.locks.request(`codexHub.outbox.${scope}`, {ifAvailable:true}, async lock => { if (lock) await run(); });
+      else await run();
+    } catch (error) { storageFailed(); errors.textContent = error.message || '本机待发送记录暂时不可用，请保持窗口打开。'; errors.hidden = false; }
+    finally { deliveryRunning = false; if (!committed) syncSubmissionControls(); }
+  }
+  const otherQueues = document.createElement('div');
+  otherQueues.className = 'ws-pending-submission'; otherQueues.dataset.wsOtherQueues = ''; otherQueues.hidden = true;
+  otherQueues.setAttribute('role', 'status'); otherQueues.setAttribute('aria-live', 'polite');
+  pendingNotice.before(otherQueues);
+  async function showOtherQueues() {
+    if (!storageAvailable) return;
+    const jobs = (await localStore.list(`${shell.dataset.user}.`)).filter(job => job.key !== pendingSubmission?.key);
+    otherQueues.replaceChildren(); otherQueues.hidden = !jobs.length;
+    if (!jobs.length) return;
+    const content = document.createElement('div');
+    const title = document.createElement('strong'); title.textContent = `本机还有 ${jobs.length} 条待发送工作`;
+    const detail = document.createElement('p'); detail.textContent = '打开对应对话后会自动确认并发送；未点击发送的草稿不会执行。';
+    content.append(title, detail);
+    jobs.forEach(job => {
+      const url = new URL(job.workspace_url || shell.dataset.projectUrl, location.href);
+      if (url.origin !== location.origin || !url.pathname.includes('/projects/')) return;
+      url.searchParams.set('resume_pending', job.key);
+      const link = document.createElement('a'); link.href = url.href; link.textContent = `继续：${job.title}`;
+      link.style.display = 'block'; content.append(link);
+    });
+    otherQueues.append(content);
+  }
+  async function syncLocalQueue() {
+    if (!storageAvailable || committed || submitting) return;
+    try {
+      const {job} = await localStore.read(scope);
+      await showOtherQueues();
+      if (job?.state === 'sent' && pendingSubmission?.key === job.key && job.url) { await completeSubmission(job.url); return; }
+      if (localStore.active(job)) {
+        if (!pendingSubmission || job.key !== pendingSubmission.key) {
+          // A notification from another window must never erase a newer draft.
+          if (form.elements.request_key.value === job.key || (!input.value && !attachments.length)) adoptJob(job);
+        }
+        else { pendingSubmission.state = job.state; pendingSubmission.attempted = job.attempted; deliveryRetryAt = Math.max(deliveryRetryAt, job.retryAt || 0); syncSubmissionControls(); }
+      } else if (pendingSubmission?.durable && job?.key === pendingSubmission.key) {
+        pendingSubmission = null; renewRequestKey(); await saveDraft(); syncSubmissionControls();
+      }
+    } catch { storageFailed(); }
+  }
+  cancelQueueButton.addEventListener('click', async () => {
+    if (!pendingSubmission?.durable || pendingSubmission.attempted || submitting) return;
+    const key = pendingSubmission.key;
+    const cancelled = await localStore.change(scope, key, null, {state:'cancelled', owner:null, leaseUntil:0}, {cancel:true}).catch(() => {storageFailed(); return false;});
+    if (!cancelled) { await syncLocalQueue(); return; }
+    pendingSubmission = null; renewRequestKey(); await saveDraft(); syncSubmissionControls(); announce();
+    errors.hidden = true; shell.querySelector('[data-ws-draft-status]').textContent = '已取消待发送，文字与附件保留为草稿';
+  });
+  channel?.addEventListener('message', event => { if (event.data?.scope === scope) void syncLocalQueue(); });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (deliveryRunning || submitting || receiptChecking || !form.reportValidity()) return;
+    if (!selectedRecipients().length) { errors.textContent = '请选择一位可分配工作的执行者。'; errors.hidden = false; recipientPicker.open = true; return; }
+    if (!input.value.trim() && !attachments.length) { errors.textContent = '写下工作目标，或添加图片和文件。'; errors.hidden = false; input.focus(); return; }
+    if (pendingSubmission && attachments.length !== pendingSubmission.files.length) { attachmentError.textContent = '请重新选择原任务的全部附件，再重试。'; attachmentError.hidden = false; return; }
+    await draftSave;
+    if (!pendingSubmission?.durable && storageAvailable) {
+      try {
+        const job = await localStore.enqueue(scope, snapshot());
+        if (job.key !== form.elements.request_key.value) {
+          errors.textContent = '这场对话还有一条待发送工作，当前新草稿已保留。请先打开待发送记录处理，随后可继续发送。'; errors.hidden = false; await showOtherQueues(); return;
+        }
+        adoptJob(job); announce();
+      }
+      catch { storageFailed(); }
     }
+    if (!pendingSubmission) {
+      if (!navigator.onLine || localOffline) { errors.textContent = '本机存储不可用，暂时无法离线排队。请保持窗口打开，恢复连接后发送。'; errors.hidden = false; return; }
+      pendingSubmission = {key:form.elements.request_key.value, files:attachments.map((item,index) => {item.pendingIndex=index; return {name:item.file.name,size:item.file.size,type:item.file.type};}), state:'queued', attempted:false, durable:false};
+    }
+    saveDraft(); syncSubmissionControls();
+    await deliverPending(true);
   });
 
   let organizingTask=false;
@@ -754,15 +946,22 @@
   }
   async function refresh() {
     clearTimeout(refreshTimer);
-    if (pendingSubmission && !submitting && !document.hidden) { await checkReceipt(); if (committed) return; }
-    if (document.hidden || submitting) { refreshTimer = setTimeout(refresh, 2000); return; }
+    if (!document.hidden && !submitting) {
+      await syncLocalQueue();
+      if (pendingSubmission && !deliveryRunning) {
+        if (pendingSubmission.durable) void deliverPending();
+        else if (pendingSubmission.attempted) void checkReceipt();
+      }
+      if (committed) return;
+    }
+    if (document.hidden || submitting || deliveryRunning) { refreshTimer = setTimeout(refresh, 2000); return; }
     if (refreshController) return;
     eventRefreshPending = false;
     lastRefreshAt = Date.now();
     refreshController = new AbortController();
     const timeout = setTimeout(() => refreshController?.abort(), 12000);
     try {
-      const response = await fetch(shell.dataset.workspaceUrl || location.href, { headers:etag ? { "If-None-Match":etag } : {}, credentials:"same-origin", signal:refreshController.signal });
+      const response = await fetch(shell.dataset.workspaceUrl || location.href, { headers:etag && !localOffline ? { "If-None-Match":etag } : {"X-Hub-Online-Probe":"1"}, credentials:"same-origin", cache:"no-store", signal:refreshController.signal });
       if (response.status === 401 || (response.redirected && new URL(response.url).pathname.endsWith('/login'))) { showLoginRequired(); return; }
       if (response.status === 304) { shell.querySelector("[data-ws-sync]").textContent = "已同步"; return; }
       if (!response.ok) throw new Error();
@@ -772,6 +971,7 @@
       if (loginRequired || eventSessionExpired) {
         loginRequired = false; eventSessionExpired = false; errors.hidden = true; connectEventStream();
       }
+      await markOnline();
       shell.dataset.eventVersion = freshShell.dataset.eventVersion || '';
       refreshPresence(freshShell);
       const nextEtag = response.headers.get("ETag") || "";
@@ -826,17 +1026,20 @@
       restoreReadingPosition(positionBeforeRefresh);
       shell.querySelector("[data-ws-sync]").textContent = "已同步";
     } catch (error) {
-      presenceUnconfirmed();
+      localOffline = true; presenceUnconfirmed();
       shell.querySelector("[data-ws-sync]").textContent = error.name === "AbortError" ? "连接超时 · 正在重试" : "等待连接";
     } finally { clearTimeout(timeout); refreshController = null; refreshTimer = setTimeout(refresh, eventRefreshPending ? 350 : refreshInterval()); }
   }
   refreshTimer = setTimeout(refresh, 2000);
   connectEventStream();
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { etag = ""; connectEventStream(); scheduleEventRefresh(300); } else closeEventStream(); });
-  window.addEventListener('online', () => { etag = ''; connectEventStream(); scheduleEventRefresh(50); });
-  window.addEventListener('offline', () => { closeEventStream(); presenceUnconfirmed(); });
+  window.addEventListener('online', () => { etag = ''; deliveryRetryAt = 0; connectEventStream(); scheduleEventRefresh(50); });
+  window.addEventListener('offline', () => { localOffline = true; closeEventStream(); presenceUnconfirmed(); syncSubmissionControls(); shell.querySelector('[data-ws-sync]').textContent='离线 · 本机草稿可继续编辑'; });
   window.addEventListener('pagehide', closeEventStream);
   window.addEventListener('pageshow', connectEventStream);
   setInterval(() => { if (!document.hidden) formatTimes(); }, 60000);
+  if (localOffline) { presenceUnconfirmed(); shell.querySelector('[data-ws-sync]').textContent='离线 · 显示本机保存的工作区'; }
   shell.dataset.wsReady = "true";
+  void showOtherQueues();
+  if (pendingSubmission?.durable) setTimeout(() => void deliverPending(), 100);
 })();

@@ -53,9 +53,10 @@ class AttachmentClient(AgentClient):
 
 
 class ImageExecutor(FakeExecutor):
-    def run(self, *args, image_paths=None, execution_context=None, cancel_event=None, **kwargs):
+    def run(self, *args, image_paths=None, execution_context=None, cancel_event=None, progress_callback=None, **kwargs):
         self.images = image_paths
         self.execution_context = execution_context
+        self.progress_callback = progress_callback
         return super().run(*args, **kwargs)
 
 
@@ -409,6 +410,7 @@ def test_workspace_upload_reaches_real_task_manifest_local_files_and_cli_argumen
     result = ProcessResult()
     runner._process_task({**task, 'project_slug': 'workspace-team'}, 'isolated-worker', result)
     assert len(executor.calls) == 1 and len(executor.images) == 1
+    assert callable(executor.progress_callback)
     assert executor.images[0].read_bytes() == image
     prepared_paths = list(config.projects['workspace-team'].rglob('*.preview.txt'))
     assert len(prepared_paths) == 1 and prepared_paths[0].read_text(encoding='utf-8') == brief.decode()

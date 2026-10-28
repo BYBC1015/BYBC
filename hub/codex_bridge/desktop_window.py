@@ -25,6 +25,7 @@ from .config import default_config_path, hub_workspace_url, load_config
 from .persistent_log import PersistentLog
 from .single_instance import SingleInstance
 from .subprocess_utils import hidden_subprocess_kwargs
+from .desktop_assets import PackagedAssets, WorkspaceCache, canonical_url
 
 
 TITLE = 'BYBC Hub'
@@ -244,6 +245,14 @@ class DesktopAPI:
         self._host.require_trusted()
         return __version__
 
+    def connection_state(self):
+        self._host.require_trusted(allow_local=True)
+        return {'offline': self._host._offline, 'cached_workspace': bool(self._host.cache.get('', latest=True))}
+
+    def workspace_online(self, user_id=None):
+        self._host.require_trusted()
+        return {'online': self._host.confirm_workspace_online(user_id)}
+
     def list_projects(self):
         self._host.require_trusted()
         return [{'id': slug, 'name': path.name, 'available': path.is_dir()}
@@ -264,7 +273,7 @@ class DesktopAPI:
 
 
 class DesktopHost:
-    def __init__(self, location: HubLocation, projects: dict, state_dir: Path, *, external_opener=open_external):
+    def __init__(self, location: HubLocation, projects: dict, state_dir: Path, *, external_opener=open_external, cache=None, assets=None):
         self.location = location
         self.projects = {str(slug): Path(path).expanduser().resolve() for slug, path in projects.items()}
         self.state_dir = state_dir
@@ -280,6 +289,14 @@ class DesktopHost:
         self._geometry = read_geometry(state_dir / 'window.json')
         self._children = []
         self._native_ready = False
+        self.cache = cache or WorkspaceCache(state_dir / 'workspace-cache')
+        self.assets = assets or PackagedAssets()
+        self._offline = False
+        self._offline_since = 0
+        self._offline_account = None
+        self._offline_response = None
+        self._navigation_target = location.home
+        self._login_network_ready = False
 
     def require_trusted(self, *, allow_local=False):
         current = self.window.get_current_url()
@@ -314,6 +331,8 @@ class DesktopHost:
             self.window.load_url(self.location.home)
 
     def show_offline(self, message):
+        self._offline = True
+        self._offline_since = time.time()
         self._local_page = True
         self._local_html = offline_page(message, connecting=False)
         self.window.load_html(self._local_html)
@@ -343,6 +362,7 @@ class DesktopHost:
             return
         if self.location.trusted(target):
             self._active_navigation = int(args.NavigationId)
+            self._navigation_target = target
             self._local_page = False
             return
         args.Cancel = True
@@ -374,7 +394,8 @@ class DesktopHost:
         import webview
         from webview.menu import Menu, MenuAction
         # A child preserves the chat's draft/File objects, including during login.
-        child = DesktopHost(self.location, self.projects, self.state_dir, external_opener=self.external_opener)
+        child = DesktopHost(self.location, self.projects, self.state_dir, external_opener=self.external_opener,
+            cache=self.cache, assets=self.assets)
         child._first_load = False
         window = webview.create_window(TITLE + ' · 预览', html=offline_page(), js_api=DesktopAPI(child),
             width=1100, height=800, min_size=(700, 500), background_color='#151819',
@@ -410,6 +431,10 @@ class DesktopHost:
         control.CoreWebView2.NewWindowRequested -= self.window.native.browser.on_new_window_request
         control.CoreWebView2.NewWindowRequested += self.on_new_window
         control.CoreWebView2.DownloadStarting += self.on_download_starting
+        from Microsoft.Web.WebView2.Core import CoreWebView2WebResourceContext
+        control.CoreWebView2.AddWebResourceRequestedFilter(self.location.base + '/*', CoreWebView2WebResourceContext.All)
+        control.CoreWebView2.WebResourceRequested += self.on_resource_requested
+        control.CoreWebView2.WebResourceResponseReceived += self.on_resource_response
 
     def on_navigation_completed(self, sender, args):
         navigation_id = int(args.NavigationId)
@@ -417,8 +442,129 @@ class DesktopHost:
             self._cancelled_navigations.discard(navigation_id)
             return
         if navigation_id == self._active_navigation and not args.IsSuccess:
-            self.log.write('Hub navigation failed; showing reconnect page.')
-            threading.Thread(target=self.show_offline, args=('网络连接未完成，请检查连接后重试。',), daemon=True).start()
+            self.log.write('Hub navigation failed; restoring local workspace if available.')
+            threading.Thread(target=self.restore_workspace, args=(navigation_id, self._navigation_target), daemon=True).start()
+
+    def restore_workspace(self, navigation_id=None, target=None):
+        navigation_id = self._active_navigation if navigation_id is None else navigation_id
+        if navigation_id != self._active_navigation:
+            return
+        target = canonical_url(target or self._navigation_target)
+        snapshot = self.cache.get(target)
+        if snapshot is None and target == self.location.home:
+            snapshot = self.cache.get(target, latest=True)
+        if navigation_id != self._active_navigation:
+            return
+        if snapshot is None:
+            self.show_offline('网络连接未完成，请检查连接后重试。')
+            return
+        self._offline = True
+        self._offline_since = time.time()
+        self._offline_account = snapshot['account']
+        self._offline_response = snapshot
+        if navigation_id != self._active_navigation:
+            self._offline_response = None
+            return
+        if self.window.get_current_url() == snapshot['url']:
+            self.window.run_js('window.location.reload()')
+        else:
+            self.window.load_url(snapshot['url'])
+
+    def confirm_workspace_online(self, user_id=None):
+        verified = self.cache.latest_verified
+        if not verified or time.time() - verified['time'] > 30:
+            return False
+        if self._offline and verified['time'] < self._offline_since:
+            return False
+        user = self.window.evaluate_js("document.querySelector('[data-ws-shell]')?.dataset.user || ''")
+        if not isinstance(user, str) or user != verified['user']:
+            return False
+        if user_id is not None and str(user_id) != user:
+            return False
+        cached_document = self.window.evaluate_js("document.documentElement.dataset.hubOffline === 'true'")
+        if cached_document and self._offline_account and verified['account'] != self._offline_account:
+            return False
+        # Another window may have logged out or changed account during the DOM
+        # query. Do not let that earlier response unlock this page afterwards.
+        if verified is not self.cache.latest_verified or verified.get('generation') != self.cache.generation:
+            return False
+        self._offline = False
+        self._offline_account = None
+        self.window.run_js("window.__HUB_DESKTOP_OFFLINE__=false;delete document.documentElement.dataset.hubOffline;document.getElementById('hub-desktop-offline-banner')?.remove();window.dispatchEvent(new Event('hubdesktopconnectionchange'));")
+        return True
+
+    def _resource_response(self, body, mime, status=200):
+        from System import Array, Byte
+        from System.IO import MemoryStream
+        stream = MemoryStream(Array[Byte](body))
+        # WebView owns a COM reference while reading the response stream.
+        response = self.window.native.webview.CoreWebView2.Environment.CreateWebResourceResponse(
+            stream, status, 'OK' if status == 200 else 'Offline',
+            'Content-Type: ' + mime + '\r\nCache-Control: no-store\r\nX-Hub-Desktop-Local: 1\r\n')
+        return response
+
+    def on_resource_requested(self, sender, args):
+        url, method = str(args.Request.Uri), str(args.Request.Method).upper()
+        if not self.location.trusted(url):
+            return
+        path = urlsplit(url).path
+        if path == self.location.path + '/logout' and method != 'GET':
+            self.cache.clear_current()
+        # Tag requests before they leave; logout must also invalidate responses
+        # that were already in flight, not just later cache-writer threads.
+        if hasattr(args.Request, 'Headers'):
+            args.Request.Headers.SetHeader('X-Hub-Desktop-Cache-Epoch', str(self.cache.generation))
+        login = path == self.location.path + '/login' and self._login_network_ready
+        if method not in {'GET', 'HEAD', 'OPTIONS'} and self._offline and not login:
+            args.Response = self._resource_response(b'{"error":"desktop_offline","message":"Not sent to server"}', 'application/json', 503)
+            return
+        if method != 'GET':
+            return
+        snapshot = self._offline_response
+        if snapshot and canonical_url(url) == snapshot['url'] and str(args.ResourceContext) == 'Document':
+            self._offline_response = None
+            args.Response = self._resource_response(snapshot['html'].encode('utf-8'), 'text/html; charset=utf-8')
+            return
+        resource = self.assets.read(self.location, url)
+        if resource:
+            args.Response = self._resource_response(resource[0], resource[1])
+
+    def on_resource_response(self, sender, args):
+        url = str(args.Request.Uri)
+        if not self.location.trusted(url) or str(args.Request.Method).upper() != 'GET':
+            return
+        response = args.Response
+        if int(response.StatusCode) != 200 or response.Headers.Contains('X-Hub-Desktop-Local'):
+            return
+        try:
+            generation = int(str(args.Request.Headers.GetHeader('X-Hub-Desktop-Cache-Epoch')))
+        except (ValueError, AttributeError):
+            return
+        if generation != self.cache.generation:
+            return
+        if urlsplit(url).path == self.location.path + '/login':
+            self._login_network_ready = True
+            self.cache.clear_current()
+            return
+        if not urlsplit(url).path.startswith(self.location.path + '/projects'):
+            return
+        content_type = str(response.Headers.GetHeader('Content-Type')) if response.Headers.Contains('Content-Type') else ''
+        if 'text/html' not in content_type:
+            return
+        task = response.GetContentAsync()
+        def capture():
+            try:
+                stream = task.GetAwaiter().GetResult()
+                if stream is None:
+                    return
+                from System.IO import StreamReader
+                reader = StreamReader(stream)
+                source = str(reader.ReadToEnd())
+                reader.Dispose()
+                self.cache.put(url, source, generation=generation)
+            except Exception:
+                self.log.write('Workspace cache refresh skipped; remote navigation remains available.')
+        threading.Thread(target=capture, daemon=True).start()
 
     def connect_native_events(self):
         control = self.window.native.webview
