@@ -249,6 +249,14 @@ def run_agent_request(arguments: argparse.Namespace) -> dict[str, Any]:
     payload = {"assigned_agent_id": target}
     if 'execution_mode' in request: payload['execution_mode']=request['execution_mode']
     if 'resource_keys' in request: payload['resource_keys']=request['resource_keys']
+    if 'execution_route' in request:
+        if request['execution_route'] not in ('direct', 'project'):
+            raise ValueError('委派执行路线需为 direct 或 project')
+        payload['execution_route'] = request['execution_route']
+    if 'execution_route_reason' in request:
+        if not isinstance(request['execution_route_reason'], str) or len(request['execution_route_reason']) > 500:
+            raise ValueError('执行路线说明需为不超过500字的文本')
+        payload['execution_route_reason'] = request['execution_route_reason']
     for field in ('work_type','work_key','fallback_reason'):
         if field in request:
             if not isinstance(request[field], str):

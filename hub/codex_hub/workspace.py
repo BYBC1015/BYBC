@@ -83,7 +83,9 @@ def _task_views(repo, project_id: int, *, conversation_id: int | None = None,
     clause = " AND t.conversation_id=?" if conversation_id is not None else ""
     params = [project_id,conversation_id] if conversation_id is not None else [project_id]
     from .task_board import active_sql,can_archive
-    if board!='all':clause+=' AND '+('NOT ' if board=='history' else '')+active_sql()
+    if board!='all':
+        clause+=' AND '+('NOT ' if board=='history' else '')+active_sql()
+        clause+=" AND (t.execution_route!='chat' OR t.board_state='active')"
     if before:clause+=' AND t.id<?';params.append(before)
     if task_ids is not None:
         if not task_ids:return []
@@ -93,6 +95,7 @@ def _task_views(repo, project_id: int, *, conversation_id: int | None = None,
     rows = repo.connection.execute(f"""SELECT t.id,t.project_id,t.title,t.status,t.priority,
         t.assigned_agent_id,t.assigned_device_id,t.conversation_id,t.created_at,t.updated_at,
         t.status_version,t.route_engine,t.route_reason,t.wait_for_task_id,t.coordination_state,t.execution_mode,t.board_state,
+        t.execution_route,t.execution_route_reason,
         NOT {active_sql()} AS in_history,substr(t.description,1,2000) AS description,
         substr(t.result_summary,1,2000) AS result_summary,
         a.name AS assigned_agent_name,a.kind AS assigned_agent_kind,
@@ -220,7 +223,7 @@ def build_workspace_context(request: Request, user: dict, project: dict, *,
     workspace_tasks = _task_views(repo, project['id'],board='active')
     message_tasks=_task_views(repo,project['id'],task_ids=list({entry['task_id'] for entry in entries}),limit=40)
     from .task_board import active_sql
-    history_count=repo.connection.execute('SELECT COUNT(*) FROM tasks t WHERE t.project_id=? AND t.conversation_id=? AND NOT '+active_sql(),
+    history_count=repo.connection.execute("SELECT COUNT(*) FROM tasks t WHERE t.project_id=? AND t.conversation_id=? AND (t.execution_route!='chat' OR t.board_state='active') AND NOT "+active_sql(),
                                          (project['id'],conversation_id)).fetchone()[0] if room else 0
     from .execution_context import annotate_execution
     memberships = annotate_membership_presence(repo.list_project_memberships(project['id']))

@@ -133,6 +133,41 @@ def test_worker_crash_after_cli_completion_uses_native_receipt_without_inbox(rep
     assert repo.connection.execute('SELECT COUNT(*) FROM entries WHERE task_id=?', (client.task_id,)).fetchone()[0] == 1
 
 
+@pytest.mark.parametrize('drop_mapping',[False,True])
+def test_crash_between_project_receipt_and_worker_completion_recovers_without_cli(repo,tmp_path,monkeypatch,drop_mapping):
+    from codex_bridge.project_sessions import ProjectSessionStore
+    import uuid
+    runner,client,_=runtime(repo,tmp_path)
+    task=repo.get_task(client.task_id)
+    client.context={'agent':{'id':task['assigned_agent_id']},'task':{
+        **task,'execution_route':'project','assigned_device_id':client.device['id']}}
+    calls=[]
+    class CrashAfterSession:
+        def run(self,slug,workspace,prompt_path,prompt,*,execution_context=None,**kwargs):
+            calls.append(1);ctx=execution_context
+            with ProjectSessionStore(runner.config.state_path.parent/'project-sessions').acquire(
+                device_id=ctx['device_id'],project_slug=slug,conversation_id=ctx['conversation_id'],
+                assigned_agent_id=ctx['assigned_agent_id'],project_path=workspace,
+                run_key=ctx['run_key'],generation=ctx['generation']) as session:
+                session.start()
+                session.observe_jsonl(json.dumps({'type':'thread.started','thread_id':str(uuid.uuid4())})+'\n'+json.dumps({'type':'turn.completed'}))
+                session.complete(ok=True,returncode=0,last_message='已完成\n<hub-reflection>'+json.dumps(REFLECTION)+'</hub-reflection>',output_path=prompt_path)
+            raise RuntimeError('crash before worker completion')
+    executor=CrashAfterSession();runner.executor=executor
+    with pytest.raises(RuntimeError,match='crash before worker'):
+        runner.process_once()
+    receipt=runner.state.get_task_delivery('agent-test',client.task_id)
+    assert not Path(receipt['completion_path']).exists()
+    if drop_mapping:
+        runner.config.projects.clear()
+    client.hide_inbox=True
+    recovered=restart(runner,client,executor)
+    recovered.process_once()
+    assert repo.get_task(client.task_id)['status']=='review'
+    assert calls==[1] and client.start_calls==1
+    assert repo.connection.execute('SELECT COUNT(*) FROM entries WHERE task_id=?',(client.task_id,)).fetchone()[0]==1
+
+
 def test_cancelled_result_stays_local_and_never_overwrites_human_state(repo, tmp_path):
     runner, client, executor = runtime(repo, tmp_path)
     client.fail_complete_before = True

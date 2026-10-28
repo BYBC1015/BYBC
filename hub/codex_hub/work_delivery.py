@@ -115,8 +115,9 @@ def revise_task(repo, source, device_id, payload):
                 assigned_agent_id=target['assigned_agent_id'],created_by_device_id=device_id,commit=False)
             db.execute('UPDATE tasks SET conversation_id=?,wait_for_task_id=?,route_engine=?,route_reason=? WHERE id=?',
                 (source['conversation_id'],target_id,'controller_revision','收到修改；原执行结束并核对结果后接续',next_task['id']))
-            db.execute('UPDATE tasks SET execution_mode=?,resource_keys_json=? WHERE id=?',
-                       (target.get('execution_mode','shared'),target.get('resource_keys_json','[]'),next_task['id']))
+            db.execute('UPDATE tasks SET execution_mode=?,resource_keys_json=?,execution_route=?,execution_route_reason=? WHERE id=?',
+                       (target.get('execution_mode','shared'),target.get('resource_keys_json','[]'),
+                        target.get('execution_route','direct'),target.get('execution_route_reason',''),next_task['id']))
             repo.bind_task_attachments(source['project_id'],[next_task['id']],
                 [r['attachment_id'] for r in db.execute('SELECT attachment_id FROM hub_task_attachments WHERE task_id=?',(target_id,))],source_task_id=target_id)
         repo.bind_task_attachments(source['project_id'],[next_task['id']],

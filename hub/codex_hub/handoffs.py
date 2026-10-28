@@ -73,7 +73,8 @@ def ask_handoff(repo, source, device_id, data):
         reply=repo.create_task(source['project_id'],('交接答复：'+source['title'])[:200],
             description=f"{worker['name']} 对工作 #{source['id']} 的第 {count+1} 轮交接提问：\n{question}\n\n请查看交接记录并直接答复，必要时指出范围或输入中的问题。使用 answer_handoff 或以最终答复回答。不要另派一份相同制作任务。",
             assigned_agent_id=controller['id'],created_by_device_id=device_id,commit=False)
-        db.execute("UPDATE tasks SET conversation_id=?,work_stage='handoff_reply',route_engine='handoff' WHERE id=?",(source['conversation_id'],reply['id']))
+        db.execute("UPDATE tasks SET conversation_id=?,work_stage='handoff_reply',route_engine='handoff',execution_route='chat',execution_route_reason=? WHERE id=?",
+                   (source['conversation_id'],'总控在原工作对话中澄清交接，实际交付继续由原执行者完成。',reply['id']))
         db.execute('INSERT OR IGNORE INTO hub_conversation_agents VALUES (?,?)',(source['conversation_id'],controller['id']))
         repo.bind_task_attachments(source['project_id'],[reply['id']],
             [item['id'] for item in repo.list_task_attachments(source['project_id'],source['id'])],source_task_id=source['id'])

@@ -4,11 +4,12 @@
 {% block extra_head %}<link rel="stylesheet" href="{{ app_path('/static/workspace-details.css') }}?v=20261027-shell2"><script src="{{ app_path('/static/codex-markdown.js') }}?v=20260807-reading4" defer></script>{% endblock %}
 {% block content %}
 {% set status_names = {'open':'待领取','claimed':'已领取','in_progress':'进行中','blocked':'遇到阻碍','review':'待复核','done':'已完成','cancelled':'已取消'} %}
+{% set execution_route_labels = {'project':'本地工程','direct':'单次执行','chat':'聊天协调'} %}
 <section class="page-head project-head">
   <div>
     <a class="back-link" href="{{ app_path('/projects/' ~ project.slug) }}">返回项目</a>
     <h1>{{ task.title }}</h1>
-    <p>{{ project.name }} · {{ status_names.get(task.status, task.status) }} · {{ {'high':'优先处理','normal':'普通优先级','low':'不紧急'}.get(task.priority, task.priority) }}</p>
+    <p>{{ project.name }} · {{ status_names.get(task.status, task.status) }} · {{ {'high':'优先处理','normal':'普通优先级','low':'不紧急'}.get(task.priority, task.priority) }}{% if execution_route_labels.get(task.execution_route) %} · <span data-execution-route="{{ task.execution_route }}">{{ execution_route_labels[task.execution_route] }}</span>{% endif %}</p>
   </div>
   <div class="page-actions">
     <a class="button" href="{{ app_path('/projects/' ~ project.slug ~ '/conversations/' ~ task.conversation_id) if task.conversation_id else app_path('/projects/' ~ project.slug) }}">回到工作区 ↗</a>

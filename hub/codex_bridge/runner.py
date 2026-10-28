@@ -588,6 +588,37 @@ class BridgeRunner:
         self._save_state()
         result.messages.append(f'任务 #{task_id}：{detail}')
 
+    def _read_agent_completion(self, receipt, current):
+        completion = read_execution_completion(Path(receipt.get('completion_path') or ''), current)
+        if completion:
+            return completion
+        context = receipt.get('execution_context') or {}
+        if (context.get('execution_route') != 'project'
+                or context.get('run_key') != current.get('run_key')
+                or context.get('generation') != current.get('generation')
+                or context.get('task_id') != receipt.get('task_id')
+                or context.get('project_slug') != receipt.get('project_slug')):
+            return None
+        # The project receipt is written first. A crash before the worker's
+        # completion receipt must recover that evidence without a new CLI turn.
+        from .project_sessions import ProjectSessionStore, ProjectSessionError
+        root = self.config.backend_options.get('project_session_root') or self.config.state_path.parent / 'project-sessions'
+        project_path = self.config.projects.get(receipt.get('target_project')) or context.get('project_path')
+        if project_path is None or not Path(root).exists():
+            return None
+        try:
+            with ProjectSessionStore(root).acquire(device_id=context.get('device_id'),
+                project_slug=receipt['target_project'], conversation_id=context.get('conversation_id'),
+                assigned_agent_id=context.get('assigned_agent_id'), project_path=project_path,
+                run_key=context['run_key'], generation=context['generation']) as session:
+                cached = session.cached_receipt
+                if cached:
+                    return {**cached, 'generation': current['generation'],
+                            'error': cached.get('error') or ''}
+        except ProjectSessionError:
+            pass  # Missing proof, active owner or corrupt history never permits a replay.
+        return None
+
     def _recover_agent_executions(self, result: ProcessResult) -> None:
         if not callable(getattr(self.client, 'reconcile_task_execution', None)):
             return
@@ -617,7 +648,7 @@ class BridgeRunner:
                     self._save_state()
                     continue
                 if task.get('status') in {'done', 'cancelled'} or current['task_version'] != task.get('status_version'):
-                    completion=read_execution_completion(Path(receipt.get('completion_path') or ''),current)
+                    completion=self._read_agent_completion(receipt,current)
                     acknowledge=getattr(self.client,'acknowledge_task_stopped',None)
                     if task.get('status') in {'done','cancelled'} and callable(acknowledge):
                         if receipt.get('stage')=='agent_result' or completion:
@@ -635,7 +666,7 @@ class BridgeRunner:
                     self._save_state()
                     continue
                 if receipt.get('stage') != 'agent_result':
-                    completion = read_execution_completion(Path(receipt.get('completion_path') or ''), current)
+                    completion = self._read_agent_completion(receipt, current)
                     if completion:
                         recovered = CodexExecResult(ok=completion['ok'], command=[],
                             returncode=completion['returncode'], stdout='', stderr='',
@@ -739,11 +770,19 @@ class BridgeRunner:
         prompt_path = Path(receipt['prompt_path'])
         # Fetch after start is fenced: amendments to queued work cannot leave an old prompt running.
         try:
+            agent_context = self.client.get_agent_context(slug, task_id)
+            current_task = agent_context.get('task') or {}
+            context.update(execution_route=current_task.get('execution_route', task.get('execution_route', 'direct')),
+                           conversation_id=current_task.get('conversation_id', task.get('conversation_id')),
+                           assigned_agent_id=(agent_context.get('agent') or {}).get('id', task.get('assigned_agent_id')),
+                           device_id=current_task.get('assigned_device_id', task.get('assigned_device_id')),
+                           project_path=str(self._resolve_project_path(receipt['target_project'])))
             fresh_prompt = self.client.get_task_prompt(slug, task_id) + self._agent_tool_instructions(slug, task_id)
             prepared = prepare_task_attachments(self.client, self.config, slug, task_id, self._resolve_project_path(receipt['target_project']))
             fresh_prompt += prepared.prompt()
             prompt_path.write_text(fresh_prompt,encoding='utf-8')
             receipt['image_paths']=[str(path) for path in prepared.images]
+            receipt['execution_context'] = context
             self._save_state()
         except Exception:
             failure=CodexExecResult(ok=False,command=[],returncode=None,stdout='',stderr='',
@@ -833,10 +872,16 @@ class BridgeRunner:
             '"assigned_agent_id":目标智能体数字编号,"title":"明确交付结果",'
             '"description":"任务范围、输入与验收要求","priority":"normal"}。\n'
             '若身份上下文含 role_contracts，必须同时指定 work_type 和稳定的 work_key；'
-            '可省略 assigned_agent_id 由系统按职责选人。work_type 为 engineering、art_direction、visual_production、postproduction、general_support。'
+            '可省略 assigned_agent_id 由系统按职责选人。work_type 为 engineering、art_direction、visual_production、postproduction、reference_research、general_support。'
+            'reference_research 由锦衣卫负责优秀案例研究，优先最近一年，核实来源与日期，交付可借鉴之处；美术总监负责方向取舍。'
             '最后一种只用于专业职责均不适用的交付，必填 fallback_reason；缺配置交工程师，离线或忙碌不换职业。'
             '例：{"action":"delegate","work_type":"visual_production","work_key":"campaign-cover-v1","title":"交付封面","description":"明确素材与验收标准"}。'
             'created=false 表示复用已有工作，不能声称新开一项；修改用 revise。依赖成果未就绪时先等待，同一文件不要并行修改。\n'
+            '按任务选择 execution_route：咨询直接在当前聊天回答；单张图片、参考检索或一次文件处理用 direct；'
+            '持续代码开发、本地工程或达芬奇项目用 project，系统在对应工程目录的持久工作会话中执行并续接上下文。'
+            'project 需 shared；独立制作可用 direct+isolated。不要因为生成图片涉及文件就派给工程师。'
+            '执行者身份、工作会话、模型和设备是独立概念；同一身份可有多个工作会话。'
+            '执行方式改变时给出 execution_route_reason，不能声称已接入某个桌面对话，除非返回了真实绑定。\n'
             '仅使用随任务提供的附件即可独立产出时，delegate 指定 "execution_mode":"isolated"，在独立工作目录执行，可与同身份其他任务并行。'
             '需要修改现有代码、原项目或现有时间线时保持 shared，等待共享工程空闲。使用共享外部工程/服务时另给 resource_keys，例如 ["resolve:project-id"]；'
             '不同任务引用同一资源必须用相同名称，不能换名字规避占用。isolated 不会复制整个原工程，只带本任务附件；缺少必要输入应明确交接。\n'

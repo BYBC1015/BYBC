@@ -25,7 +25,8 @@ def task_config(config, task):
         project_root=root/'workspace';projects={slug:project_root}
     return replace(config,state_path=root/'state.json',prompt_dir=root/'prompts',codex_exec_output_dir=root/'outputs',
         projects=projects,project_root=project_root,auto_create_missing_projects=True,
-        backend_options={**config.backend_options,'agent_network_access':True})
+        backend_options={**config.backend_options,'agent_network_access':True,
+                         'project_session_root':str(config.backend_options.get('project_session_root') or config.state_path.parent/'project-sessions')})
 
 
 def resource_keys(config,task):
@@ -112,7 +113,7 @@ class DurableTaskPool:
             self.metadata[task_id]=task
             path=task_config(self.config,task).state_path.parent/'task.json'
             path.parent.mkdir(parents=True,exist_ok=True)
-            saved={key:task[key] for key in ('id','project_id','project_slug','assigned_agent_id','assigned_agent_kind','execution_mode','resource_keys_json') if key in task}
+            saved={key:task[key] for key in ('id','project_id','project_slug','assigned_agent_id','assigned_agent_kind','assigned_device_id','conversation_id','execution_mode','resource_keys_json','execution_route','execution_route_reason') if key in task}
             temp=path.with_suffix('.tmp');temp.write_text(json.dumps(saved),encoding='utf-8');temp.replace(path)
             self.active[task_id]=(self.executor.submit(runner.process_once),keys)
         return messages

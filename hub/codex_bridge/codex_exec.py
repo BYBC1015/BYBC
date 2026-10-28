@@ -49,8 +49,12 @@ class CodexExecRunner:
         execution_context: dict | None = None,
         cancel_event: threading.Event | None = None,
     ) -> CodexExecResult:
-        result = self._run(project_slug, project_path, prompt_path, prompt,
-                           execution_preferences, image_paths, execution_context, cancel_event)
+        if (execution_context or {}).get('execution_route') == 'project':
+            result = self._run_project(project_slug, project_path, prompt_path, prompt,
+                                       execution_preferences, image_paths, execution_context, cancel_event)
+        else:
+            result = self._run(project_slug, project_path, prompt_path, prompt,
+                               execution_preferences, image_paths, execution_context, cancel_event)
         if execution_context:
             # Persist the actual process outcome before returning to the worker.
             # A last-message file alone is not evidence that the process exited.
@@ -68,6 +72,38 @@ class CodexExecRunner:
             temporary.replace(receipt_path)
         return result
 
+    def _run_project(self, project_slug, project_path, prompt_path, prompt,
+                     execution_preferences, image_paths, execution_context, cancel_event):
+        from .project_sessions import ProjectSessionStore, ProjectSessionError
+
+        options = getattr(self.config, 'backend_options', {}) or {}
+        root = options.get('project_session_root') or self.config.state_path.parent / 'project-sessions'
+        try:
+            with ProjectSessionStore(root).acquire(
+                device_id=execution_context.get('device_id'), project_slug=project_slug,
+                conversation_id=execution_context.get('conversation_id'),
+                assigned_agent_id=execution_context.get('assigned_agent_id'), project_path=project_path,
+                run_key=execution_context['run_key'], generation=execution_context['generation'],
+            ) as session:
+                if session.cached_receipt:
+                    cached = session.cached_receipt
+                    return CodexExecResult(ok=cached['ok'], command=[], returncode=cached['returncode'],
+                        stdout='', stderr='', last_message=cached.get('last_message') or '',
+                        output_path=Path(cached.get('output_path') or self._output_path(project_slug, prompt_path)),
+                        error=cached.get('error') or '')
+                result = self._run(project_slug, project_path, prompt_path, prompt,
+                    execution_preferences, image_paths, execution_context, cancel_event, project_session=session)
+                if session.started:
+                    output = result.stdout.decode('utf-8', errors='replace') if isinstance(result.stdout, bytes) else result.stdout
+                    session.observe_jsonl(output)
+                    session.complete(ok=result.ok, returncode=result.returncode,
+                        last_message=self._redact(result.last_message)[:262144],
+                        error=self._redact(result.error)[:65536], output_path=result.output_path)
+                return result
+        except ProjectSessionError as exc:
+            return self._failed(command=[], output_path=self._output_path(project_slug, prompt_path),
+                                error='本地工程会话暂未继续：' + str(exc))
+
     def _run(
         self,
         project_slug: str,
@@ -78,6 +114,7 @@ class CodexExecRunner:
         image_paths: list[Path] | None = None,
         execution_context: dict | None = None,
         cancel_event: threading.Event | None = None,
+        project_session=None,
     ) -> CodexExecResult:
         cli_path = getattr(self.config, "codex_cli_path", None)
         if not cli_path:
@@ -132,6 +169,12 @@ class CodexExecRunner:
             # delegation helper. Keep the filesystem sandbox and old bindings.
             command.extend(["-c", "sandbox_workspace_write.network_access=true"])
         command.append("exec")
+        if project_session:
+            # Parent exec options retain the exact workspace and sandbox on resume.
+            command.extend(['--cd', str(project_path), '--sandbox', sandbox])
+            if project_session.session_id:
+                command.append('resume')
+            command.append('--json')
         if bool(getattr(self.config, "codex_exec_ignore_user_config", True)):
             command.append("--ignore-user-config")
         for image_path in image_paths or []:
@@ -140,20 +183,15 @@ class CodexExecRunner:
                 return self._failed(command=[], output_path=output_path,
                                     error="Task image is missing or outside the configured project.")
             command.extend(["--image", str(resolved)])
-        command.extend(
-            [
-                "--cd",
-                str(project_path),
-                "--sandbox",
-                sandbox,
-                "--skip-git-repo-check",
-                "--output-last-message",
-                str(output_path),
-                "-",
-            ]
-        )
+        if not project_session:
+            command.extend(['--cd', str(project_path), '--sandbox', sandbox])
+        command.extend(['--skip-git-repo-check', '--output-last-message', str(output_path)])
+        if project_session and project_session.session_id:
+            command.append(project_session.session_id)
+        command.append('-')
 
         process_options = hidden_subprocess_kwargs()
+        process_options['cwd'] = str(project_path)
         if execution_context:
             child_environment = os.environ.copy()
             for field, variable in [('generation', 'GENERATION'), ('run_key', 'RUN_KEY'),
@@ -161,8 +199,15 @@ class CodexExecRunner:
                 child_environment['CODEX_HUB_EXECUTION_' + variable] = str(execution_context[field])
             process_options['env'] = child_environment
         try:
-            if cancel_event is not None and self.process_runner is subprocess:
-                completed = self._run_cancellable(command, prompt, timeout, process_options, cancel_event)
+            if cancel_event is not None and cancel_event.is_set():
+                return self._failed(command=command, output_path=output_path,
+                                    error='Hub 已撤销本次执行许可，工作进程未启动。')
+            if project_session:
+                project_session.start()
+            if self.process_runner is subprocess and (cancel_event is not None or project_session):
+                completed = self._run_cancellable(command, prompt, timeout, process_options,
+                    cancel_event if cancel_event is not None else threading.Event(),
+                    on_unstarted=project_session.abort_unstarted if project_session else None)
             else:
                 completed = self.process_runner.run(
                     command, input=prompt, capture_output=True, text=True,
@@ -231,14 +276,22 @@ class CodexExecRunner:
             process.kill()
         return tree_stopped
 
-    def _run_cancellable(self, command, prompt, timeout, process_options, cancel_event):
+    def _run_cancellable(self, command, prompt, timeout, process_options, cancel_event, on_unstarted=None):
         if cancel_event.is_set():
+            if on_unstarted:
+                on_unstarted()
             return subprocess.CompletedProcess(command, -1, '', 'ERROR: Hub 已撤销本次执行许可，工作进程未启动。')
         options = dict(process_options)
         if os.name != 'nt':
             options['start_new_session'] = True
-        with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              text=True, encoding='utf-8', errors='replace', **options) as process:
+        try:
+            process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                       text=True, encoding='utf-8', errors='replace', **options)
+        except OSError:
+            if on_unstarted:
+                on_unstarted()
+            raise
+        with process:
             deadline = time.monotonic() + timeout
             first_input = prompt
             while True:

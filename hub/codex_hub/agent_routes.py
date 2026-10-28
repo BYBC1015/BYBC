@@ -151,6 +151,8 @@ def register_agent_routes(app: FastAPI) -> None:
         key = str(form.get('request_key', ''))
         raw_room = str(form.get('conversation_id', '')).strip()
         raw_ids = form.getlist('agent_ids')
+        execution_route = form.get('execution_route') or None
+        execution_route_reason = form.get('execution_route_reason', '')
         ids = [int(value) for value in raw_ids if isinstance(value, str)
                and re.fullmatch(r'[1-9][0-9]{0,17}', value)]
         room_id = int(raw_room) if re.fullmatch(r'[1-9][0-9]{0,17}', raw_room) else None
@@ -178,7 +180,8 @@ def register_agent_routes(app: FastAPI) -> None:
             manifest = await inspect_workspace_uploads(request, uploads)
             effective_title = title.strip() or ' '.join(clean_description.split())[:80] or (
                 '处理附件：' + manifest[0]['original_filename'])[:80]
-            digest = dispatch_payload_hash(ids, effective_title, clean_description, room_id, attachments=manifest)
+            digest = dispatch_payload_hash(ids, effective_title, clean_description, room_id, attachments=manifest,
+                execution_route=execution_route, execution_route_reason=execution_route_reason)
             result = store.previous_dispatch(repo, project['id'], 'web:' + key, digest)
             if result is None:
                 # Validate destinations before creating durable files. dispatch repeats
@@ -194,7 +197,8 @@ def register_agent_routes(app: FastAPI) -> None:
                 result = store.dispatch(repo, project['id'], agent_ids=ids,
                     title=effective_title, description=clean_description,
                     request_key='web:' + key, conversation_id=room_id, user_id=user['id'],
-                    attachments=stored_attachments)
+                    attachments=stored_attachments, execution_route=execution_route,
+                    execution_route_reason=execution_route_reason)
                 keep_files = result['created']
         except (ValueError, TypeError, HTTPException) as exc:
             if isinstance(exc, HTTPException) and exc.status_code != 413:
@@ -248,7 +252,9 @@ def register_agent_routes(app: FastAPI) -> None:
         result = checked(lambda: store.dispatch(repo, project['id'],
             agent_ids=[parse_optional_int(i) for i in form.getlist('agent_ids')],
             title=str(form.get('title','继续协作')), description=str(form.get('description','')),
-            request_key='web:'+str(form.get('request_key','')), conversation_id=conversation_id,user_id=user['id']))
+            request_key='web:'+str(form.get('request_key','')), conversation_id=conversation_id,user_id=user['id'],
+            execution_route=form.get('execution_route') or None,
+            execution_route_reason=form.get('execution_route_reason','')))
         return redirect_to(request, f"/projects/{slug}/conversations/{result['conversation_id']}")
 
     @app.get('/api/projects/{slug}/agents')
@@ -315,6 +321,7 @@ def register_agent_routes(app: FastAPI) -> None:
             attachment_ids=data.get('attachment_ids'), execution=data.get('execution'),
             work_type=data.get('work_type'), work_key=data.get('work_key'), fallback_reason=data.get('fallback_reason',''),
             execution_mode=data.get('execution_mode','shared'), resource_keys=data.get('resource_keys'),
+            execution_route=data.get('execution_route'), execution_route_reason=data.get('execution_route_reason',''),
             model_request=data.get('model_selection'), model_data_dir=get_settings(request).data_dir))
         return {'task': result['tasks'][0], 'created': result['created']}
 

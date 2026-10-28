@@ -91,6 +91,8 @@ def initialize_agent_schema(db: sqlite3.Connection) -> None:
         'conversation_id': 'INTEGER REFERENCES hub_conversations(id) ON DELETE SET NULL',
         'route_reason': "TEXT NOT NULL DEFAULT ''",
         'route_engine': "TEXT NOT NULL DEFAULT ''",
+        'execution_route': "TEXT NOT NULL DEFAULT 'direct' CHECK(execution_route IN ('chat','direct','project'))",
+        'execution_route_reason': "TEXT NOT NULL DEFAULT ''",
         'wait_for_task_id': 'INTEGER REFERENCES tasks(id)',
     }.items():
         if name not in columns:
@@ -105,13 +107,18 @@ def clean(value: Any, limit: int) -> str:
 
 
 def dispatch_payload_hash(agent_ids, title, description, conversation_id, priority='normal',
-                          attachments=None, source_task_id=None, attachment_ids=None) -> str:
+                          attachments=None, source_task_id=None, attachment_ids=None,
+                          execution_route=None, execution_route_reason='') -> str:
     """Stable content identity excludes temporary storage paths and upload ordering."""
     payload = [sorted(set(agent_ids)), clean(title, 200), clean(description, 16000), conversation_id, priority]
     if attachments or source_task_id is not None:
         manifest = sorted((item['original_filename'], item['content_type'], item['byte_size'], item['sha256'])
                           for item in (attachments or []))
         payload.append([manifest, source_task_id, sorted(attachment_ids) if attachment_ids is not None else None])
+    from .execution_routing import validate_route_request
+    execution_route, execution_route_reason = validate_route_request(execution_route, execution_route_reason)
+    if execution_route is not None or execution_route_reason:
+        payload.append({'execution_route': execution_route, 'execution_route_reason': execution_route_reason})
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -275,7 +282,8 @@ class AgentStore:
         from .repository import Repository
         from .agent_roles import ROLES, enabled, work_context
         from .handoffs import handoff_context
-        return {'agent': agent, 'task': {k: task[k] for k in ('id','title','description','conversation_id','route_reason','route_engine')},
+        return {'agent': agent, 'task': {k: task[k] for k in ('id','title','description','conversation_id','route_reason','route_engine',
+                'assigned_agent_id','assigned_device_id','execution_route','execution_route_reason')},
                 'execution_scope': {'mode':task.get('execution_mode','shared'),'resources':json.loads(task.get('resource_keys_json') or '[]')},
                 'attachments': Repository(self.db).list_task_attachments(task['project_id'], task['id']),
                 'role_contracts': {key: {'name': value[0], 'scope': value[1]} for key, value in ROLES.items()}
@@ -313,13 +321,16 @@ class AgentStore:
                  attachment_ids: list[int] | None = None, execution: dict | None = None,
                  model_selection: dict | None = None, model_request: dict | None = None,
                  model_data_dir=None, work_type: str | None = None, work_key: str | None = None,
-                 fallback_reason: str = '', execution_mode: str = 'shared', resource_keys: list[str] | None = None) -> dict:
+                 fallback_reason: str = '', execution_mode: str = 'shared', resource_keys: list[str] | None = None,
+                 execution_route: str | None = None, execution_route_reason: str = '') -> dict:
         """Atomic, retry-safe group work. Every participant keeps its own identity."""
         if not agent_ids or len(agent_ids) > 12 or any(i is not None and (type(i) is not int or i <= 0) for i in agent_ids):
             raise ValueError('请选择 1 至 12 个有效智能体')
         from .agent_roles import enabled, resolve_owner, previous_work, contract_hash
         from .execution_resources import normalize_scope
+        from .execution_routing import choose_execution_route, validate_route_request
         execution_mode,resource_keys=normalize_scope(execution_mode,resource_keys)
+        execution_route,execution_route_reason=validate_route_request(execution_route,execution_route_reason)
         managed = enabled(self.db, project_id)
         if managed and source_task_id is not None:
             if len(agent_ids) != 1:
@@ -345,7 +356,8 @@ class AgentStore:
         if attachment_ids and source_task_id is None:
             raise ValueError('继承附件需要明确的源任务')
         digest = dispatch_payload_hash(requested_ids, title, description, conversation_id, priority,
-                                       attachments, source_task_id, attachment_ids)
+                                       attachments, source_task_id, attachment_ids,
+                                       execution_route, execution_route_reason)
         if model_request or model_selection:
             digest = hashlib.sha256((digest + json.dumps(model_request or model_selection, sort_keys=True)).encode()).hexdigest()
         if managed and source_task_id is not None:
@@ -355,6 +367,11 @@ class AgentStore:
         created = False
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
+            # Identity/role and the resulting route are read under the dispatch
+            # transaction. Later identity edits cannot rewrite a task's surface.
+            execution_routes = {agent_id: choose_execution_route(self.get(project_id, agent_id),
+                work_type=work_type, route=execution_route, reason=execution_route_reason,
+                delegated=source_task_id is not None, execution_mode=execution_mode) for agent_id in ids}
             # Fence first, even for a retry: an obsolete run cannot dispatch or
             # appear to succeed after another device has taken ownership.
             source = None
@@ -396,6 +413,8 @@ class AgentStore:
                         previous_task=repo.get_task(existing_task)
                         if previous_task['execution_mode']!=execution_mode or json.loads(previous_task['resource_keys_json'])!=resource_keys:
                             raise ValueError('已有工作的执行范围不同，请接续原任务，不可通过重复派工改写资源归属')
+                        if previous_task['execution_route'] != execution_routes[ids[0]][0]:
+                            raise ValueError('已有工作的 execution_route 不同，请接续原任务，不可通过重复派工更换执行路线')
                         # Persist this retry key too: changing its content later must fail.
                         dispatch_id = self.db.execute('''INSERT INTO hub_agent_dispatches
                             (project_id,request_key,payload_hash,conversation_id,created_at) VALUES (?,?,?,?,?)''',
@@ -428,8 +447,9 @@ class AgentStore:
                                      if ids != requested_ids else '发起者指定的共同协作对话',task['id']))
                     self.db.execute('INSERT INTO hub_dispatch_tasks VALUES (?,?)', (dispatch_id,task['id']))
                     task_ids.append(task['id'])
-                    self.db.execute('UPDATE tasks SET execution_mode=?,resource_keys_json=? WHERE id=?',
-                                    (execution_mode,json.dumps(resource_keys),task['id']))
+                    selected_route, selected_route_reason = execution_routes[agent_id]
+                    self.db.execute('UPDATE tasks SET execution_mode=?,resource_keys_json=?,execution_route=?,execution_route_reason=? WHERE id=?',
+                                    (execution_mode,json.dumps(resource_keys),selected_route,selected_route_reason,task['id']))
                     if selected:
                         from .model_policy import freeze_choice
                         freeze_choice(self.db, task['id'], selected)
@@ -510,6 +530,13 @@ class AgentStore:
                      '按 handoff.max_rounds 控制轮数，一轮合并相关问题。提问成功后结束本次执行，等待总控真实答复，不自行模拟对方、轮询等候或继续依赖该答复的操作。'
                      '总控的交接答复任务应读取 handoff.rounds，使用 answer_handoff 或直接最终答复，明确可执行的细节与取舍。'
                      '答复后原执行者继续同一个任务；已有成果先检查再接续，不重新做一遍。双方交流会即时显示给用户。\n')
+        guidance += ('执行路线与身份、模型、设备分别管理：chat 是直接交流与总控协调，咨询直接回答，不为每句话创建专业交付；'
+                     'direct 是单次工具或 CLI 工作，例如生成一张图片、一次修图、整理一个文件或参考调研；'
+                     'project 是需要本机文件、应用及持续上下文的本地项目工作会话，例如开发、工程修改、达芬奇后期。'
+                     '每项委派使用 execution_route 明确选择 direct 或 project，可通过 execution_route_reason 解释选择。'
+                     '图片生成和修图属于视觉制作，不因调用工具或缺少配置就把整项美术制作交给工程师。'
+                     '总控用 chat 保持回应并安排交付；后续持续制作可选择 project。智能体是持久执行者，工作会话只是工作场所，'
+                     '同一智能体可以参与多个工作会话，一个会话也可以有多个身份协作。\n')
         guidance += ('继续保护既有 SW 中转链路；此约束来自 Hub 初建时用户要求，不得因精简回复而取消。'
                      '面向用户的回复聚焦成果、可直接打开的预览、实际问题和下一步。不要例行附带“未触碰 SW /upload 或 /u”等内部操作排除说明；'
                      '保留真实影响交付的限制，例如视频尚未修改或缺少必要素材。\n')

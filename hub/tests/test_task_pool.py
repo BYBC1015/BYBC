@@ -61,6 +61,30 @@ while not (folder/(task+'.release')).exists():
         return CodexExecResult(ok=True,command=[],returncode=0,stdout='',stderr='',last_message=body,output_path=prompt_path)
 
 
+def test_leased_project_execution_carries_actual_binding_context(client,repo,lease_task,tmp_path,monkeypatch):
+    d=lease_task;task_id=d['task']['id'];slug=d['project']['slug']
+    repo.connection.execute("UPDATE tasks SET execution_route='project' WHERE id=?",(task_id,));repo.connection.commit()
+    task=repo.get_task(task_id)
+    config=config_for(tmp_path);config.projects={slug:tmp_path/'project'}
+    monkeypatch.setattr('codex_bridge.model_allocator.allocate_task_model',lambda *args:{})
+    monkeypatch.setattr('codex_hub.model_policy.ensure_task_choice',lambda *args:{})
+    captured=[]
+    class Capture:
+        def run(self,*args,execution_context=None,**kwargs):
+            captured.append(execution_context)
+            return CodexExecResult(ok=True,command=[],returncode=0,stdout='',stderr='',
+                last_message='已处理\n<hub-reflection>'+json.dumps(REFLECTION)+'</hub-reflection>',output_path=args[2])
+    api=ApiClient(client,token_headers(repo,d['device']),task_id)
+    runner=BridgeRunner(task_config(config,{**task,'project_slug':slug}),client=api,executor=Capture())
+    runner._next_capability_report=float('inf')
+    runner.process_once()
+    assert len(captured)==1
+    assert captured[0]['execution_route']=='project'
+    assert captured[0]['conversation_id']==task['conversation_id']
+    assert captured[0]['assigned_agent_id']==d['worker']['id']
+    assert captured[0]['device_id']==d['device']['id']
+
+
 def until(pool,condition,timeout=10):
     end=time.monotonic()+timeout
     while time.monotonic()<end:

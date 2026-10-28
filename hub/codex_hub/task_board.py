@@ -12,13 +12,16 @@ def initialize_task_board_schema(db):
 def active_sql(alias='t'):
     # A cancellation is not proof that its process stopped. Keep uncertain or
     # live execution visible until the worker acknowledges the stop.
-    return f"""(EXISTS (SELECT 1 FROM hub_task_executions board_run
+    # Chat turns retain durable execution receipts and remain in the transcript,
+    # but do not masquerade as production work. Explicit restore still exposes one.
+    return f"""({alias}.board_state='active' OR ({alias}.execution_route!='chat' AND (
+        EXISTS (SELECT 1 FROM hub_task_executions board_run
         WHERE board_run.task_id={alias}.id AND board_run.state IN ('running','uncertain')
         AND board_run.generation=(SELECT MAX(board_last.generation) FROM hub_task_executions board_last WHERE board_last.task_id={alias}.id))
-        OR {alias}.board_state='active' OR ({alias}.board_state='auto'
+        OR ({alias}.board_state='auto'
         AND {alias}.status NOT IN ('done','cancelled')
         AND NOT ({alias}.status='review' AND EXISTS
-          (SELECT 1 FROM hub_agents board_agent WHERE board_agent.id={alias}.assigned_agent_id AND board_agent.kind='controller'))))"""
+          (SELECT 1 FROM hub_agents board_agent WHERE board_agent.id={alias}.assigned_agent_id AND board_agent.kind='controller'))))))"""
 
 
 def can_archive(task, execution):
