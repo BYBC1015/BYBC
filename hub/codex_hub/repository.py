@@ -2037,7 +2037,7 @@ class Repository:
         if task.get("assigned_agent_id"):
             agent = AgentStore(self.connection).get(project["id"], task["assigned_agent_id"])
             task = dict(task, assigned_agent_kind=agent["kind"])
-        if task.get('work_stage')=='delivery_summary':
+        if task.get('work_stage')=='delivery_summary' or (task.get('controller_read_only') and task.get('assigned_agent_kind')=='controller'):
             return AgentStore(self.connection).prompt(task)
         entries = self.list_entries(project["id"], task_id=task_id)
         return render_task_prompt_markdown(

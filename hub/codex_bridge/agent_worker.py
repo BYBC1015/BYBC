@@ -77,6 +77,27 @@ def run_lane(runner, stopped, interval, emit=None):
             emit(f'执行连接暂未完成：{type(exc).__name__}；保留回执等待恢复。')
         stopped.wait(max(3,interval))
 
+
+def run_pool_lane(pool, stopped, stop_event=None, *, emit=None, failures=None, interval=3):
+    """One inbox poller per lane; a slow worker network call cannot queue chat."""
+    emit=emit or (lambda message: print(message, flush=True))
+    wakeup=getattr(pool,'wakeup',threading.Event())
+    try:
+        while not stopped.is_set() and not (stop_event and stop_event.is_set()):
+            wakeup.clear()
+            try:
+                for message in pool.tick():emit(message)
+            except Exception as exc:
+                emit(f'本轮未完成：{type(exc).__name__}；保留回执等待恢复。')
+            deadline=time.monotonic()+interval
+            while not stopped.is_set() and not (stop_event and stop_event.is_set()):
+                remaining=deadline-time.monotonic()
+                if remaining<=0 or wakeup.wait(min(.2,remaining)):break
+    except BaseException as exc:
+        if failures is not None:failures.append(exc)
+        stopped.set()
+
+
 class AgentWorkerHeartbeat:
     """Keep a busy dedicated worker visible without polling or claiming work."""
     def __init__(self, client: HubClient, interval_seconds: float = 45, on_success=None):
@@ -205,28 +226,32 @@ def main(argv: list[str] | None = None, *, stop_event=None, status_callback=None
             except BaseException:
                 pool.close()
                 raise
+            failures=[]
+            poll_threads=[threading.Thread(target=run_pool_lane,args=(lane,stopped,stop_event),
+                kwargs={'emit':emit,'failures':failures},name=name,daemon=True)
+                for lane,name in ((controller_pool,'hub-controller-poll'),(pool,'hub-worker-poll'))]
             try:
                 if stop_event is not None and stop_event.is_set():
                     return 0
                 heartbeat.start()
                 controller_thread.start()
                 recovery_thread.start()
+                for thread in poll_threads:thread.start()
                 emit(f"专用智能体 worker 已启动；独立任务最多并行 {pool.capacity} 项，共享工程顺序执行；总控不同对话并行，简短追问保留独立回应通道。")
                 while not stopped.is_set() and not (stop_event and stop_event.is_set()):
-                    if not all(thread.is_alive() for thread in (controller_thread, recovery_thread, heartbeat.thread)):
+                    if not all(thread.is_alive() for thread in (controller_thread, recovery_thread, heartbeat.thread,*poll_threads)):
+                        if failures:raise failures[0]
                         raise RuntimeError('An agent service lane exited unexpectedly')
-                    try:
-                        for message in controller_pool.tick(): emit(message)
-                        for message in pool.tick(): emit(message)
-                    except Exception as exc:
-                        # Durable receipts distinguish safe result retries
-                        # from uncertain work; do not reset that state.
-                        emit(f"本轮未完成：{type(exc).__name__}；保留回执等待恢复。")
-                    (stop_event if stop_event is not None else stopped).wait(3)
+                    (stop_event if stop_event is not None else stopped).wait(.2)
+                if failures:raise failures[0]
             finally:
                 stopped.set()
                 if status_callback: status_callback({'phase': 'stopping'})
                 try:
+                    # Stop both inbox pollers before closing their executors.
+                    # Active work still drains with heartbeats and leases intact.
+                    for thread in poll_threads:
+                        if thread.ident is not None:thread.join()
                     try:
                         try:
                             controller_pool.close()

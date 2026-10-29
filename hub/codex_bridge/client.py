@@ -138,10 +138,14 @@ class HubClient:
                           {key:execution[key] for key in ('generation','run_key')})
 
     def complete_task_execution(self, slug: str, task_id: int, execution: dict, *,
-                                status: str, summary: str, body: str, reflection: dict) -> dict:
+                                status: str, summary: str, body: str, reflection: dict,
+                                token_usage: dict | None = None) -> dict:
+        from .token_usage import normalize_token_usage
+        usage = normalize_token_usage(token_usage)
+        extra = {'token_usage': usage} if usage is not None else {}
         return self._json('POST', f'/api/projects/{slug}/tasks/{task_id}/execution/complete',
                           {key:execution[key] for key in ('generation','run_key')} |
-                          {'status':status,'summary':summary,'body':body,'reflection':reflection})
+                          {'status':status,'summary':summary,'body':body,'reflection':reflection} | extra)
 
     def execution_renewal_client(self):
         return HubClient(self.hub, self.token, timeout_seconds=min(12, self.timeout_seconds),

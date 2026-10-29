@@ -38,6 +38,8 @@ class ProgressDispatcher:
         self._condition = threading.Condition()
         self._pending: dict[str, str] = {}
         self._latest: dict[str, str] = {}
+        self._retry_at: dict[str, float] = {}
+        self._failures: dict[str, int] = {}
         self._closing = False
         self._stopped = False
         self._thread = threading.Thread(target=self._send, name='hub-visible-progress', daemon=True)
@@ -51,6 +53,8 @@ class ProgressDispatcher:
                 return
             self._latest[kind] = text
             self._pending[kind] = text
+            self._retry_at.pop(kind, None)
+            self._failures[kind] = 0
             self._condition.notify()
 
     def _send(self) -> None:
@@ -60,20 +64,33 @@ class ProgressDispatcher:
                 while not self._stopped:
                     if self._closing and not self._pending:
                         return
-                    delay = next_send - time.monotonic()
-                    if self._pending and (self._closing or delay <= 0):
-                        kind = next(iter(self._pending))
+                    now = time.monotonic()
+                    available = [kind for kind in ('assistant', 'status') if kind in self._pending
+                                 and (self._closing or self._retry_at.get(kind, 0) <= now)]
+                    delay = next_send - now
+                    if available and (self._closing or delay <= 0):
+                        kind = available[0]
                         text = self._pending.pop(kind)
                         break
+                    if self._pending and not available:
+                        delay = max(delay, min(self._retry_at.get(kind, 0) for kind in self._pending) - now)
                     self._condition.wait(max(.001, delay) if self._pending else None)
                 else:
                     return
             try:
                 self.callback(kind, text)
             except Exception:
-                # Progress is best effort. Never retry the model or interrupt
-                # its actual work because the progress endpoint is unavailable.
-                pass
+                # Retry only the latest actual public answer, at most twice.
+                # A transient failed POST must not hide that answer until a
+                # refresh or model completion. Never restart model work.
+                with self._condition:
+                    if (kind == 'assistant' and not self._closing and not self._stopped
+                            and self._latest.get(kind) == text and self._failures.get(kind, 0) < 2):
+                        count = self._failures.get(kind, 0) + 1
+                        self._failures[kind] = count
+                        self._pending[kind] = text
+                        self._retry_at[kind] = time.monotonic() + max(.1, self.interval) * 2 ** (count - 1)
+                        self._condition.notify_all()
             next_send = time.monotonic() + self.interval
 
     def close(self, timeout: float = .4) -> None:
@@ -103,6 +120,7 @@ class VisibleCodexProgress:
         self.publish = publish
         self.redact = redact
         self._messages: dict[str, str] = {}
+        self._active_tools: dict[str, str] = {}
         self._visible = ''
 
     def started(self) -> None:
@@ -130,8 +148,15 @@ class VisibleCodexProgress:
         if not isinstance(item_type, str):
             return
         if item_type in self._TOOL_STATES:
+            item_id = item.get('id')
             if event_type in ('item.started', 'item.updated'):
+                if isinstance(item_id, str) and len(item_id) <= 200:
+                    self._active_tools[item_id] = item_type
                 self.publish('status', self._TOOL_STATES[item_type])
+            elif event_type == 'item.completed':
+                if isinstance(item_id, str):self._active_tools.pop(item_id, None)
+                remaining = next(reversed(self._active_tools.values()), None)
+                self.publish('status', self._TOOL_STATES[remaining] if remaining else '工具调用已结束，正在继续处理')
             return
         if item_type != 'agent_message' or not isinstance(item.get('text'), str):
             return

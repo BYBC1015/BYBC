@@ -70,6 +70,7 @@ class WindowsProcessProbe:
                 ["tasklist", "/FI", f"IMAGENAME eq {image_name}"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8", errors="replace",
                 timeout=5,
                 check=False,
                 **hidden_subprocess_kwargs(),

@@ -155,7 +155,10 @@ def test_summary_contains_original_bounded_acceptance_not_all_attachments(repo,l
     repo.connection.execute('UPDATE tasks SET description=? WHERE id=?',(requirements,d['task']['id']));repo.connection.commit()
     finish(repo,d);task=repo.get_task(summaries(repo)[0]['id'])
     context=d['agents'].context(task);event=context['delivery_events'][0]
-    assert event['acceptance_requirements']==requirements[:4000] and event['requirements_excerpted']
+    excerpt=event['acceptance_requirements']
+    assert len(excerpt)<=4000 and event['requirements_excerpted']
+    assert excerpt.startswith('青绿美丽，金色宜居，蓝金智慧；不允许地标台阶')
+    assert excerpt.endswith(requirements[-100:]) and '按 source_task_id 查阅' in excerpt
     assert context['attachments']==[] and context['conversations']==[]
     prompt=repo.build_task_prompt_markdown(d['project']['slug'],task['id'])
     assert '不允许地标台阶' in prompt and '不得声称已亲自核验画面' in prompt and '不委派' in prompt

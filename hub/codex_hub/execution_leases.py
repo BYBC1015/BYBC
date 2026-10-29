@@ -31,6 +31,8 @@ def initialize_execution_schema(db) -> None:
     db.commit()
     from .execution_progress import initialize_progress_schema
     initialize_progress_schema(db)
+    from .execution_usage import initialize_execution_usage
+    initialize_execution_usage(db)
 
 
 def latest_execution(db, task_id: int) -> dict | None:
@@ -164,7 +166,10 @@ class ExecutionStore:
                 VALUES (?,?,?,?,'prepared',?,?,?,?,?)''',
                 (task_id, generation, run_key, device_id, task['status_version'],
                  self.clock() + self.lease_seconds, self.clock(), '尚未授权启动工作进程。',input_manifest))
-            return self._reply(task_id, latest_execution(self.db, task_id))
+            created=latest_execution(self.db,task_id)
+            from .execution_usage import capture_execution_model
+            capture_execution_model(self.db,created)
+            return self._reply(task_id, created)
 
     def start(self, task_id, device_id, generation, run_key):
         with self.transaction():
@@ -218,7 +223,7 @@ class ExecutionStore:
                 record = latest_execution(self.db, task_id)
             return self._reply(task_id, record)
 
-    def complete(self, task_id, device_id, generation, run_key, *, status, summary, body, reflection):
+    def complete(self, task_id, device_id, generation, run_key, *, status, summary, body, reflection, token_usage=None):
         if (status not in {'review','blocked'} or not isinstance(summary, str) or len(summary) > 1000
                 or not isinstance(body, str) or len(body) > 24000 or not isinstance(reflection, dict)
                 or len(json.dumps(reflection, ensure_ascii=False)) > 20000):
@@ -227,14 +232,17 @@ class ExecutionStore:
                                            sort_keys=True).encode()).hexdigest()
         with self.transaction():
             task, record = self._fenced(task_id, device_id, generation, run_key)
+            from .execution_usage import record_execution_usage
             if record['state'] in {'completed','yielded'}:
                 if record['result_digest'] != digest:
                     raise ExecutionConflict('同一执行不能回传不同结果。')
+                record_execution_usage(self.db,record['id'],token_usage,self.clock())
                 return {**self._reply(task_id, record), 'accepted': True, 'replayed': True,'yielded':record['state']=='yielded'}
             if (record['state'] not in {'running','uncertain'} or task['status_version'] != record['task_version']
                     or task['status'] not in {'in_progress','blocked'}):
                 raise ExecutionConflict('任务已取消、结束或被更新；迟到结果保留本地，不覆盖当前状态。')
             from .execution_progress import clear_progress
+            record_execution_usage(self.db,record['id'],token_usage,self.clock())
             clear_progress(self.db,task_id)
             handoff=self.db.execute('SELECT * FROM hub_task_handoffs WHERE task_id=? AND generation=?',(task_id,generation)).fetchone()
             if handoff:

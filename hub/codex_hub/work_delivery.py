@@ -19,6 +19,10 @@ def initialize_delivery_schema(db):
         target_task_id INTEGER NOT NULL REFERENCES tasks(id), next_task_id INTEGER NOT NULL REFERENCES tasks(id),
         request_key TEXT NOT NULL, payload_hash TEXT NOT NULL, instruction TEXT NOT NULL, mode TEXT NOT NULL,
         created_at TEXT NOT NULL, UNIQUE(source_task_id,request_key));
+      CREATE TABLE IF NOT EXISTS hub_task_amendment_requests (
+        source_task_id INTEGER NOT NULL REFERENCES tasks(id), request_key TEXT NOT NULL,
+        amendment_id INTEGER NOT NULL REFERENCES hub_task_amendments(id),
+        PRIMARY KEY(source_task_id,request_key));
     ''')
     db.commit()
 
@@ -78,9 +82,22 @@ def revise_task(repo, source, device_id, payload):
         agent=db.execute('SELECT kind FROM hub_agents WHERE id=?',(source['assigned_agent_id'],)).fetchone()
         if not agent or agent['kind']!='controller':
             raise ExecutionConflict('只有当前运行的总控可以调整工作')
-        previous=db.execute('SELECT * FROM hub_task_amendments WHERE source_task_id=? AND request_key=?',(source['id'],key)).fetchone()
+        previous=db.execute('''SELECT a.* FROM hub_task_amendment_requests r
+            JOIN hub_task_amendments a ON a.id=r.amendment_id
+            WHERE r.source_task_id=? AND r.request_key=?''',(source['id'],key)).fetchone()
+        if not previous:
+            # Existing records predate the request-alias table.
+            previous=db.execute('SELECT * FROM hub_task_amendments WHERE source_task_id=? AND request_key=?',(source['id'],key)).fetchone()
         if previous:
             if previous['payload_hash']!=digest: raise ValueError('同一请求编号不能对应不同修改')
+            return dict(previous)
+        # A controller may retry the same tool call with a new request key.
+        # Only collapse identical target/content within this source turn;
+        # another user turn can intentionally request the same work again.
+        previous=db.execute('SELECT * FROM hub_task_amendments WHERE source_task_id=? AND payload_hash=? ORDER BY id LIMIT 1',
+                            (source['id'],digest)).fetchone()
+        if previous:
+            db.execute('INSERT INTO hub_task_amendment_requests VALUES (?,?,?)',(source['id'],key,previous['id']))
             return dict(previous)
         target=repo.get_task(target_id)
         if not target or target['project_id']!=source['project_id'] or target['conversation_id']!=source['conversation_id'] or target_id==source['id']:
@@ -113,8 +130,11 @@ def revise_task(repo, source, device_id, payload):
             db.execute('DELETE FROM hub_task_model_choices WHERE task_id=?',(next_task['id'],))
         else:
             mode='queued'
+            description=('接续原工作 #'+str(target_id)+'。先检查原工作成果；只实施本次修改，避免重复副作用。\n原要求：\n'
+                         +target['description']+'\n\n最新用户修改：\n'+instruction)
+            if len(description)>16000: raise ValueError('修改记录过长，请先由总控整理完整要求')
             next_task=repo.create_task(source['project_id'],('调整：'+target['title'])[:200],
-                description=('接续原工作 #'+str(target_id)+'。先检查原工作成果；只实施本次修改，避免重复副作用。\n原要求：\n'+target['description'][:10000]+'\n\n最新用户修改：\n'+instruction),
+                description=description,
                 assigned_agent_id=target['assigned_agent_id'],created_by_device_id=device_id,commit=False)
             db.execute('UPDATE tasks SET conversation_id=?,wait_for_task_id=?,route_engine=?,route_reason=? WHERE id=?',
                 (source['conversation_id'],target_id,'controller_revision','收到修改；原执行结束并核对结果后接续',next_task['id']))

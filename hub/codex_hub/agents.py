@@ -283,6 +283,9 @@ class AgentStore:
         if task.get('work_stage')=='delivery_summary':
             from .completion_followups import delivery_summary_context
             return delivery_summary_context(self.db,task,agent)
+        if task.get('controller_read_only') and agent['kind']=='controller':
+            from .controller_followups import read_only_context
+            return read_only_context(self.db,task,agent)
         from .repository import Repository
         from .agent_roles import ROLES, enabled, work_context
         from .handoffs import handoff_context
@@ -527,6 +530,11 @@ class AgentStore:
         if task.get('work_stage')=='delivery_summary':
             from .completion_followups import delivery_summary_prompt
             return delivery_summary_prompt(self.db,task,self.get(task['project_id'],task['assigned_agent_id']))
+        if task.get('controller_read_only'):
+            agent=self.get(task['project_id'],task['assigned_agent_id'])
+            if agent['kind']=='controller':
+                from .controller_followups import read_only_prompt
+                return read_only_prompt(self.context(task))
         from .execution_context import execution_identity, room_history
         context = self.context(task)
         if not context:

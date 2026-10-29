@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from .device_capabilities import load_device_capabilities
 from .model_catalog import MODEL_ID_RE, EFFORTS
+from .controller_followups import is_read_only_followup
 
 
 def initialize_model_policy_schema(db):
@@ -106,7 +107,7 @@ def select_model(db, agent, data_dir, requested=None, *, task=None):
             effort = 'medium'
         elif any(word in description for word in ('深度优化', '深度审查', '架构设计', '复杂故障', '极高')):
             effort = 'xhigh'
-        elif len(description) < 100 and any(word in description for word in ('进度', '怎么样了', '收到', '你好', '状态', '谢谢')):
+        elif is_read_only_followup(description) or description.rstrip('。！？!?') in {'收到', '你好', '谢谢'}:
             effort = 'medium'
         preferences = [('gpt-6-astra', e) for e in dict.fromkeys([effort, 'high', 'medium'])] + preferences
         reason = '总控优先 GPT-6 Astra；简短状态沟通用中档，工作安排用高档，明确深度审查用极高档；仅选择设备支持的档位。'

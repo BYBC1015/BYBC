@@ -4,7 +4,10 @@
   if (!shell) return;
   const form = shell.querySelector("[data-ws-dispatch]");
   const input = form.querySelector("[data-ws-input]");
-  const inputEditedBeforeInit = input.value !== input.defaultValue;
+  let inputEditedBeforeInit = input.value !== input.defaultValue;
+  // IndexedDB may take time to hydrate large local drafts. Observe edits before
+  // that await so a late restoration cannot replace what the user just typed.
+  input.addEventListener('input', () => { inputEditedBeforeInit = true; }, {once:true});
   const send = form.querySelector("[data-ws-send]");
   const errors = shell.querySelector("[data-ws-dispatch-error]");
   const scroll = shell.querySelector("[data-ws-scroll]");
@@ -241,6 +244,9 @@
     const saved = read(draftKey);
     if (!key || saved.request_key === key) remove(draftKey);
     committed = true; pendingSubmission = null;
+    // A successful explicit send is a request to see the new message. Preserve
+    // old reading positions during background refreshes, not across this send.
+    followBottom = true; saveUi();
     input.value = ""; clearAttachments();
     location.assign(url);
   }
@@ -416,6 +422,7 @@
     let stored;
     try { stored = await localStore.read(scope); }
     catch { storageFailed(); }
+    if (inputEditedBeforeInit || fileInput.files.length) return;
     if (localStore?.active(stored?.job) && (!stored.draft || stored.draft.key === stored.job.key || query.get('resume_pending') === stored.job.key)) { adoptJob(stored.job); return; }
     const saved = read(draftKey);
     if (stored?.job && stored.job.key === saved.request_key && stored.job.state === 'sent') remove(draftKey);
@@ -812,23 +819,29 @@
     if (!selectedRecipients().length) { errors.textContent = '请选择一位可分配工作的执行者。'; errors.hidden = false; recipientPicker.open = true; return; }
     if (!input.value.trim() && !attachments.length) { errors.textContent = '写下工作目标，或添加图片和文件。'; errors.hidden = false; input.focus(); return; }
     if (pendingSubmission && attachments.length !== pendingSubmission.files.length) { attachmentError.textContent = '请重新选择原任务的全部附件，再重试。'; attachmentError.hidden = false; return; }
-    await draftSave;
-    if (!pendingSubmission?.durable && storageAvailable) {
-      try {
-        const job = await localStore.enqueue(scope, snapshot());
-        if (job.key !== form.elements.request_key.value) {
-          errors.textContent = '这场对话还有一条待发送工作，当前新草稿已保留。请先打开待发送记录处理，随后可继续发送。'; errors.hidden = false; await showOtherQueues(); return;
+    // Lock immediately, before waiting for IndexedDB. Otherwise a slow enqueue
+    // captures one payload and subsequently overwrites edits made while waiting.
+    setSubmitting(true);
+    shell.querySelector('[data-ws-draft-status]').textContent = '正在保存并安排工作…';
+    try {
+      await draftSave;
+      if (!pendingSubmission?.durable && storageAvailable) {
+        try {
+          const job = await localStore.enqueue(scope, snapshot());
+          if (job.key !== form.elements.request_key.value) {
+            errors.textContent = '这场对话还有一条待发送工作，当前新草稿已保留。请先打开待发送记录处理，随后可继续发送。'; errors.hidden = false; await showOtherQueues(); return;
+          }
+          adoptJob(job); announce();
         }
-        adoptJob(job); announce();
+        catch { storageFailed(); }
       }
-      catch { storageFailed(); }
-    }
-    if (!pendingSubmission) {
-      if (!navigator.onLine || localOffline) { errors.textContent = '本机存储不可用，暂时无法离线排队。请保持窗口打开，恢复连接后发送。'; errors.hidden = false; return; }
-      pendingSubmission = {key:form.elements.request_key.value, files:attachments.map((item,index) => {item.pendingIndex=index; return {name:item.file.name,size:item.file.size,type:item.file.type};}), state:'queued', attempted:false, durable:false};
-    }
-    saveDraft(); syncSubmissionControls();
-    await deliverPending(true);
+      if (!pendingSubmission) {
+        if (!navigator.onLine || localOffline) { errors.textContent = '本机存储不可用，暂时无法离线排队。请保持窗口打开，恢复连接后发送。'; errors.hidden = false; return; }
+        pendingSubmission = {key:form.elements.request_key.value, files:attachments.map((item,index) => {item.pendingIndex=index; return {name:item.file.name,size:item.file.size,type:item.file.type};}), state:'queued', attempted:false, durable:false};
+      }
+      saveDraft(); syncSubmissionControls();
+      await deliverPending(true);
+    } finally { if (!committed) setSubmitting(false); }
   });
 
   let organizingTask=false;
@@ -995,15 +1008,33 @@
             if (old && old.dataset.wsEntryVersion === node.dataset.wsEntryVersion) return old;
             return document.importNode(node,true);
           });
-          // Keep the bounded part of the preceding page while someone is reading it.
-          // New replies must not evict their focused message at the 40-message boundary.
+          // A disconnected tab can miss more than a full page. Retain a bounded
+          // window around the reader even when old/new pages share no entries.
           if (!followBottom && incoming.querySelector('.ws-load-records')) {
             const incomingIds = new Set(children.filter(node => node.dataset.wsEntry).map(node => node.dataset.wsEntry));
             const older = Array.from(previous.values()).filter(node => !node.hasAttribute('data-ws-progress'));
             const firstShared = older.findIndex(node => incomingIds.has(node.dataset.wsEntry));
-            const keep = firstShared > 0 ? older.slice(0, firstShared).slice(-40) : [];
+            const preceding = firstShared < 0 ? older : older.slice(0, firstShared);
+            const anchorIndex = preceding.findIndex(node => node.id === positionBeforeRefresh.id);
+            const start = anchorIndex < 0 ? Math.max(0, preceding.length-40) : Math.max(0, Math.min(anchorIndex, preceding.length-40));
+            const keep = preceding.slice(start, start+40);
             const firstMessage = children.findIndex(node => node.dataset.wsEntry);
-            if (keep.length && firstMessage >= 0) { children.splice(firstMessage,0,...keep); skipped = true; }
+            if (keep.length && firstMessage >= 0) {
+              const links = children.filter(node => node.matches('.ws-load-records'));
+              const olderLink = links.find(node => new URL(node.href, location.href).searchParams.has('before'));
+              const extra = [...keep];
+              if (olderLink && (firstShared < 0 || keep.at(-1) !== preceding.at(-1) || destination.querySelector('[data-ws-history-gap]'))) {
+                const gap = olderLink.cloneNode(true);
+                gap.textContent = '展开此前记录'; gap.dataset.wsHistoryGap = '';
+                extra.push(gap);
+              }
+              if (olderLink) {
+                const url = new URL(olderLink.href, location.href);
+                url.searchParams.set('before', keep[0].dataset.wsEntry);
+                olderLink.href = url.href;
+              }
+              children.splice(firstMessage,0,...extra); skipped = true;
+            }
           }
           // Move only changed nodes; stable messages retain focus, image state and selections.
           const retained = new Set(children);

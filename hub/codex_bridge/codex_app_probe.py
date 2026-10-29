@@ -18,6 +18,7 @@ class WindowsCodexAppProbe:
 
         configured = _powershell_literal(str(configured_path or ""))
         command = (
+            "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
             f"$configured = '{configured}'; "
             "$found = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | "
             "Where-Object { "
@@ -38,6 +39,7 @@ class WindowsCodexAppProbe:
                 ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
                 capture_output=True,
                 text=True,
+                encoding="utf-8", errors="replace",
                 timeout=8,
                 check=False,
                 **hidden_subprocess_kwargs(),

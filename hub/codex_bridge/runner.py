@@ -20,6 +20,7 @@ from .agent_runtime import CodexAgentDecisionRunner, extract_reflection, Executi
 from .codex_app_submitter import CodexAppSubmitter
 from .codex_exec import CodexExecResult, CodexExecRunner
 from .attachments import PreparedAttachments, AttachmentPreparationError, prepare_task_attachments
+from .token_usage import normalize_token_usage
 from .config import BridgeConfig
 from .hermes_exec import HermesExecRunner
 from .launcher import CodexLauncher
@@ -593,7 +594,11 @@ class BridgeRunner:
         if completion:
             return completion
         context = receipt.get('execution_context') or {}
-        if (context.get('execution_route') != 'project'
+        continuous_chat = (context.get('execution_route') == 'chat'
+                           and context.get('assigned_agent_kind') == 'controller'
+                           and context.get('conversation_id')
+                           and not context.get('controller_read_only'))
+        if ((context.get('execution_route') != 'project' and not continuous_chat)
                 or context.get('run_key') != current.get('run_key')
                 or context.get('generation') != current.get('generation')
                 or context.get('task_id') != receipt.get('task_id')
@@ -671,7 +676,8 @@ class BridgeRunner:
                         recovered = CodexExecResult(ok=completion['ok'], command=[],
                             returncode=completion['returncode'], stdout='', stderr='',
                             last_message=completion['last_message'], error=completion['error'],
-                            output_path=Path(completion.get('output_path') or receipt['completion_path']))
+                            output_path=Path(completion.get('output_path') or receipt['completion_path']),
+                            token_usage=normalize_token_usage(completion.get('token_usage')))
                         self._save_agent_result(slug, task_id, recovered)
                     else:
                         result.pending_tasks.append(task_id)
@@ -925,6 +931,8 @@ class BridgeRunner:
                         "ok": execution.ok, "output_path": str(execution.output_path),
                         "result_status": "blocked" if not execution.ok or reflection.get("outcome") == "blocked" else "review",
                         "entry_attempted": False, "reflection_complete": complete})
+        usage = normalize_token_usage(execution.token_usage)
+        if usage is not None:receipt['token_usage'] = usage
         self._save_state()
 
     def _publish_agent_result(self, project_slug: str, task_id: int, result: ProcessResult) -> None:
@@ -940,8 +948,10 @@ class BridgeRunner:
                     from .artifacts import publish_artifacts
                     body=publish_artifacts(self.client,project_slug,task_id,receipt['execution'],
                         self._resolve_project_path(receipt.get('target_project') or project_slug),body)
+                usage = normalize_token_usage(receipt.get('token_usage'))
                 published = self.client.complete_task_execution(project_slug, task_id, receipt['execution'],
-                    status=status, summary=body[:1000], body=body, reflection=receipt['reflection'])
+                    status=status, summary=body[:1000], body=body, reflection=receipt['reflection'],
+                    **({'token_usage': usage} if usage is not None else {}))
             except Exception as exc:
                 if isinstance(exc, ValueError) or getattr(exc,'status_code',None) in {413,415,422}:
                     # Invalid delivery cannot heal through endless network retries.
@@ -1872,6 +1882,7 @@ class BridgeRunner:
                 cwd=project_path,
                 capture_output=True,
                 text=True,
+                encoding="utf-8", errors="replace",
                 timeout=5,
                 check=False,
                 creationflags=flags,

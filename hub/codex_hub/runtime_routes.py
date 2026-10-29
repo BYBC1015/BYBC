@@ -10,7 +10,7 @@ from .execution_leases import ExecutionConflict, ExecutionStore
 
 def register_execution_routes(app: FastAPI) -> None:
     from .main import (get_repo, require_api_device, require_project, require_project_task,
-                       require_device_write, json_object, require_user, get_settings)
+                       require_device_write, require_device_read, json_object, require_user, get_settings)
     from .execution_progress import (initialize_progress_schema,write_progress,StreamLimiter,
                                      workspace_event_stream)
     initialize_progress_schema(app.state.repo.connection)
@@ -31,6 +31,25 @@ def register_execution_routes(app: FastAPI) -> None:
             raise HTTPException(409, str(exc)) from None
         except (TypeError, ValueError) as exc:
             raise HTTPException(422, str(exc)) from None
+
+    @app.get('/api/projects/{slug}/execution-timings')
+    def execution_timings(request: Request, slug: str, limit: int = 100):
+        device = require_api_device(request)
+        repo = get_repo(request)
+        project = require_project(repo, slug)
+        require_device_read(repo, project, device)
+        from .execution_telemetry import execution_latency
+        return {'timings': execution_latency(repo.connection, project['id'], limit=limit),
+                'measurement_note': '时间来自服务器收到的公开答复；不含网页最终绘制耗时。旧记录或中途开始采样的记录不推算首条回复时间。'}
+
+    @app.get('/api/projects/{slug}/execution-usage')
+    def execution_usage(request: Request, slug: str, limit: int = 100):
+        device=require_api_device(request)
+        repo=get_repo(request)
+        project=require_project(repo,slug)
+        require_device_read(repo,project,device)
+        from .execution_usage import usage_report
+        return usage_report(repo.connection,project['id'],limit=limit)
 
     @app.post('/api/projects/{slug}/tasks/{task_id}/execution/acquire')
     async def acquire(request: Request, slug: str, task_id: int):
@@ -93,4 +112,5 @@ def register_execution_routes(app: FastAPI) -> None:
         store, device_id = execution(request, slug, task_id)
         data = await json_object(request)
         return checked(lambda: store.complete(task_id, device_id, data.get('generation'), data.get('run_key'),
-            status=data.get('status'), summary=data.get('summary'), body=data.get('body'), reflection=data.get('reflection')))
+            status=data.get('status'), summary=data.get('summary'), body=data.get('body'), reflection=data.get('reflection'),
+            token_usage=data.get('token_usage')))

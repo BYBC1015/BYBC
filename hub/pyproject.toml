@@ -1,6 +1,6 @@
 [project]
 name = "codex-hub"
-version = "2.9.2"
+version = "2.9.3"
 description = "Private Codex multi-device collaboration relay"
 requires-python = ">=3.10"
 dependencies = [

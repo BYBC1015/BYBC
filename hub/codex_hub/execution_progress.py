@@ -34,6 +34,8 @@ def initialize_progress_schema(db):
         version INTEGER NOT NULL DEFAULT 0
       );
     ''')
+    from .execution_telemetry import initialize_execution_telemetry
+    initialize_execution_telemetry(db)
     # Registration runs again after all additive schemas exist. Triggers observe
     # changes by every process, including completion and manual status updates.
     tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}

@@ -345,7 +345,8 @@ class ProjectSessionLease:
                 self._turn_failed = True
 
     def complete(self, *, ok: bool, returncode: int | None, last_message: str = "",
-                 error: str | None = None, output_path: str | Path | None = None) -> dict[str, Any]:
+                 error: str | None = None, output_path: str | Path | None = None,
+                 token_usage: dict[str, int] | None = None) -> dict[str, Any]:
         self._check_open()
         if not self._started or self._completed:
             raise ProjectSessionError("项目对话尚未启动或已经结束。")
@@ -368,6 +369,9 @@ class ProjectSessionLease:
                    "error": error, "output_path": str(output_path) if output_path is not None else None,
                    "completed_at": _now(), "turn_completed": self._turn_completed,
                    "turn_failed": self._turn_failed}
+        from .token_usage import normalize_token_usage
+        usage = normalize_token_usage(token_usage)
+        if usage is not None:receipt['token_usage'] = usage
         # Receipt precedes clearing pending: a crash between writes is recovered
         # without submitting the same task twice.
         _write(self.receipt_path, receipt)

@@ -14,6 +14,7 @@ from typing import Any, Protocol
 from .codex_stream import ProgressCallback, ProgressDispatcher, VisibleCodexProgress
 from .subprocess_utils import hidden_subprocess_kwargs
 from .tool_locator import resolve_codex_cli_path
+from .token_usage import normalize_token_usage, usage_from_jsonl
 
 
 class ProcessRunner(Protocol):
@@ -30,6 +31,7 @@ class CodexExecResult:
     last_message: str
     output_path: Path
     error: str = ""
+    token_usage: dict[str, int] | None = None
 
     @property
     def summary(self) -> str:
@@ -75,6 +77,8 @@ class CodexExecRunner:
             payload.update(ok=result.ok, returncode=result.returncode,
                            last_message=message,
                            error=self._redact(result.error)[:4000], output_path=str(result.output_path))
+            usage = normalize_token_usage(result.token_usage)
+            if usage is not None:payload['token_usage'] = usage
             temporary = receipt_path.with_suffix('.tmp')
             temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
             temporary.replace(receipt_path)
@@ -86,6 +90,7 @@ class CodexExecRunner:
 
         options = getattr(self.config, 'backend_options', {}) or {}
         root = options.get('project_session_root') or self.config.state_path.parent / 'project-sessions'
+        result = None
         try:
             with ProjectSessionStore(root).acquire(
                 device_id=execution_context.get('device_id'), project_slug=project_slug,
@@ -98,7 +103,7 @@ class CodexExecRunner:
                     return CodexExecResult(ok=cached['ok'], command=[], returncode=cached['returncode'],
                         stdout='', stderr='', last_message=cached.get('last_message') or '',
                         output_path=Path(cached.get('output_path') or self._output_path(project_slug, prompt_path)),
-                        error=cached.get('error') or '')
+                        error=cached.get('error') or '', token_usage=normalize_token_usage(cached.get('token_usage')))
                 result = self._run(project_slug, project_path, prompt_path, prompt,
                     execution_preferences, image_paths, execution_context, cancel_event,
                     project_session=session, progress_callback=progress_callback)
@@ -107,10 +112,19 @@ class CodexExecRunner:
                     session.observe_jsonl(output)
                     session.complete(ok=result.ok, returncode=result.returncode,
                         last_message=self._redact(result.last_message)[:262144],
-                        error=self._redact(result.error)[:65536], output_path=result.output_path)
+                        error=self._redact(result.error)[:65536], output_path=result.output_path,
+                        token_usage=result.token_usage)
                 return result
         except ProjectSessionError as exc:
             label = '总控对话' if execution_context.get('execution_route') == 'chat' else '本地工程会话'
+            if result is not None:
+                # A timeout/process failure explains why the receipt remains
+                # uncertain. Do not replace that evidence with a generic lock
+                # message or claim that no actual work took place.
+                detail = '\n'.join(part for part in (result.error, label + '暂未继续：' + str(exc)) if part)
+                return CodexExecResult(ok=False, command=result.command, returncode=result.returncode,
+                    stdout=result.stdout, stderr=result.stderr, last_message='', output_path=result.output_path,
+                    error=detail, token_usage=result.token_usage)
             return self._failed(command=[], output_path=self._output_path(project_slug, prompt_path),
                                 error=label + '暂未继续：' + str(exc))
 
@@ -266,6 +280,7 @@ class CodexExecRunner:
             last_message=last_message,
             output_path=output_path,
             error=error,
+            token_usage=usage_from_jsonl(completed.stdout),
         )
 
     @staticmethod

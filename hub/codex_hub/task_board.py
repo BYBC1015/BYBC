@@ -10,6 +10,8 @@ def initialize_task_board_schema(db):
         db.execute("ALTER TABLE tasks ADD COLUMN board_state TEXT NOT NULL DEFAULT 'auto'")
     if 'board_archive_reason' not in columns:
         db.execute("ALTER TABLE tasks ADD COLUMN board_archive_reason TEXT NOT NULL DEFAULT ''")
+    from .task_resubmissions import initialize_resubmission_schema
+    initialize_resubmission_schema(db)
     db.commit()
 
 
@@ -67,10 +69,11 @@ def archive_completed_delivery(repo, task_id, files_root):
     db=repo.connection
     if not db.in_transaction:
         raise RuntimeError('Automatic organization requires a result transaction')
+    from .task_resubmissions import archive_completed_resubmissions
+    archived=archive_completed_resubmissions(repo,task_id)
     task=repo.get_task(task_id)
     if not task or not _web_delivery(db,task,latest_execution(db,task_id),files_root):
-        return []
-    archived=[]
+        return archived
     if task['board_state']=='auto' and task['status']=='review':
         db.execute("UPDATE tasks SET board_state='archived',board_archive_reason='delivered' WHERE id=?",(task_id,))
         archived.append(task_id)

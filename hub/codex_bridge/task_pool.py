@@ -5,6 +5,7 @@ from pathlib import Path
 import json
 import os
 import re
+import threading
 import time
 
 from .client import HubClient
@@ -34,6 +35,7 @@ def task_config(config, task):
         codex_exec_sandbox='read-only' if task.get('controller_read_only') else config.codex_exec_sandbox,
         codex_exec_ignore_user_config=True if task.get('controller_read_only') else config.codex_exec_ignore_user_config,
         backend_options={**config.backend_options,'agent_network_access':True,
+                         'attachment_cache_root':str(config.backend_options.get('attachment_cache_root') or config.state_path.parent/'attachment-cache'),
                          'project_session_root':str(config.backend_options.get('project_session_root') or config.state_path.parent/'project-sessions')})
 
 
@@ -66,6 +68,7 @@ class DurableTaskPool:
         self.config=config;self.client=client;self.capacity=max(1,min(4,int(capacity)))
         if lane not in {'controller','worker'}:raise ValueError('Unknown execution lane')
         self.lane=lane
+        self.wakeup=threading.Event()
         self.executor=ThreadPoolExecutor(max_workers=self.capacity+(1 if lane=='controller' else 0),thread_name_prefix='hub-task')
         self.runners={};self.metadata={};self.active={};self.retry_after={};self.runner_factory=runner_factory or self._runner
         root=config.state_path.parent/('controller-task-runs' if lane=='controller' else 'task-runs')
@@ -142,7 +145,9 @@ class DurableTaskPool:
             path.parent.mkdir(parents=True,exist_ok=True)
             saved={key:task[key] for key in ('id','project_id','project_slug','assigned_agent_id','assigned_agent_kind','assigned_device_id','conversation_id','execution_mode','resource_keys_json','execution_route','execution_route_reason','controller_read_only') if key in task}
             temp=path.with_suffix('.tmp');temp.write_text(json.dumps(saved),encoding='utf-8');temp.replace(path)
-            self.active[task_id]=(self.executor.submit(runner.process_once),keys)
+            future=self.executor.submit(runner.process_once)
+            self.active[task_id]=(future,keys)
+            future.add_done_callback(lambda _:self.wakeup.set())
         return messages
 
     def close(self):

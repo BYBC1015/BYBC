@@ -112,6 +112,7 @@ def find_running_codex_path() -> Path | None:
                 "-NoProfile",
                 "-Command",
                 (
+                    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
                     "Get-CimInstance Win32_Process "
                     "| Where-Object { $_.Name -in @('ChatGPT.exe','Codex.exe') } "
                     "| Select-Object -ExpandProperty ExecutablePath"
@@ -119,6 +120,7 @@ def find_running_codex_path() -> Path | None:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8", errors="replace",
             timeout=5,
             check=False,
             **hidden_subprocess_kwargs(),

@@ -225,23 +225,50 @@ def prepare_task_attachments(client, config, project_slug: str, task_id: int,
         directory = _contained(root / '.codex-hub-inputs' / source / project_slug / f'task-{task_id}', root)
         directory.mkdir(parents=True, exist_ok=True)
         _contained(directory, root)
+        cache = None
+        if options.get('attachment_cache_root'):
+            from .attachment_cache import AttachmentCache
+            try:
+                cache = AttachmentCache(options['attachment_cache_root'], config.hub, project_slug)
+            except (OSError, ValueError):
+                pass  # A cache problem must not prevent an authorized download.
         prepared = PreparedAttachments()
+        visual_inputs = {}
         for item in items:
             path = _contained(directory / f"{item['id']}-{_filename(item['original_filename'])}", root)
             if path.parent != directory:
                 raise AttachmentPreparationError('附件文件路径无效。')
             if not (path.is_file() and path.stat().st_size == item['byte_size'] and _digest(path) == item['sha256'].lower()):
-                client.download_task_attachment(project_slug, item['id'], path,
-                    expected_size=item['byte_size'], expected_sha256=item['sha256'], max_bytes=file_limit)
+                restored = False
+                if cache:
+                    try:
+                        restored = cache.restore(path, item['sha256'], item['byte_size'])
+                    except OSError:
+                        pass
+                if not restored:
+                    client.download_task_attachment(project_slug, item['id'], path,
+                        expected_size=item['byte_size'], expected_sha256=item['sha256'], max_bytes=file_limit)
             # Verify again here even when a custom client adapter is used.
             if path.stat().st_size != item['byte_size'] or _digest(path) != item['sha256'].lower():
                 raise AttachmentPreparationError('附件完整性校验失败，未交给执行者。')
+            if cache:
+                try:
+                    cache.store(path, item['sha256'], item['byte_size'])
+                except OSError:
+                    pass
             record = {'attachment_id': item['id'], 'filename': item['original_filename'],
                       'local_path': str(path), 'byte_size': item['byte_size']}
             content_type = str(item.get('content_type') or '').split(';', 1)[0].lower()
             if path.suffix.lower() in IMAGE_SUFFIXES or content_type in {'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff'}:
-                visual, note = _image_input(path, root)
-                prepared.images.append(visual)
+                digest = item['sha256'].lower()
+                previous_visual = visual_inputs.get(digest)
+                if previous_visual:
+                    visual, original_id = previous_visual
+                    note = f'与附件 #{original_id} 的已校验原文件字节完全一致，复用同一视觉输入；本文件路径仍保留。'
+                else:
+                    visual, note = _image_input(path, root)
+                    prepared.images.append(visual)
+                    visual_inputs[digest] = (visual, item['id'])
                 record.update({'image_path': str(visual), 'note': note})
             else:
                 preview, note = _text_preview(path, root)

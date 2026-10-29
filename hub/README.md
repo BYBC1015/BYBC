@@ -2,7 +2,7 @@
 
 Web workspace for persistent agents, shared conversations and device-bound execution.
 
-Source version 2.9.2 (2026-10-29), desktop and worker source 1.2.1. Agents are durable roles, independent of conversations, models and devices.
+Source version 2.9.3 (2026-10-29), desktop and worker source 1.2.2. Agents are durable roles, independent of conversations, models and devices.
 
 This source snapshot does not prove that a particular computer has installed or started the new desktop binaries. Background source/server updates leave the currently running desktop application uninterrupted; a prepared native update takes effect only after that application is subsequently started with the new binaries.
 
@@ -20,6 +20,11 @@ This source snapshot does not prove that a particular computer has installed or 
 - The controller chooses a reported model and reasoning level per task; explicit user overrides take priority.
 - Feedback records page/device context and tracks evidence-based engineering updates.
 - Weekly maintenance is queued idempotently; offline execution waits for its actual device.
+- Bounded hourly health scans collect repeated failures and measured slow replies without model calls. Evidence merges into untouched maintenance, and new diagnostic work is limited to once per day; maintenance cannot trigger itself.
+- Generation-scoped response timings and optional reported token counters survive completion. Unknown or conflicting measurements are not estimated, and current task reassignment cannot alter the historical executing device.
+- Short read-only status prompts preserve the original goal and latest correction. Repeated revision aliases cannot duplicate work, and newer requirements survive delivery summaries.
+- Verified attachment reuse avoids redundant downloads. Within-call identical vision inputs are deduplicated without silently discarding original reference metadata.
+- Slow draft/outbox recovery cannot overwrite text typed after sending; reconnection preserves a reading anchor while explicit sends reveal the new message.
 - Generation-fenced execution, atomic result publication and local completion receipts prevent unsafe replay.
 - User messages persist immediately; live replies preserve reading position and drafts.
 - The Windows desktop hosts the same workspace with persistent sign-in, local project access and separate result previews.
@@ -33,7 +38,7 @@ This source snapshot does not prove that a particular computer has installed or 
 - Durable per-task runners overlap independent jobs while shared workspaces and declared external resources remain serialized.
 - Task cards support completion, reversible archiving and paginated history while preserving chat and drafts.
 - Executor presence refreshes in place across avatars, profiles and the composer; dedicated worker heartbeats expire after two minutes.
-- Desktop companion source 1.2.1 hosts the durable agent worker with shared start/stop controls, supervised recovery, local MCP configuration inheritance and same-family CLI path recovery after desktop updates.
+- Desktop companion source 1.2.2 hosts the durable agent worker with shared start/stop controls, supervised recovery, local MCP configuration inheritance and same-family CLI path recovery after desktop updates.
 - Results are published as viewable images and document previews in the conversation.
 
 ## Run locally
@@ -43,7 +48,7 @@ Requires Python 3.10+. Create a virtual environment, install `pip install -e ".[
 `uvicorn codex_hub.main:app --host 127.0.0.1 --port 8797`.
 Use your own deployment configuration; examples contain placeholders, never production credentials.
 
-See `deploy/MAINTENANCE.md` for weekly operations, `deploy/RELEASE-2.9.2.md` for this source revision and `deploy/BRIDGE-1.2.1.md` for native update boundaries.
+See `deploy/MAINTENANCE.md` for weekly operations, `deploy/RELEASE-2.9.3.md` for this source revision and `deploy/BRIDGE-1.2.2.md` for native update boundaries.
 The `codex_bridge` package includes the dedicated agent worker and compatibility code for existing clients.
 Windows desktop source, pinned build instructions and isolated installer verification are included; generated binaries and mobile clients are not part of this source backup.
 
