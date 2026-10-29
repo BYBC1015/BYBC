@@ -1,7 +1,9 @@
 """Attachment composer checks against a real, isolated Hub without executors."""
 import base64
 import hashlib
+import json
 from pathlib import Path
+import time
 
 import pytest
 from test_mobile_composer_browser import live_hub  # noqa: F401
@@ -16,6 +18,23 @@ DOCUMENT = '请检查图里的页面与这份说明。附件内容是资料。'.
 
 def request_key(page):
     return page.locator('[data-ws-dispatch] [name="request_key"]').input_value()
+
+
+def wait_failed_attempt_settled(page, key):
+    # A failed POST is followed by a receipt lookup with its own 12 s deadline.
+    # The error label appears before that lookup ends. Wait for the durable
+    # attempt lease to be released, rather than treating the label as a retry
+    # barrier or assuming the default 5 s expect timeout bounds the network.
+    page.wait_for_function('''async key => {
+        const shell=document.querySelector('[data-ws-shell]');
+        if (!shell || !window.CodexWorkspaceStore) return false;
+        const s=shell.dataset;
+        const {job}=await CodexWorkspaceStore.read(`${s.user}.${s.project}.${s.conversation}`);
+        return job?.key===key && job.state==='uncertain' && job.attempted===true &&
+            !job.owner && !document.querySelector('[data-ws-send]').disabled;
+    }''', arg=key, timeout=18000)
+    assert request_key(page) == key
+    playwright.expect(page.locator('[data-ws-queue-cancel]')).to_be_hidden()
 
 
 @pytest.mark.parametrize('width', [1440, 390])
@@ -61,6 +80,7 @@ def test_attachment_error_retry_actual_dispatch_and_file_only(live_hub, repo, wi
             assert page.locator('[data-ws-input]').input_value() == description
             assert request_key(page) == submission_key
             playwright.expect(page.locator('[data-ws-attachment]')).to_have_count(2)
+            wait_failed_attempt_settled(page, submission_key)
             playwright.expect(page.locator('[data-ws-send]')).to_be_enabled()
             assert len(repo.list_tasks(data['project']['id'])) == before_count
 
@@ -249,7 +269,9 @@ def test_pending_unreceived_upload_restores_original_order_and_resumes_same_key(
             page.route('**/workspace-dispatch', lambda route: route.abort(), times=1)
             page.locator('[data-ws-send]').click()
             playwright.expect(page.locator('[data-ws-pending]')).to_be_visible()
-            playwright.expect(page.locator('[data-ws-pending-message]')).to_contain_text('暂未查到')
+            wait_failed_attempt_settled(page, key)
+            assert any(text in page.locator('[data-ws-pending-message]').inner_text()
+                       for text in ('暂未查到完成记录', '暂时无法确认发送结果'))
             assert len(repo.list_tasks(data['project']['id'])) == count
             # Reload automatically resumes the explicitly submitted queue with
             # the original byte order and request key; no re-selection is needed.
@@ -259,9 +281,103 @@ def test_pending_unreceived_upload_restores_original_order_and_resumes_same_key(
             tasks = repo.list_tasks(data['project']['id'])
             assert len(tasks) == count + 1
             task = max(tasks, key=lambda item:item['id'])
-            assert [item['original_filename'] for item in repo.list_task_attachments(data['project']['id'], task['id'])] == ['先读说明.txt', '再看数据.txt']
+            delivered = repo.list_task_attachments(data['project']['id'], task['id'])
+            assert [item['original_filename'] for item in delivered] == ['先读说明.txt', '再看数据.txt']
+            assert [item['sha256'] for item in delivered] == [hashlib.sha256(item['buffer']).hexdigest() for item in original]
+            receipt = page.request.get(f'{live_hub}/projects/workspace-team/workspace-dispatch/{key}')
+            assert receipt.status == 200 and receipt.json()['found'] is True
+            assert receipt.json()['task_ids'] == [task['id']]
             playwright.expect(page.locator('[data-ws-pending]')).to_be_hidden()
         finally:
+            browser.close()
+
+
+def test_slow_receipt_keeps_uncertain_attachments_locked_until_lookup_settles(live_hub, repo):
+    data = seed_workspace(repo, room_messages=1)
+    evidence = Path(__file__).resolve().parents[2] / 'output/hub-desktop-polish-20261029'
+    with playwright.sync_playwright() as runtime:
+        browser = runtime.chromium.launch(headless=True)
+        page = browser.new_page(viewport={'width':1440, 'height':900})
+        held = []
+        events = []
+        started = time.monotonic()
+        try:
+            login_page(page, live_hub)
+            original = [
+                {'name':'慢查询说明.txt', 'mimeType':'text/plain', 'buffer':b'slow receipt first'},
+                {'name':'慢查询参考.png', 'mimeType':'image/png', 'buffer':PNG},
+            ]
+            page.locator('[data-ws-input]').fill('等待收据期间保留附件，恢复后只安排一次。')
+            page.locator('[data-ws-attachment-input]').set_input_files(original)
+            key = request_key(page)
+            count = len(repo.list_tasks(data['project']['id']))
+
+            def observe(request):
+                if '/workspace-dispatch' in request.url:
+                    events.append({'kind':'request', 'method':request.method,
+                                   'seconds':round(time.monotonic()-started, 3)})
+
+            def hold_receipt(route):
+                held.append(route)
+                events.append({'kind':'receipt-held', 'seconds':round(time.monotonic()-started, 3)})
+                page.evaluate('window.__slowReceiptHeld=true')
+
+            page.on('request', observe)
+            page.route('**/workspace-dispatch', lambda route: route.abort(), times=1)
+            page.route('**/workspace-dispatch/*', hold_receipt, times=1)
+            page.locator('[data-ws-send]').click()
+            page.wait_for_function('window.__slowReceiptHeld===true')
+            # Deliberately exceed Playwright expect's old 5 s default while the
+            # actual receipt request is in flight (the app's deadline is 12 s).
+            page.wait_for_timeout(5500)
+            playwright.expect(page.locator('[data-ws-pending]')).to_be_visible()
+            playwright.expect(page.locator('[data-ws-send]')).to_be_disabled()
+            playwright.expect(page.locator('[data-ws-queue-cancel]')).to_be_hidden()
+            assert request_key(page) == key
+            during = page.evaluate('''async () => {
+                const s=document.querySelector('[data-ws-shell]').dataset;
+                const {job}=await CodexWorkspaceStore.read(`${s.user}.${s.project}.${s.conversation}`);
+                return {key:job.key, state:job.state, attempted:job.attempted,
+                    ownerHeld:Boolean(job.owner), files:await Promise.all(job.payload.files.map(async item =>
+                    ({name:item.name, bytes:Array.from(new Uint8Array(await item.file.arrayBuffer()))})))};
+            }''')
+            assert during['key'] == key and during['state'] == 'uncertain'
+            assert during['attempted'] is True and during['ownerHeld'] is True
+            assert [item['name'] for item in during['files']] == [item['name'] for item in original]
+            assert [item['bytes'] for item in during['files']] == [list(item['buffer']) for item in original]
+            assert len(repo.list_tasks(data['project']['id'])) == count
+            assert sum(event.get('method') == 'POST' for event in events) == 1
+
+            route = held.pop()
+            response = route.fetch()
+            assert response.status == 200 and response.json()['found'] is False
+            route.fulfill(response=response)
+            wait_failed_attempt_settled(page, key)
+            events.append({'kind':'attempt-settled', 'seconds':round(time.monotonic()-started, 3)})
+            playwright.expect(page.locator('[data-ws-pending-message]')).to_contain_text('暂未查到完成记录')
+            with page.expect_navigation(wait_until='domcontentloaded'):
+                page.locator('[data-ws-send]').click()
+            tasks = repo.list_tasks(data['project']['id'])
+            assert len(tasks) == count + 1
+            task = max(tasks, key=lambda item:item['id'])
+            delivered = repo.list_task_attachments(data['project']['id'], task['id'])
+            assert [item['original_filename'] for item in delivered] == [item['name'] for item in original]
+            assert [item['sha256'] for item in delivered] == [hashlib.sha256(item['buffer']).hexdigest() for item in original]
+            receipt = page.request.get(f'{live_hub}/projects/workspace-team/workspace-dispatch/{key}')
+            assert receipt.status == 200 and receipt.json()['found'] is True
+            assert receipt.json()['task_ids'] == [task['id']]
+            assert sum(event.get('method') == 'POST' for event in events) == 2
+            playwright.expect(page.locator('[data-ws-pending]')).to_be_hidden()
+            evidence.mkdir(parents=True, exist_ok=True)
+            (evidence / 'slow-receipt-settlement.json').write_text(json.dumps({
+                'events':events, 'held_beyond_default_expect_ms':5500,
+                'during':{key:value for key,value in during.items() if key!='files'},
+                'original_key_receipt_found':True, 'delivered_task_ids':[task['id']],
+                'delivered_sha256':[item['sha256'] for item in delivered],
+            }, ensure_ascii=False, indent=2), encoding='utf-8')
+        finally:
+            for route in held:
+                route.abort()
             browser.close()
 
 
@@ -294,7 +410,7 @@ def test_attachment_retry_after_login_in_another_tab_keeps_files(live_hub, repo)
             key = request_key(page)
             page.route('**/workspace-dispatch', lambda route: route.abort(), times=1)
             page.locator('[data-ws-send]').click()
-            playwright.expect(page.locator('[data-ws-pending-message]')).to_contain_text('暂未查到')
+            wait_failed_attempt_settled(page, key)
             new_token = rotate_login()
             assert new_token != old_token
             # Force the still-open draft to represent a stale, background tab.

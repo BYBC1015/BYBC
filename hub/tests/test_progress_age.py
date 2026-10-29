@@ -1,6 +1,7 @@
 """Read-only timing shows silence and contact separately, without invented progress."""
 from datetime import datetime, timezone
 from types import SimpleNamespace
+import re
 
 import codex_hub.execution_progress as progress
 from codex_hub.execution_leases import ExecutionStore
@@ -68,4 +69,5 @@ def test_workspace_labels_expired_connection_as_unconfirmed(client,repo,lease_ta
     current=workspace_contexts[-1]['conversation_progress'][0]
     assert not current['execution_contact_valid']
     assert '执行状态待核对' in response.text and '任务联系已过期' in response.text
-    assert '最近报告：正在执行工具' in response.text
+    # The report text has its own span so age refreshes preserve the body DOM.
+    assert '最近报告：正在执行工具' in re.sub(r'<[^>]+>', '', response.text)

@@ -1,6 +1,6 @@
 /* The workspace belongs to durable identities; connections stay in settings. */
 html:has(body.workspace-screen) { color-scheme:dark; height:100%; background:#101112; }
-html body.workspace-screen { --ws-bg:#101112; --ws-left:#17191b; --ws-main:#1d1f21; --ws-right:#191b1d; --ws-surface:#27292c; --ws-border:#34373b; --ws-text:#eeedea; --ws-muted:#b2b5b7; --ws-dim:#92989b; --ws-accent:#d4c2aa; margin:0; padding:0; min-width:0; height:100dvh; overflow:hidden; background:var(--ws-bg); color:var(--ws-text); font:15px/1.65 Inter,"Segoe UI","Microsoft YaHei",sans-serif; -webkit-font-smoothing:antialiased; }
+html body.workspace-screen { --ws-bg:#101112; --ws-left:#17191b; --ws-main:#1d1f21; --ws-right:#191b1d; --ws-surface:#27292c; --ws-border:#34373b; --ws-text:#eeedea; --ws-muted:#b2b5b7; --ws-dim:#92989b; --ws-accent:#d4c2aa; margin:0; padding:0; min-width:0; height:100dvh; overflow:hidden; background:var(--ws-bg); color:var(--ws-text); font-size:15px; line-height:1.65; font-family:"Segoe UI","Microsoft YaHei UI","Microsoft YaHei","PingFang SC",sans-serif; -webkit-font-smoothing:antialiased; }
 .workspace-screen * { box-sizing:border-box; }
 .workspace-screen button,.workspace-screen input,.workspace-screen select,.workspace-screen textarea { font:inherit; }
 .workspace-screen button,.workspace-screen a { -webkit-tap-highlight-color:transparent; }
@@ -77,10 +77,10 @@ html body.workspace-screen { --ws-bg:#101112; --ws-left:#17191b; --ws-main:#1d1f
 .ws-sidebar-bottom footer small { color:#737f86; font-size:10px; margin-left:4px; }
 .ws-sidebar-bottom footer form { margin:0; }
 .ws-sidebar-bottom footer button { border:0; padding:0; background:none; color:#7e8a91; font-size:11px; }
-.ws-center { display:grid; grid-template-rows:76px minmax(0,1fr) auto; background:var(--ws-main); position:relative; }
+.ws-center { display:grid; grid-template-rows:76px minmax(0,1fr) auto; background:var(--ws-main); position:relative; box-shadow:inset 0 0 0 1px #ffffff05; }
 .ws-receipt { margin:8px 0 0; color:#a9bbb4; font-size:12px; }
 .ws-new-messages { position:absolute; z-index:12; left:50%; top:85px; transform:translateX(-50%); border:1px solid #5b6962; border-radius:20px; background:#33443d; color:#e3ece5; padding:8px 18px; box-shadow:0 6px 24px #0005; }
-.ws-chat-head { display:flex; align-items:center; gap:14px; padding:0 26px; min-width:0; border-bottom:1px solid #292e31; }
+.ws-chat-head { display:flex; align-items:center; gap:14px; padding:0 26px; min-width:0; border-bottom:1px solid #ffffff06; background:#ffffff01; }
 .ws-chat-title { min-width:0; }
 .ws-chat-title h1 { font-size:16px; font-weight:550; line-height:1.5; color:#e3e4e2; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .ws-chat-title p { font-size:11px; color:#8d989f; line-height:1.4; margin:3px 0 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -133,7 +133,7 @@ html body.workspace-screen { --ws-bg:#101112; --ws-left:#17191b; --ws-main:#1d1f
 .ws-message-user { justify-content:flex-end; margin-left:36px; }
 .ws-message-user .ws-message-content { flex:initial; max-width:100%; }
 .ws-message-user .ws-message-meta { justify-content:flex-end; }
-.ws-user-bubble { display:block; background:#303638; color:#e0e2df; border:1px solid #3b4243; border-radius:18px 18px 4px 18px; padding:14px 18px; font-size:15px; line-height:1.85; white-space:pre-wrap; overflow-wrap:anywhere; }
+.ws-user-bubble { display:block; background:#303638; color:#e0e2df; border:1px solid #ffffff09; border-radius:20px 20px 7px 20px; padding:14px 18px; font-size:15px; line-height:1.85; white-space:pre-wrap; overflow-wrap:anywhere; }
 .ws-user-bubble:has(.codex-markdown) { white-space:normal; }
 .ws-message-source { margin:12px 0 0; border:0; padding:0; background:none; color:#97a4aa; font-size:11px; text-align:left; }
 .ws-message-source span { color:#af9e86; margin-left:6px; }

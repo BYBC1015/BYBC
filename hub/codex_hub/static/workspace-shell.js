@@ -64,7 +64,14 @@
   let draftRevision = 0;
   let lastSavedKey = form.elements.request_key.value;
   let deliveryRunning = false;
+  let queueSyncRevision = 0;
   let localOffline = Boolean(window.__HUB_DESKTOP_OFFLINE__ || document.documentElement.dataset.hubOffline === 'true' || !navigator.onLine);
+  function setWorkspaceConnection(state) {
+    if (shell.dataset.wsConnection === state) return;
+    shell.dataset.wsConnection = state;
+    window.dispatchEvent(new CustomEvent('hub:workspace-connectivity', {detail:{state}}));
+  }
+  setWorkspaceConnection(localOffline ? 'offline' : 'online');
   let deliveryRetryAt = 0;
   function announce() { channel?.postMessage({scope}); }
   function snapshot() {
@@ -695,6 +702,9 @@
     if (!navigator.onLine) { localOffline = true; syncSubmissionControls(); return; }
     if (attachments.length !== pendingSubmission.files.length) return;
     deliveryRunning = true;
+    // Invalidate reads begun before this attempt, even if they return only
+    // after the attempt has already finished. Persisted receipts remain truth.
+    queueSyncRevision += 1;
     const key = pendingSubmission.key;
     const run = async () => {
       let leaseTimer;
@@ -788,10 +798,14 @@
     otherQueues.append(content);
   }
   async function syncLocalQueue() {
-    if (!storageAvailable || committed || submitting) return;
+    if (!storageAvailable || committed || submitting || deliveryRunning) return;
+    const revision = ++queueSyncRevision;
     try {
       const {job} = await localStore.read(scope);
       await showOtherQueues();
+      // A late queued snapshot must not undo attempted/sending/uncertain state
+      // or re-enable cancellation after a POST has actually started.
+      if (revision !== queueSyncRevision || committed || submitting || deliveryRunning) return;
       if (job?.state === 'sent' && pendingSubmission?.key === job.key && job.url) { await completeSubmission(job.url); return; }
       if (localStore.active(job)) {
         if (!pendingSubmission || job.key !== pendingSubmission.key) {
@@ -923,8 +937,46 @@
   let loginRequired = false;
   let lastRefreshAt = 0;
   const refreshInterval = () => loginRequired ? 30000 : eventHealthy && !pendingSubmission ? 10000 : 2000;
+  function selectionTouches(node, selection) {
+    if (!node || !selection || selection.isCollapsed) return false;
+    for (let i = 0; i < selection.rangeCount; i++) {
+      if (selection.getRangeAt(i).intersectsNode(node)) return true;
+    }
+    return false;
+  }
+  function patchProgress(old, incoming, focused, selection) {
+    const oldBody = old.querySelector('[data-ws-progress-body]');
+    const nextBody = incoming.querySelector('[data-ws-progress-body]');
+    const bodyChanged = old.dataset.wsProgressBodyVersion !== incoming.dataset.wsProgressBodyVersion;
+    const deferred = bodyChanged && (oldBody?.contains(focused) || selectionTouches(oldBody, selection));
+    const reportChanged = old.querySelector('[data-ws-progress-status-text]')?.textContent !== incoming.querySelector('[data-ws-progress-status-text]')?.textContent;
+    // Preserve the article, rendered Markdown and details element. The clock
+    // changes independently of public content, and must never rebuild a reply.
+    for (const attr of incoming.attributes) {
+      if (attr.name.startsWith('data-ws-progress-') || attr.name === 'data-ws-entry-version') {
+        if (deferred && attr.name === 'data-ws-progress-body-version') continue;
+        if (old.getAttribute(attr.name) !== attr.value) old.setAttribute(attr.name, attr.value);
+      }
+    }
+    for (const selector of ['[data-ws-progress-label-text]', '[data-ws-progress-waiting]',
+      '[data-ws-progress-status-text]', '[data-ws-progress-warning]', '[data-ws-progress-timing]']) {
+      const current = old.querySelector(selector), next = incoming.querySelector(selector);
+      if (!current || !next) continue;
+      if (current.innerHTML !== next.innerHTML) current.replaceChildren(...Array.from(next.childNodes, node => document.importNode(node, true)));
+      current.hidden = next.hidden;
+    }
+    const row = old.querySelector('[data-ws-progress-report-row]');
+    if (row) row.hidden = incoming.querySelector('[data-ws-progress-report-row]')?.hidden ?? true;
+    if (bodyChanged && oldBody && nextBody && !deferred) {
+      oldBody.replaceChildren(...Array.from(nextBody.childNodes, node => document.importNode(node, true)));
+      oldBody.hidden = nextBody.hidden;
+    }
+    old.toggleAttribute('data-ws-body-deferred', deferred);
+    return {deferred, changed:reportChanged || (bodyChanged && !deferred)};
+  }
   function showLoginRequired() {
     loginRequired = true; eventSessionExpired = true; closeEventStream(); saveDraft();
+    setWorkspaceConnection('expired');
     const sync = shell.querySelector('[data-ws-sync]');
     const link = document.createElement('a');
     link.href = new URL(shell.dataset.projectUrl, location.href).pathname.split('/projects/')[0] + '/login';
@@ -976,7 +1028,10 @@
     try {
       const response = await fetch(shell.dataset.workspaceUrl || location.href, { headers:etag && !localOffline ? { "If-None-Match":etag } : {"X-Hub-Online-Probe":"1"}, credentials:"same-origin", cache:"no-store", signal:refreshController.signal });
       if (response.status === 401 || (response.redirected && new URL(response.url).pathname.endsWith('/login'))) { showLoginRequired(); return; }
-      if (response.status === 304) { shell.querySelector("[data-ws-sync]").textContent = "已同步"; return; }
+      if (response.status === 304) {
+        if (localOffline || loginRequired || shell.dataset.wsConnection !== 'online') { etag = ''; throw new Error('Fresh workspace required'); }
+        shell.querySelector("[data-ws-sync]").textContent = "已同步"; return;
+      }
       if (!response.ok) throw new Error();
       const page = new DOMParser().parseFromString(await response.text(), "text/html");
       const freshShell = page.querySelector("[data-ws-shell]");
@@ -985,6 +1040,7 @@
         loginRequired = false; eventSessionExpired = false; errors.hidden = true; connectEventStream();
       }
       await markOnline();
+      setWorkspaceConnection('online');
       shell.dataset.eventVersion = freshShell.dataset.eventVersion || '';
       refreshPresence(freshShell);
       const nextEtag = response.headers.get("ETag") || "";
@@ -1004,6 +1060,20 @@
           const children = Array.from(incoming.children).map(node => {
             const old = node.dataset.wsEntry && previous.get(node.dataset.wsEntry);
             if (node.dataset.wsEntry && !old) added = true;
+            if (old?.hasAttribute('data-ws-progress') && node.hasAttribute('data-ws-progress')) {
+              const generation = Number(node.dataset.wsProgressGeneration);
+              const oldGeneration = Number(old.dataset.wsProgressGeneration);
+              if (generation < oldGeneration || (generation === oldGeneration && Number(node.dataset.wsProgressSequence) < Number(old.dataset.wsProgressSequence))) {
+                skipped = true; return old;
+              }
+              if (generation === oldGeneration) {
+                const result = patchProgress(old, node, focused, selection);
+                if (result.deferred) skipped = true;
+                if (result.changed) added = true;
+                return old;
+              }
+              return document.importNode(node, true);
+            }
             if (old && (old.contains(focused) || (selection && !selection.isCollapsed && old.contains(selection.anchorNode)))) { skipped = true; return old; }
             if (old && old.dataset.wsEntryVersion === node.dataset.wsEntryVersion) return old;
             return document.importNode(node,true);
@@ -1047,7 +1117,7 @@
         }
         if (destination && incoming) destination.replaceChildren(...Array.from(incoming.childNodes).map((node) => document.importNode(node, true)));
       });
-      if (!skipped) etag = nextEtag;
+      etag = skipped ? '' : nextEtag;
       const taskList = shell.querySelector("[data-ws-task-list]");
       if (taskList && taskListOpen) taskList.open = true;
       window.CodexMarkdown?.enhanceMarkdown(shell.querySelector("[data-ws-live]"));
@@ -1056,16 +1126,21 @@
       filterRooms(); selectPanel(activeTab, activeTab === "agent" ? selectedAgent : selectedTask);
       restoreReadingPosition(positionBeforeRefresh);
       shell.querySelector("[data-ws-sync]").textContent = "已同步";
+      window.dispatchEvent(new CustomEvent('hub:workspace-updated'));
     } catch (error) {
       localOffline = true; presenceUnconfirmed();
+      setWorkspaceConnection(loginRequired ? 'expired' : 'offline');
       shell.querySelector("[data-ws-sync]").textContent = error.name === "AbortError" ? "连接超时 · 正在重试" : "等待连接";
     } finally { clearTimeout(timeout); refreshController = null; refreshTimer = setTimeout(refresh, eventRefreshPending ? 350 : refreshInterval()); }
   }
   refreshTimer = setTimeout(refresh, 2000);
   connectEventStream();
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { etag = ""; connectEventStream(); scheduleEventRefresh(300); } else closeEventStream(); });
-  window.addEventListener('online', () => { etag = ''; deliveryRetryAt = 0; connectEventStream(); scheduleEventRefresh(50); });
-  window.addEventListener('offline', () => { localOffline = true; closeEventStream(); presenceUnconfirmed(); syncSubmissionControls(); shell.querySelector('[data-ws-sync]').textContent='离线 · 本机草稿可继续编辑'; });
+  window.addEventListener('online', () => { etag = ''; deliveryRetryAt = 0; setWorkspaceConnection(loginRequired ? 'expired' : 'reconnecting'); connectEventStream(); scheduleEventRefresh(50); });
+  window.addEventListener('offline', () => { localOffline = true; setWorkspaceConnection('offline'); closeEventStream(); presenceUnconfirmed(); syncSubmissionControls(); shell.querySelector('[data-ws-sync]').textContent='离线 · 本机草稿可继续编辑'; });
+  document.addEventListener('selectionchange', () => {
+    if (window.getSelection()?.isCollapsed && shell.querySelector('[data-ws-body-deferred]')) { etag = ''; scheduleEventRefresh(50); }
+  });
   window.addEventListener('pagehide', closeEventStream);
   window.addEventListener('pageshow', connectEventStream);
   setInterval(() => { if (!document.hidden) formatTimes(); }, 60000);

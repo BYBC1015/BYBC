@@ -18,7 +18,7 @@ import subprocess
 import sys
 import threading
 import time
-from urllib.parse import unquote, urlsplit, urlunsplit
+from urllib.parse import parse_qs, unquote, urlsplit, urlunsplit
 
 from . import __version__
 from .config import default_config_path, hub_workspace_url, load_config
@@ -129,7 +129,11 @@ def read_geometry(path: Path, screens=()) -> dict:
     except (OSError, ValueError, TypeError):
         pass
     if screens:
-        screen = screens[0]
+        # A saved window on a larger secondary display must not be shrunk to
+        # the primary monitor's dimensions on every launch.
+        screen = next((item for item in screens if defaults['x'] is not None
+            and defaults['x'] + 100 > item.x and defaults['x'] < item.x + item.width - 100
+            and item.y <= defaults['y'] < item.y + item.height - 80), screens[0])
         defaults['width'] = min(defaults['width'], max(900, int(screen.width)))
         defaults['height'] = min(defaults['height'], max(620, int(screen.height)))
     return defaults
@@ -137,11 +141,14 @@ def read_geometry(path: Path, screens=()) -> dict:
 
 def offline_page(message='正在连接你的工作区…', *, connecting=True) -> str:
     title = '正在打开 Hub' if connecting else '暂时连接不上 Hub'
-    detail = '聊天、智能体和成果，即将在这里继续。' if connecting else '已保留桌面登录信息。恢复网络后重试；后台工作的实际状态以重新连接后的记录为准。'
+    detail = '聊天、智能体和成果，即将在这里继续。' if connecting else '恢复连接后继续当前页面。登录信息保留在本机；后台工作的实际进度，以重新连接后的记录为准。'
+    state = '连接工作区' if connecting else '等待重新连接'
+    modifier = ' connecting' if connecting else ''
     return f'''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>html,body{{margin:0;min-height:100%;background:#151819;color:#eee;font:15px "Segoe UI","Microsoft YaHei",sans-serif}}body{{display:grid;place-items:center;height:100vh}}main{{width:min(520px,80vw);padding:44px;border:1px solid #343b3c;border-radius:28px;background:#202627}}.mark{{font:42px Georgia;color:#b7c6bf}}h1{{font-size:25px;font-weight:550;margin:24px 0 14px}}p{{line-height:1.8;color:#b6c1c1}}button{{border:0;border-radius:20px;padding:12px 23px;background:#c5d7cc;color:#15231d;font:inherit;cursor:pointer}}small{{display:block;margin-top:22px;color:#889797}}#status{{min-height:24px}}</style>
-<main><div class="mark">h·</div><h1>{title}</h1><p>{detail}</p><p id="status">{html.escape(message)}</p><button onclick="retry()">重新连接</button><small>BYBC Hub · 桌面工作区</small></main>
-<script>function retry(){{document.querySelector('#status').textContent='正在重新连接…';if(window.pywebview)window.pywebview.api.retry_connection().catch(()=>document.querySelector('#status').textContent='连接尚未恢复，请稍后重试。')}};</script></html>'''
+<meta name="color-scheme" content="dark">
+<style>*{{box-sizing:border-box}}html,body{{margin:0;min-height:100%;background:#151819;color:#edf0ed;font:15px "Segoe UI","Microsoft YaHei",sans-serif}}body{{display:grid;place-items:center;min-height:100vh;padding:32px;background:radial-gradient(ellipse at 50% 20%,#27322e70,transparent 60%),#151819}}main{{width:min(540px,100%);padding:40px;border:1px solid #3a444040;border-radius:32px;background:#202725;box-shadow:0 28px 90px #0003}}header{{display:flex;align-items:center;justify-content:space-between;gap:20px}}.mark{{display:grid;place-items:center;width:62px;height:62px;border-radius:22px;background:#cfdbc512;color:#d3dfcb;font:38px Georgia}}.state{{display:flex;align-items:center;gap:9px;font-size:12px;color:#a7b5ad}}.dot{{width:7px;height:7px;border-radius:50%;background:#c6ba96}}.connecting .dot{{background:#b7cbb4;animation:breathe 2.4s ease-in-out infinite}}h1{{font-size:27px;font-weight:550;letter-spacing:.02em;margin:34px 0 16px}}p{{line-height:1.9;color:#b6c1bb;margin:0}}#status{{min-height:28px;margin-top:24px;font-size:13px;color:#ced7cf}}button{{width:100%;margin-top:20px;border:1px solid transparent;border-radius:18px;padding:14px 23px;background:#cbd9c5;color:#1b2a20;font:inherit;font-weight:600;cursor:pointer;transition:background .15s,transform .15s}}button:hover{{background:#dce7d7}}button:active{{transform:translateY(1px)}}button:focus-visible{{outline:2px solid #e2f1db;outline-offset:4px}}button:disabled{{opacity:.6;cursor:wait}}small{{display:block;text-align:center;margin-top:24px;color:#8c9a91;font-size:11px;letter-spacing:.09em}}@keyframes breathe{{50%{{opacity:.35}}}}@media(prefers-reduced-motion:reduce){{*,*::before,*::after{{animation:none!important;transition:none!important}}}}@media(max-width:480px){{body{{padding:18px}}main{{padding:28px;border-radius:26px}}h1{{font-size:24px}}}}</style>
+<main class="{modifier.strip()}"><header><div class="mark" aria-hidden="true">h·</div><span class="state"><span class="dot" aria-hidden="true"></span>{state}</span></header><h1>{title}</h1><p>{detail}</p><p id="status" role="status" aria-live="polite">{html.escape(message)}</p><button id="retry-button" type="button" onclick="retry()">重新连接</button><small>BYBC HUB · 你的智能体工作区</small></main>
+<script>let retryPending=false;async function retry(){{if(retryPending)return;const status=document.querySelector('#status'),button=document.querySelector('#retry-button');const connect=window.pywebview?.api?.retry_connection;if(typeof connect!=='function'){{status.textContent='桌面连接仍在准备，请稍后重试。';return;}}retryPending=true;button.disabled=true;status.textContent='正在重新连接…';try{{const result=await connect();if(!result?.connecting)throw new Error('unavailable');}}catch{{status.textContent='连接尚未恢复，请稍后重试。';}}finally{{retryPending=false;button.disabled=false;}}}}window.addEventListener('online',retry);</script></html>'''
 
 
 class DesktopInstance:
@@ -265,10 +272,7 @@ class DesktopAPI:
 
     def retry_connection(self):
         self._host.require_trusted(allow_local=True)
-        # Let pywebview resolve this Promise before replacing its JS document.
-        timer = threading.Timer(.2, self._host.navigate_home)
-        timer.daemon = True
-        timer.start()
+        self._host.schedule_reconnect()
         return {'connecting': True}
 
 
@@ -290,6 +294,10 @@ class DesktopHost:
         self._geometry_lock = threading.Lock()
         self._geometry = read_geometry(state_dir / 'window.json')
         self._children = []
+        self._lifecycle_lock = threading.RLock()
+        self._closed = threading.Event()
+        self._retry_timer = None
+        self._retry_serial = 0
         self._native_ready = False
         self.cache = cache or WorkspaceCache(state_dir / 'workspace-cache')
         self.assets = assets or PackagedAssets()
@@ -298,9 +306,12 @@ class DesktopHost:
         self._offline_account = None
         self._offline_response = None
         self._navigation_target = location.home
+        self._resume_url = location.home
         self._login_network_ready = False
 
     def require_trusted(self, *, allow_local=False):
+        if self._closed.is_set():
+            raise PermissionError('窗口已关闭。')
         current = self.window.get_current_url()
         if self.location.trusted(current):
             return
@@ -317,7 +328,11 @@ class DesktopHost:
         os.startfile(str(path))
 
     def bring_forward(self):
+        if self._closed.is_set():
+            return
         self.window.show()
+        if self._closed.is_set():
+            return
         if str(self.window.native.WindowState) == 'Minimized':
             if self._geometry.get('maximized'):
                 self.window.maximize()
@@ -325,15 +340,71 @@ class DesktopHost:
                 self.window.restore()
 
     def navigate_home(self):
+        self._navigate(self.location.home)
+
+    def reconnect(self):
+        self._navigate(self._resume_url)
+
+    def schedule_reconnect(self):
+        # Resolve the bridge Promise first. Repeated clicks replace one pending
+        # retry, and even a callback already queued before close becomes inert.
+        with self._lifecycle_lock:
+            if self._closed.is_set():
+                return
+            self._retry_serial += 1
+            serial = self._retry_serial
+            if self._retry_timer:
+                self._retry_timer.cancel()
+            def retry():
+                with self._lifecycle_lock:
+                    if self._closed.is_set() or serial != self._retry_serial:
+                        return
+                    self._retry_timer = None
+                self.reconnect()
+            self._retry_timer = threading.Timer(.2, retry)
+            self._retry_timer.daemon = True
+            self._retry_timer.start()
+
+    def _cancel_reconnect(self):
+        with self._lifecycle_lock:
+            self._retry_serial += 1
+            if self._retry_timer:
+                self._retry_timer.cancel()
+                self._retry_timer = None
+
+    def _navigate(self, target):
+        if self._closed.is_set():
+            return
+        self._cancel_reconnect()
         self._recovery_target = None
+        self._offline_response = None
         self._local_page = False
+        self._navigation_target = target
+        if self._can_resume(target):
+            self._resume_url = target
         # WebView2 setting Source to the current URL does not reload it.
-        if self.window.get_current_url() == self.location.home:
+        if self.window.get_current_url() == target:
             self.window.run_js('window.location.reload()')
         else:
-            self.window.load_url(self.location.home)
+            self.window.load_url(target)
+
+    def _can_resume(self, target):
+        if not self.location.trusted(target):
+            return False
+        value = urlsplit(target)
+        parts = unquote(value.path)[len(self.location.path):].strip('/').split('/')
+        query = parse_qs(value.query, keep_blank_values=True)
+        if 'download' in query or parts[0] in {'login', 'logout', 'api', 'static', 'downloads'}:
+            return False
+        if parts[0] != 'projects':
+            return parts[0] in {'', 'inbox', 'devices', 'feedback', 'notifications'}
+        if 'attachments' in parts:
+            return parts[-1] == 'preview' or query.get('inline') == ['true']
+        return not parts[-1].endswith(('.md', '.json')) and parts[-1] != 'chat-updates'
 
     def show_offline(self, message):
+        if self._closed.is_set():
+            return
         self._offline = True
         self._offline_since = time.time()
         self._local_page = True
@@ -352,6 +423,8 @@ class DesktopHost:
             return False
 
     def on_loaded(self):
+        if self._closed.is_set():
+            return
         if self._first_load:
             self._first_load = False
             self.navigate_home()
@@ -359,13 +432,19 @@ class DesktopHost:
             self.window.run_js("document.documentElement.dataset.hubDesktop='true';window.dispatchEvent(new Event('hubdesktopready'));")
 
     def on_navigation(self, sender, args):
+        if self._closed.is_set():
+            args.Cancel = True
+            return
         target = str(args.Uri)
         if (target in ('about:blank', 'about:srcdoc') and self._local_page) or self.is_local_html_navigation(target):
             self._active_navigation = int(args.NavigationId)
             return
         if self.location.trusted(target):
+            self._cancel_reconnect()
             self._active_navigation = int(args.NavigationId)
             self._navigation_target = target
+            if self._can_resume(target):
+                self._resume_url = target
             self._local_page = False
             return
         args.Cancel = True
@@ -377,16 +456,20 @@ class DesktopHost:
 
     def launch_external(self, target):
         def launch():
+            if self._closed.is_set():
+                return
             try:
                 self.external_opener(target)
             except (OSError, ValueError):
                 self.log.write('External page could not be opened in the configured browser.')
-                if self.location.trusted(self.window.get_current_url()):
+                if not self._closed.is_set() and self.location.trusted(self.window.get_current_url()):
                     self.window.run_js("alert('未能打开链接，请检查本机谷歌浏览器或 Microsoft Edge 是否已安装。')")
         threading.Thread(target=launch, daemon=True).start()
 
     def on_new_window(self, sender, args):
         args.Handled = True
+        if self._closed.is_set():
+            return
         target = str(args.Uri)
         if self.location.trusted(target):
             threading.Thread(target=self.open_preview, args=(target,), daemon=True).start()
@@ -394,6 +477,8 @@ class DesktopHost:
             self.launch_external(target)
 
     def open_preview(self, target):
+        if self._closed.is_set() or not self.location.trusted(target):
+            return
         import webview
         from webview.menu import Menu, MenuAction
         # A child preserves the chat's draft/File objects, including during login.
@@ -406,27 +491,58 @@ class DesktopHost:
             menu=[Menu('Hub', [MenuAction('回到聊天窗口', self.bring_forward),
                 MenuAction('上一页', lambda: child.window.run_js('history.back()'))])])
         child.window = window
+        # Window creation can yield to the native event loop. The parent may
+        # have closed during it; never leave that late preview orphaned.
+        with self._lifecycle_lock:
+            closed = self._closed.is_set()
+            if not closed:
+                self._children.append(child)
+        if closed:
+            child.close_children()
+            window.destroy()
+            return
         window.events.loaded += child.on_loaded
         # Dynamically created pywebview windows have already emitted before_show.
         # Attach interception before sending this child's first remote navigation.
         child.connect_native_events()
-        self._children.append(child)
-        window.events.closed += lambda: self._children.remove(child) if child in self._children else None
+        def forget_child():
+            child.close_children()
+            with self._lifecycle_lock:
+                if child in self._children:
+                    self._children.remove(child)
+        window.events.closed += forget_child
         window.events.closing += child.close_children
+        if child._closed.is_set() or self._closed.is_set():
+            return
         child._local_page = False
-        window.load_url(target)
+        child._navigate(target)
 
     def close_children(self):
-        for child in list(self._children):
+        with self._lifecycle_lock:
+            if self._closed.is_set():
+                return
+            self._closed.set()
+            self._retry_serial += 1
+            if self._retry_timer:
+                self._retry_timer.cancel()
+                self._retry_timer = None
+            children = list(self._children)
+            self._children.clear()
+        for child in children:
+            child.close_children()
             child.window.destroy()
 
     def on_download_starting(self, sender, args):
         # A navigation converted to a download is not a disconnected Hub.
-        if self._active_navigation is not None:
+        # Downloads from another frame/older page must not suppress the current
+        # navigation's genuine network failure.
+        uri = str(getattr(getattr(args, 'DownloadOperation', None), 'Uri', ''))
+        if (not self._closed.is_set() and self._active_navigation is not None and uri
+                and canonical_url(uri) == canonical_url(self._navigation_target)):
             self._cancelled_navigations.add(self._active_navigation)
 
     def on_native_ready(self, sender=None, args=None):
-        if self._native_ready or (args is not None and not args.IsSuccess):
+        if self._closed.is_set() or self._native_ready or (args is not None and not args.IsSuccess):
             return
         self._native_ready = True
         control = self.window.native.webview
@@ -440,6 +556,8 @@ class DesktopHost:
         control.CoreWebView2.WebResourceResponseReceived += self.on_resource_response
 
     def on_navigation_completed(self, sender, args):
+        if self._closed.is_set():
+            return
         navigation_id = int(args.NavigationId)
         if navigation_id in self._cancelled_navigations:
             self._cancelled_navigations.discard(navigation_id)
@@ -463,14 +581,16 @@ class DesktopHost:
             threading.Thread(target=self.restore_workspace, args=(navigation_id, self._navigation_target), daemon=True).start()
 
     def restore_workspace(self, navigation_id=None, target=None):
+        if self._closed.is_set():
+            return
         navigation_id = self._active_navigation if navigation_id is None else navigation_id
-        if navigation_id != self._active_navigation:
+        if self._closed.is_set() or navigation_id != self._active_navigation:
             return
         target = canonical_url(target or self._navigation_target)
         snapshot = self.cache.get(target)
         if snapshot is None and target == self.location.home:
             snapshot = self.cache.get(target, latest=True)
-        if navigation_id != self._active_navigation:
+        if self._closed.is_set() or navigation_id != self._active_navigation:
             return
         if snapshot is None:
             self.show_offline('网络连接未完成，请检查连接后重试。')
@@ -479,7 +599,7 @@ class DesktopHost:
         self._offline_since = time.time()
         self._offline_account = snapshot['account']
         self._offline_response = snapshot
-        if navigation_id != self._active_navigation:
+        if self._closed.is_set() or navigation_id != self._active_navigation:
             self._offline_response = None
             return
         if self.window.get_current_url() == snapshot['url']:
@@ -488,13 +608,15 @@ class DesktopHost:
             self.window.load_url(snapshot['url'])
 
     def confirm_workspace_online(self, user_id=None):
+        if self._closed.is_set():
+            return False
         verified = self.cache.latest_verified
         if not verified or time.time() - verified['time'] > 30:
             return False
         if self._offline and verified['time'] < self._offline_since:
             return False
         user = self.window.evaluate_js("document.querySelector('[data-ws-shell]')?.dataset.user || ''")
-        if not isinstance(user, str) or user != verified['user']:
+        if self._closed.is_set() or not isinstance(user, str) or user != verified['user']:
             return False
         if user_id is not None and str(user_id) != user:
             return False
@@ -503,10 +625,12 @@ class DesktopHost:
             return False
         # Another window may have logged out or changed account during the DOM
         # query. Do not let that earlier response unlock this page afterwards.
-        if verified is not self.cache.latest_verified or verified.get('generation') != self.cache.generation:
+        if (self._closed.is_set() or verified is not self.cache.latest_verified
+                or verified.get('generation') != self.cache.generation):
             return False
         self._offline = False
         self._offline_account = None
+        self._recovery_target = None
         self.window.run_js("window.__HUB_DESKTOP_OFFLINE__=false;delete document.documentElement.dataset.hubOffline;document.getElementById('hub-desktop-offline-banner')?.remove();window.dispatchEvent(new Event('hubdesktopconnectionchange'));")
         return True
 
@@ -521,6 +645,8 @@ class DesktopHost:
         return response
 
     def on_resource_requested(self, sender, args):
+        if self._closed.is_set():
+            return
         url, method = str(args.Request.Uri), str(args.Request.Method).upper()
         if not self.location.trusted(url):
             return
@@ -547,6 +673,8 @@ class DesktopHost:
             args.Response = self._resource_response(resource[0], resource[1])
 
     def on_resource_response(self, sender, args):
+        if self._closed.is_set():
+            return
         url = str(args.Request.Uri)
         if not self.location.trusted(url) or str(args.Request.Method).upper() != 'GET':
             return
@@ -571,6 +699,8 @@ class DesktopHost:
         task = response.GetContentAsync()
         def capture():
             try:
+                if self._closed.is_set():
+                    return
                 stream = task.GetAwaiter().GetResult()
                 if stream is None:
                     return
@@ -578,12 +708,15 @@ class DesktopHost:
                 reader = StreamReader(stream)
                 source = str(reader.ReadToEnd())
                 reader.Dispose()
-                self.cache.put(url, source, generation=generation)
+                if not self._closed.is_set():
+                    self.cache.put(url, source, generation=generation)
             except Exception:
                 self.log.write('Workspace cache refresh skipped; remote navigation remains available.')
         threading.Thread(target=capture, daemon=True).start()
 
     def connect_native_events(self):
+        if self._closed.is_set():
+            return
         control = self.window.native.webview
         control.NavigationStarting += self.on_navigation
         control.NavigationCompleted += self.on_navigation_completed
@@ -592,6 +725,8 @@ class DesktopHost:
             self.on_native_ready()
 
     def save_geometry(self, **changes):
+        if self._closed.is_set():
+            return
         with self._geometry_lock:
             self._geometry.update(changes)
             _atomic_json(self.state_dir / 'window.json', self._geometry)
@@ -640,6 +775,7 @@ def run_desktop(config_path: Path, *, hub_override=None, webview_module=None):
     instance = DesktopInstance(location.key)
     if not instance.acquire():
         return 0
+    host = None
     try:
         if webview_module is None:
             import webview as webview_module
@@ -649,7 +785,7 @@ def run_desktop(config_path: Path, *, hub_override=None, webview_module=None):
         geometry = read_geometry(state_dir / 'window.json', webview.screens)
         host._geometry = geometry.copy()
         menu = [Menu('Hub', [MenuAction('上一页', lambda: host.window.run_js('history.back()')),
-            MenuAction('返回工作区', host.navigate_home), MenuAction('重新连接', host.navigate_home)])]
+            MenuAction('返回工作区', host.navigate_home), MenuAction('重新连接', host.reconnect)])]
         if host.projects:
             menu.append(Menu('本机工程', [MenuAction(path.name, lambda slug=slug: host.open_project(slug))
                 for slug, path in host.projects.items()]))
@@ -665,6 +801,7 @@ def run_desktop(config_path: Path, *, hub_override=None, webview_module=None):
         window.events.resized += host.on_resize
         window.events.moved += host.on_move
         window.events.closing += host.close_children
+        window.events.closed += host.close_children
         window.events.maximized += lambda: host.save_geometry(maximized=True)
         window.events.restored += lambda: host.save_geometry(maximized=False)
         instance._watcher = threading.Thread(target=instance.watch, args=(host.bring_forward, window.destroy), daemon=True)
@@ -674,7 +811,11 @@ def run_desktop(config_path: Path, *, hub_override=None, webview_module=None):
         host.log.write('Desktop foreground closed; Bridge execution was not stopped.')
         return 0
     finally:
-        instance.close()
+        try:
+            if host:
+                host.close_children()
+        finally:
+            instance.close()
 
 
 def main(argv=None):

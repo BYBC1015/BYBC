@@ -8,7 +8,7 @@ from fastapi import HTTPException, Request
 
 from .agents import AgentStore
 from .execution_leases import ExecutionConflict
-from .maintenance import MaintenanceStore, capture_context, optional_id, STATUS_NAMES, TASK_NAMES
+from .maintenance import MaintenanceStore, capture_context, optional_id, read_feedback_context, STATUS_NAMES, TASK_NAMES
 
 
 def register_maintenance_routes(app):
@@ -132,7 +132,7 @@ def register_maintenance_routes(app):
         repo,project,store=context(request,slug)
         row=feedback_for_device(repo,project,device,feedback_id)
         return {'feedback':{key:row[key] for key in ('id','kind','title','body','reproduction','expected','status','linked_task_id','verification_note')},
-                'context':json.loads(row['context_json'])}
+                'context':read_feedback_context(row['context_json'])}
 
     @app.get('/api/projects/{slug}/maintenance/tasks/{task_id}')
     def maintenance_task_context(request:Request,slug:str,task_id:int):

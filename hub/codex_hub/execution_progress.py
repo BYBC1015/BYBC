@@ -124,9 +124,12 @@ def annotate_progress_timing(row, at):
                        DEVICE_ONLINE_WINDOW_SECONDS)
     sampled=int(at//ACTIVITY_CLOCK_SECONDS)*ACTIVITY_CLOCK_SECONDS
     row['timing_bucket']=int(at//ACTIVITY_CLOCK_SECONDS)
-    row['run_age_label']=_duration(sampled-row['started_at']) if row.get('started_at') else '尚未确认'
-    row['report_age_label']=_duration(sampled-row['updated_at'])
-    row['execution_contact_valid']=row['lease_until']>at
+    # Let the browser update contact/age independently of Markdown and media.
+    row['public_text_version']=hashlib.sha256(row['assistant_text'].encode('utf-8')).hexdigest()[:16]
+    row['run_age_label']=_duration(sampled-row['started_at']) if row.get('started_at') is not None else '尚未确认'
+    row['has_public_report']=bool(row['has_public_report'])
+    row['report_age_label']=_duration(sampled-row['updated_at']) if row['updated_at'] is not None else '尚未收到'
+    row['execution_contact_valid']=row['execution_state']=='running' and row['lease_until']>at
     seen=parse_iso_datetime(str(row.get('last_agent_seen_at') or ''))
     window=AGENT_WORKER_ONLINE_WINDOW_SECONDS if row['agent_tasks_only'] else DEVICE_ONLINE_WINDOW_SECONDS
     row['device_contact_recent']=bool(seen and 0<=at-seen.timestamp()<=window)
@@ -139,6 +142,12 @@ def active_progress(db,project_id,*,conversation_id=None,task_ids=None,limit=12,
     params=[project_id]
     lease_clause='' if include_expired else ' AND r.lease_until>?'
     if not include_expired:params.append(at)
+    # A confirmed start is visible before its first public packet. An uncertain
+    # execution retains evidence already received, but never looks live. Neither
+    # read path inserts a progress row or invents report/response timestamps.
+    state_clause="(r.state='running' AND t.status='in_progress')"
+    if include_expired:
+        state_clause="("+state_clause+" OR (r.state='uncertain' AND t.status='blocked'))"
     clause=''
     if conversation_id is not None:
         clause+=' AND t.conversation_id=?';params.append(conversation_id)
@@ -147,16 +156,19 @@ def active_progress(db,project_id,*,conversation_id=None,task_ids=None,limit=12,
         if not ids:return []
         clause+=' AND t.id IN ('+','.join('?' for _ in ids)+')';params.extend(ids)
     params.append(max(1,min(160,limit)))
-    return [annotate_progress_timing(dict(row),at) for row in db.execute('''SELECT p.task_id,r.generation,p.sequence,p.status_text,
-        p.assistant_text,p.updated_at,r.started_at,r.lease_until,t.assigned_agent_id,t.execution_route,
+    return [annotate_progress_timing(dict(row),at) for row in db.execute('''SELECT t.id AS task_id,r.generation,
+        COALESCE(p.sequence,0) AS sequence,COALESCE(p.status_text,'') AS status_text,
+        COALESCE(p.assistant_text,'') AS assistant_text,COALESCE(p.last_kind,'') AS last_kind,
+        p.execution_id IS NOT NULL AS has_public_report,r.state AS execution_state,
+        p.updated_at,r.started_at,r.lease_until,t.assigned_agent_id,t.execution_route,
         a.name AS agent_name,a.kind AS agent_kind,d.label AS device_label,d.last_agent_seen_at,
         EXISTS(SELECT 1 FROM hub_agent_connections c WHERE c.device_id=d.id) AS agent_tasks_only
-        FROM hub_execution_progress p JOIN hub_task_executions r ON r.id=p.execution_id
-        JOIN tasks t ON t.id=p.task_id JOIN hub_agents a ON a.id=t.assigned_agent_id JOIN devices d ON d.id=r.device_id
-        WHERE t.project_id=? '''+lease_clause+''' AND r.state='running' AND t.status='in_progress'
+        FROM hub_task_executions r LEFT JOIN hub_execution_progress p ON p.execution_id=r.id
+        JOIN tasks t ON t.id=r.task_id JOIN hub_agents a ON a.id=t.assigned_agent_id JOIN devices d ON d.id=r.device_id
+        WHERE t.project_id=? '''+lease_clause+' AND '+state_clause+'''
         AND r.task_version=t.status_version AND r.device_id=t.assigned_device_id
         AND r.generation=(SELECT MAX(last.generation) FROM hub_task_executions last WHERE last.task_id=t.id)
-        '''+clause+' ORDER BY p.updated_at,p.task_id LIMIT ?',params)]
+        '''+clause+' ORDER BY r.started_at,r.id LIMIT ?',params)]
 
 
 class StreamLimiter:
@@ -209,10 +221,11 @@ def project_event_version(db,project_id):
     # Expired presence and expired draft leases change the view even when no
     # process can write another row to notify us of its disappearance.
     at=time.time()
-    activity=db.execute('''SELECT COUNT(*) AS count,SUM(r.lease_until>?) AS live FROM hub_execution_progress p
-      JOIN hub_task_executions r ON r.id=p.execution_id JOIN tasks t ON t.id=p.task_id
-      WHERE t.project_id=? AND r.state='running' AND r.device_id=t.assigned_device_id
-      AND t.status='in_progress' AND r.task_version=t.status_version
+    activity=db.execute('''SELECT COUNT(*) AS count,SUM(r.state='running' AND r.lease_until>?) AS live
+      FROM hub_task_executions r JOIN tasks t ON t.id=r.task_id
+      WHERE t.project_id=? AND r.device_id=t.assigned_device_id
+      AND ((r.state='running' AND t.status='in_progress') OR (r.state='uncertain' AND t.status='blocked'))
+      AND r.task_version=t.status_version
       AND r.generation=(SELECT MAX(e.generation) FROM hub_task_executions e WHERE e.task_id=t.id)''',(at,project_id)).fetchone()
     # Existing SSE/polling redraws only the age metadata. This is not a new
     # progress packet and does not write storage or invoke a model.

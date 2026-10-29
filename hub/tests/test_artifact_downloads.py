@@ -98,7 +98,7 @@ def test_cancelled_and_repeated_native_navigation_never_trigger_recovery(host):
     host._local_page = False
     host._active_navigation = 10
     host.on_navigation_completed(None, SimpleNamespace(NavigationId=10, IsSuccess=False, WebErrorStatus='OperationCanceled'))
-    host.on_download_starting(None, None)
+    host.on_download_starting(None, SimpleNamespace(DownloadOperation=SimpleNamespace(Uri=host._navigation_target)))
     for _ in range(3):
         host.on_navigation_completed(None, SimpleNamespace(NavigationId=10, IsSuccess=False))
     host.restore_workspace.assert_not_called()

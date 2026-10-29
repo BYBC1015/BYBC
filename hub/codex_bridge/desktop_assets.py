@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 from html.parser import HTMLParser
 import json
+import math
 import mimetypes
 from pathlib import Path
 import re
@@ -62,6 +63,7 @@ class WorkspaceCache:
     MAX_BYTES = 10 * 1024 * 1024
     MAX_PAGE_BYTES = 2 * 1024 * 1024
     MAX_PAGES = 20
+    MAX_INDEX_BYTES = 256 * 1024
 
     def __init__(self, directory):
         self.directory = Path(directory)
@@ -72,12 +74,29 @@ class WorkspaceCache:
 
     def _index(self):
         try:
-            data = json.loads((self.directory / 'index.json').read_text(encoding='utf-8'))
-            if not isinstance(data.get('pages'), dict):
+            path = self.directory / 'index.json'
+            if path.stat().st_size > self.MAX_INDEX_BYTES:
                 raise ValueError()
-            if any(not re.fullmatch(r'[a-f0-9]{24}-[a-f0-9]{32}\.html', key) or not isinstance(page, dict)
-                   for key, page in data['pages'].items()):
+            data = json.loads(path.read_text(encoding='utf-8'))
+            if (not isinstance(data, dict) or 'account' not in data
+                    or not isinstance(data.get('pages'), dict)
+                    or len(data['pages']) > self.MAX_PAGES):
                 raise ValueError()
+            account = data['account']
+            if account is not None and (not isinstance(account, str) or not re.fullmatch(r'[a-f0-9]{24}', account)):
+                raise ValueError()
+            for key, page in data['pages'].items():
+                if not re.fullmatch(r'[a-f0-9]{24}-[a-f0-9]{32}\.html', key) or not isinstance(page, dict):
+                    raise ValueError()
+                url, saved_account = page.get('url'), page.get('account')
+                if (not isinstance(url, str) or len(url) > 8192
+                        or not isinstance(saved_account, str) or saved_account != key[:24]
+                        or type(page.get('bytes')) is not int or not 0 <= page['bytes'] <= self.MAX_PAGE_BYTES
+                        or type(page.get('time')) not in (int, float) or not math.isfinite(page['time'])
+                        or page['time'] < 0 or not isinstance(page.get('sha256'), str)
+                        or not re.fullmatch(r'[a-f0-9]{64}', page['sha256'])
+                        or key[25:-5] != hashlib.sha256(url.encode()).hexdigest()[:32]):
+                    raise ValueError()
             return data
         except (OSError, ValueError, TypeError, UnicodeError):
             return {'account': None, 'pages': {}}
@@ -160,7 +179,10 @@ class WorkspaceCache:
             if not re.fullmatch(r'[a-f0-9]{24}-[a-f0-9]{32}\.html', key):
                 return None
             try:
-                content = (self.directory / key).read_text(encoding='utf-8')
+                path = self.directory / key
+                if path.stat().st_size != page['bytes'] or path.stat().st_size > self.MAX_PAGE_BYTES:
+                    return None
+                content = path.read_text(encoding='utf-8')
             except (OSError, UnicodeError):
                 return None
             if hashlib.sha256(content.encode('utf-8')).hexdigest() != page.get('sha256'):
@@ -198,8 +220,15 @@ class PackagedAssets:
         self.root = Path(root or bundle / 'codex_hub' / 'static').resolve()
         try:
             self.manifest = json.loads((self.root / 'desktop-assets.json').read_text(encoding='utf-8'))['assets']
-        except (OSError, ValueError, KeyError):
-            self.manifest = build_asset_manifest(self.root, self.root.parent / 'templates')['assets'] if not getattr(sys, 'frozen', False) else {}
+            if not isinstance(self.manifest, dict):
+                raise ValueError()
+        except (OSError, ValueError, TypeError, KeyError):
+            self.manifest = {}
+            if not getattr(sys, 'frozen', False):
+                try:
+                    self.manifest = build_asset_manifest(self.root, self.root.parent / 'templates')['assets']
+                except (OSError, ValueError):
+                    pass
 
     def read(self, location, url):
         if not location.trusted(url):
@@ -212,15 +241,21 @@ class PackagedAssets:
         if not relative or '\\' in relative or ':' in relative or '..' in relative.split('/'):
             return None
         declared = self.manifest.get(relative)
-        if not declared or urlsplit(url).query not in declared.get('queries', []):
+        if (not isinstance(declared, dict) or not isinstance(declared.get('queries'), list)
+                or urlsplit(url).query not in declared['queries']):
             return None
-        target = (self.root / relative).resolve()
-        if not target.is_relative_to(self.root) or not target.is_file() or target.stat().st_size > 16 * 1024 * 1024:
+        try:
+            target = (self.root / relative).resolve()
+            if not target.is_relative_to(self.root) or not target.is_file() or target.stat().st_size > 16 * 1024 * 1024:
+                return None
+            content = target.read_bytes()
+        except (OSError, ValueError):
+            # Optional packaged acceleration must not prevent network loading
+            # during an update, transient file lock or incomplete installation.
             return None
         mime = mimetypes.guess_type(target.name)[0] or 'application/octet-stream'
         if target.suffix.lower() == '.js':
             mime = 'application/javascript'
-        content = target.read_bytes()
         if hashlib.sha256(content).hexdigest() != declared.get('sha256'):
             return None
         return content, mime

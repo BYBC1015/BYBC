@@ -1,0 +1,43 @@
+/* Activity follows real reports. No endless spinner, synthetic typing or progress. */
+.ws-message-progress { align-items:flex-start; }
+.ws-message-progress>.ws-avatar { margin-top:17px; box-shadow:0 0 0 5px #ffffff03,inset 0 0 0 1px #ffffff20; }
+.ws-reply-card { --reply-ink:#b9d1c6; min-width:0; padding:18px 20px 13px; border:1px solid #a3c3b620; border-radius:22px; background:linear-gradient(135deg,#a3c3b608,transparent 65%),#202528; box-shadow:0 6px 24px #0000000b; }
+.ws-reply-head { flex-wrap:wrap; gap:8px 12px; margin:0 0 14px; }
+.ws-reply-head strong { color:#e0e5e2; font-size:13px; }
+.ws-reply-label { display:inline-flex; align-items:center; gap:7px; color:var(--reply-ink); font-size:12px; line-height:1.6; padding:3px 9px; border-radius:999px; background:#b9d1c609; border:1px solid #b9d1c612; }
+.ws-reply-mark { display:block; position:relative; width:6px; height:6px; border-radius:50%; background:currentColor; flex:none; }
+.ws-reply-mark::after { content:""; position:absolute; inset:-4px; border:1px solid currentColor; border-radius:50%; opacity:0; }
+.ws-reply-body { color:#e0e5e2; }
+.ws-reply-body .codex-markdown>:first-child { margin-top:0; }
+.ws-reply-body .codex-markdown>:last-child { margin-bottom:0; }
+.ws-reply-waiting { font-size:13px; line-height:1.8; color:#b6bfbe; margin:0 0 10px; }
+.ws-reply-report { display:flex; align-items:flex-start; gap:9px; padding:10px 12px; margin:14px 0 3px; border-radius:12px; background:#ffffff04; border:1px solid #ffffff07; color:#95aaa3; }
+.ws-reply-report svg { flex:none; margin-top:3px; }
+.ws-reply-report .ws-progress-status { min-width:0; margin:0; color:#b9c5c0; font-size:12px; line-height:1.8; overflow-wrap:anywhere; }
+.ws-reply-warning,.ws-reply-connection-note { margin:12px 0 0; padding:10px 12px; border-radius:12px; color:#ddc5a0; background:#b98e4f0b; border:1px solid #b98e4f24; font-size:12px; line-height:1.8; }
+.ws-reply-footer { display:flex; align-items:flex-start; gap:12px; justify-content:space-between; margin-top:14px; padding-top:11px; border-top:1px solid #ffffff08; }
+.ws-reply-details { flex:1; min-width:0; }
+.ws-reply-details summary { display:inline-flex; align-items:center; gap:8px; padding:2px 0; color:#9daaa6; font-size:12px; list-style:none; cursor:pointer; border-radius:4px; }
+.ws-reply-details summary::-webkit-details-marker { display:none; }
+.ws-reply-details summary span { color:#778a82; transition:transform 160ms ease; }
+.ws-reply-details[open] summary span { transform:rotate(180deg); }
+.ws-reply-details [data-ws-progress-timing] { margin:10px 0 1px; font-size:12px; line-height:1.9; color:#a6b0ac; }
+.ws-reply-details [data-ws-progress-timing] small { font-size:12px; color:#8c9a94; }
+.ws-reply-footer>.ws-message-source { flex:none; margin:0; font-size:12px; padding:2px 0; color:#a8bcb2; white-space:nowrap; }
+[data-reply-state="waiting"] .ws-reply-card { --reply-ink:#bec4cc; border-color:#bdc8d51a; }
+[data-reply-state="waiting"] .ws-reply-mark { background:transparent; border:1px solid currentColor; }
+[data-reply-state="uncertain"] .ws-reply-card { --reply-ink:#ddbd89; border-color:#c3a16b32; background:linear-gradient(135deg,#bb935609,transparent 65%),#242526; }
+[data-reply-connection="offline"] .ws-reply-label,[data-reply-connection="unknown"] .ws-reply-label { color:#c9b68e; }
+.ws-sync { display:inline-flex; align-items:center; gap:6px; }
+.ws-sync::before { content:""; width:5px; height:5px; flex:none; background:#96b0a2; border-radius:50%; }
+[data-reply-connection="offline"] .ws-sync,[data-reply-connection="unknown"] .ws-sync { color:#d5bc95; }
+[data-reply-connection="offline"] .ws-sync::before,[data-reply-connection="unknown"] .ws-sync::before { background:#d5bc95; }
+.ws-reply-delivered { display:inline-flex; align-items:center; gap:5px; font-size:11px; color:#9eafa7; }
+.ws-reply-delivered::before { content:"✓"; font-size:12px; color:#b6c9be; }
+.ws-reply-arrived>.ws-message-content { animation:ws-reply-arrive 220ms cubic-bezier(.2,.75,.3,1) 1; }
+.ws-reply-updated .ws-reply-mark::after { animation:ws-reply-report 420ms ease-out 1; }
+@keyframes ws-reply-arrive { from { opacity:.6; transform:translateY(3px); } to { opacity:1; transform:translateY(0); } }
+@keyframes ws-reply-report { from { opacity:.55; transform:scale(.7); } to { opacity:0; transform:scale(1.45); } }
+@media(max-width:600px) { .ws-reply-card { padding:14px 14px 11px; border-radius:18px; } .ws-message-progress>.ws-avatar { margin-top:15px; } .ws-reply-head { gap:6px 8px; } .ws-reply-report { padding:9px 10px; } .ws-reply-footer { margin-top:12px; } }
+@media(max-width:540px) { .ws-sync { display:none; } [data-reply-connection="offline"] .ws-sync,[data-reply-connection="unknown"] .ws-sync { display:inline-flex; max-width:100px; overflow:hidden; text-overflow:ellipsis; font-size:10px; } }
+@media(prefers-reduced-motion:reduce) { .ws-reply-arrived>.ws-message-content,.ws-reply-updated .ws-reply-mark::after { animation:none !important; } .ws-reply-details summary span { transition:none; } }

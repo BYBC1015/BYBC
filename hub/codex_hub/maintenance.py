@@ -177,6 +177,37 @@ def capture_context(repo, project_id, request, values, data_dir):
                 'note':'执行电脑名称来自执行连接自行报告；报告问题的浏览器不代表这台执行电脑。'}}
 
 
+def read_feedback_context(raw):
+    """Normalize a read projection, leaving stored provenance and extra data intact."""
+    if isinstance(raw, (str, bytes)):
+        try:
+            raw = json.loads(raw)
+        except (ValueError, UnicodeError):
+            raw = None
+    context = dict(raw) if isinstance(raw, dict) else {}
+    for name in ('server', 'browser', 'execution', 'work'):
+        value = context.get(name)
+        context[name] = dict(value) if isinstance(value, dict) else {}
+    # Automatic reports and older clients may have no browser at all. Bad
+    # nested types must not turn one history record into a page/API failure.
+    for section, names in (
+            ('server', ('url', 'host', 'app_version')),
+            ('browser', ('reported_page_url', 'platform', 'user_agent')),
+            ('execution', ('device_label', 'machine_name', 'note'))):
+        for name in names:
+            value = context[section].get(name)
+            context[section][name] = value if isinstance(value, str) else None
+    port = context['server'].get('port')
+    context['server']['port'] = port if type(port) is int and 0 < port <= 65535 else None
+    viewport = context['browser'].get('viewport')
+    viewport = dict(viewport) if isinstance(viewport, dict) else {}
+    for name in ('width', 'height'):
+        value = viewport.get(name)
+        viewport[name] = value if type(value) is int and 0 < value <= 20000 else None
+    context['browser']['viewport'] = viewport
+    return context
+
+
 class MaintenanceStore:
     def __init__(self, repo):
         self.repo, self.db = repo, repo.connection
@@ -213,7 +244,7 @@ class MaintenanceStore:
             LEFT JOIN hub_agents a ON a.id=t.assigned_agent_id WHERE f.project_id=? AND f.user_id=? ORDER BY f.id DESC LIMIT ?''',
             (project_id,user_id,min(limit,100)))]
         for record in records:
-            record['context'] = json.loads(record['context_json'])
+            record['context'] = read_feedback_context(record['context_json'])
             record['events'] = [dict(row) for row in self.db.execute(
                 'SELECT * FROM hub_feedback_events WHERE feedback_id=? ORDER BY id DESC LIMIT 20',(record['id'],))]
         return records
@@ -271,7 +302,7 @@ class MaintenanceStore:
         feedback, budget = [], 10500
         for row in self.db.execute('''SELECT * FROM hub_feedback WHERE project_id=? AND status IN ('new','triaged','in_progress')
              ORDER BY CASE status WHEN 'new' THEN 0 WHEN 'triaged' THEN 1 ELSE 2 END,id LIMIT 50''',(project_id,)):
-            context = json.loads(row['context_json'])
+            context = read_feedback_context(row['context_json'])
             item = {'id':row['id'],'kind':row['kind'],'title':row['title'], 'body':row['body'][:800],
                     'reproduction':row['reproduction'][:400],'expected':row['expected'][:300],
                     'work':context.get('work',{}), 'server':context.get('server',{}),

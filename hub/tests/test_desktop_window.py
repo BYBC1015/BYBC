@@ -175,9 +175,12 @@ def test_internal_popup_preserves_main_chat_and_external_popup_routes_browser(ho
 
 def test_download_is_not_treated_as_offline_navigation(host):
     host._active_navigation = 20
-    host.on_download_starting(None, None)
+    host.restore_workspace = Mock()
+    host.on_download_starting(None, SimpleNamespace(DownloadOperation=SimpleNamespace(Uri=host._navigation_target)))
+    assert 20 in host._cancelled_navigations
     host.on_navigation_completed(None, SimpleNamespace(NavigationId=20, IsSuccess=False))
     host.window.load_html.assert_not_called()
+    host.restore_workspace.assert_not_called()
 
 
 def test_offline_text_is_escaped():
