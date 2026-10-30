@@ -7,9 +7,11 @@ struct HubApp: App {
     @StateObject private var session: HubSession
 
     init() {
-        let address = Bundle.main.object(forInfoDictionaryKey: "HubBaseURL") as? String ?? ""
+        // Hosted XCTest must not contact the user's live Hub during CI.
+        let verificationOnly = ProcessInfo.processInfo.environment["HUB_TESTING"] == "1"
+        let address = verificationOnly ? "https://example.invalid/hub/" : (Bundle.main.object(forInfoDictionaryKey: "HubBaseURL") as? String ?? "")
         guard let url = URL(string: address), HubPolicy(baseURL: url) != nil else { fatalError("Invalid HubBaseURL configuration") }
-        _session = StateObject(wrappedValue: HubSession(baseURL: url))
+        _session = StateObject(wrappedValue: HubSession(baseURL: url, connectAutomatically: !verificationOnly))
     }
 
     var body: some Scene {

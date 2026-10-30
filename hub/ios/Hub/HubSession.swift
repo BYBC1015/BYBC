@@ -31,7 +31,7 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     private var downloads: [ObjectIdentifier: (WKDownload, URL?)] = [:]
     private let lastLocationKey = "hub.last-workspace"
 
-    init(baseURL: URL) {
+    init(baseURL: URL, connectAutomatically: Bool = true) {
         guard let policy = HubPolicy(baseURL: baseURL) else { fatalError("HubBaseURL must be a trusted HTTPS base URL") }
         self.policy = policy
         let config = WKWebViewConfiguration()
@@ -64,8 +64,10 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
                 if available && wasOffline { self.resume() }
             }
         }
-        networkMonitor.start(queue: DispatchQueue(label: "hub.network-state"))
-        loadRecovery()
+        if connectAutomatically {
+            networkMonitor.start(queue: DispatchQueue(label: "hub.network-state"))
+            loadRecovery()
+        }
     }
 
     func resume() {

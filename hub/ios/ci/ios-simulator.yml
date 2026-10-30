@@ -18,8 +18,6 @@ jobs:
   simulator:
     runs-on: macos-latest
     timeout-minutes: 25
-    env:
-      HUB_IOS_OUTPUT: ${{ runner.temp }}/hub-ios-verification
     steps:
       - uses: actions/checkout@v4
       - name: Build unsigned simulator app and run policy tests
