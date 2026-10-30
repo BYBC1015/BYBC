@@ -1,0 +1,90 @@
+/* The same conversation remains usable above mobile keyboards and safe areas. */
+@media(max-width:899px) {
+  .ws-shell,.ws-shell.is-inspector-hidden {
+    position:fixed; inset-inline:0; top:var(--ws-viewport-top,0px);
+    height:var(--ws-viewport-height,100dvh);
+    padding-top:max(8px,env(safe-area-inset-top));
+    padding-left:max(8px,env(safe-area-inset-left));
+    padding-right:max(8px,env(safe-area-inset-right));
+    padding-bottom:max(8px,env(safe-area-inset-bottom));
+  }
+  .ws-shell.is-sidebar-open .ws-sidebar {
+    top:calc(var(--ws-viewport-top,0px) + max(8px,env(safe-area-inset-top)));
+    left:max(8px,env(safe-area-inset-left)); bottom:auto;
+    height:calc(var(--ws-viewport-height,100dvh) - max(8px,env(safe-area-inset-top)) - max(8px,env(safe-area-inset-bottom)));
+  }
+  .ws-shell.is-inspector-open .ws-inspector {
+    top:calc(var(--ws-viewport-top,0px) + max(8px,env(safe-area-inset-top)));
+    right:max(8px,env(safe-area-inset-right)); bottom:auto;
+    height:calc(var(--ws-viewport-height,100dvh) - max(8px,env(safe-area-inset-top)) - max(8px,env(safe-area-inset-bottom)));
+  }
+  .ws-chat-head { min-width:0; gap:8px; }
+  .ws-chat-title { flex:1; min-width:0; }
+  .ws-head-actions { gap:4px; }
+  .ws-icon,.ws-detail-toggle,.ws-head-feedback { min-width:44px; min-height:44px; }
+  .ws-detail-toggle,.ws-head-feedback { justify-content:center; }
+  .ws-composer-tools .ws-icon,.ws-attach,.ws-send { min-width:44px; min-height:44px; }
+  .ws-recipient-picker>summary,.ws-reply-details summary,.ws-reply-footer>.ws-message-source { min-height:44px; align-items:center; }
+  .ws-reply-footer>.ws-message-source { display:inline-flex; }
+  .ws-all-agents { min-height:40px; }
+  .ws-room-search input,.ws-project-switch select,.ws-composer textarea { font-size:16px; }
+  .ws-messages { touch-action:pan-y pinch-zoom; -webkit-overflow-scrolling:touch; }
+  html body.workspace-screen .agent-workspace {
+    inset:auto; top:calc(var(--ws-viewport-top,0px) + 12px + env(safe-area-inset-top));
+    left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right));
+    margin:0 auto; width:auto;
+    height:calc(var(--ws-viewport-height,100dvh) - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height:calc(var(--ws-viewport-height,100dvh) - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+  html body.workspace-screen .agent-workspace :is(input,textarea,select) { font-size:16px; }
+  .agent-workspace-head h2 { font-weight:600; }
+  html body.workspace-screen .agent-workspace button { min-height:44px; }
+}
+@media(max-width:540px) {
+  .ws-shell,.ws-shell.is-inspector-hidden {
+    padding-top:env(safe-area-inset-top); padding-left:env(safe-area-inset-left);
+    padding-right:env(safe-area-inset-right); padding-bottom:env(safe-area-inset-bottom);
+  }
+  .ws-chat-head { padding-inline:8px; }
+  .ws-chat-title h1 { font-size:16px; }
+  .ws-chat-title p { max-width:100%; font-size:11px; }
+  .ws-head-actions { gap:2px; }
+  .ws-head-feedback { display:none; } /* Feedback remains in the navigation drawer. */
+  .ws-message { gap:8px; }
+  .ws-message-progress>.ws-avatar { width:26px; height:26px; }
+  .ws-messages { padding-inline:12px; }
+  .ws-reply-card { padding-inline:13px; }
+  .ws-message-prose,.ws-user-bubble { font-size:16px; }
+  .ws-composer-region { padding-inline:10px; }
+  .ws-composer-context { gap:8px; }
+  .ws-composer textarea { font-size:16px; }
+  .ws-recipient-picker>summary { padding-block:3px; min-height:36px; }
+  .ws-composer-location { font-size:11px; }
+  .ws-reply-head { gap:6px; }
+  .ws-reply-footer { flex-wrap:wrap; gap:4px 8px; margin-top:8px; padding-top:5px; }
+  .ws-reply-footer>.ws-message-source { font-size:12px; }
+  .ws-pending-submission button,.ws-attachment button { min-width:40px; min-height:40px; }
+}
+/* Short editing views keep controls visible until the viewport actually recovers. */
+@media(max-width:899px) {
+  [data-ws-compact-viewport="true"] .ws-center { grid-template-rows:54px minmax(0,1fr) auto; }
+  [data-ws-compact-viewport="true"] .ws-composer-region { padding-top:6px; padding-bottom:6px; }
+  [data-ws-compact-viewport="true"] .ws-composer { padding-top:6px; padding-bottom:6px; border-radius:18px; }
+  [data-ws-compact-viewport="true"] .ws-composer textarea { min-height:44px; max-height:64px; padding-top:6px; padding-bottom:3px; line-height:1.65; }
+  [data-ws-compact-viewport="true"] .ws-recipient-picker>summary { min-height:32px; }
+  [data-ws-compact-viewport="true"] .ws-recipient-status { margin-top:4px; max-height:33px; overflow:auto; font-size:11px; line-height:1.5; }
+  [data-ws-compact-viewport="true"] .ws-attachments { display:flex; height:46px; max-height:46px; margin-top:4px; padding:1px; overflow-x:auto; overflow-y:hidden; }
+  [data-ws-compact-viewport="true"] .ws-attachment { flex:0 0 min(248px,calc(100% - 14px)); height:44px; padding:1px 4px; gap:6px; }
+  [data-ws-compact-viewport="true"] .ws-attachment-preview { width:28px; height:28px; }
+  [data-ws-compact-viewport="true"] .ws-attachment-info strong { -webkit-line-clamp:1; }
+  [data-ws-compact-viewport="true"] .ws-attachment-info small { margin-top:0; font-size:10px; }
+  [data-ws-compact-viewport="true"] .ws-attachment-error,[data-ws-compact-viewport="true"] .ws-dispatch-error { max-height:32px; overflow:auto; }
+  [data-ws-compact-viewport="true"] [data-ws-other-queues] { max-height:48px; }
+  [data-ws-compact-viewport="true"] .ws-pending-submission { padding:6px 9px; margin-bottom:5px; }
+  [data-ws-compact-viewport="true"] .ws-pending-submission p { max-height:30px; overflow:auto; }
+  [data-ws-compact-viewport="true"] .ws-composer-meta { display:none; }
+  [data-ws-compact-viewport="true"] .ws-recipient-menu { max-height:calc(var(--ws-viewport-height,100dvh) - 145px); }
+  [data-ws-compact-viewport="true"] .ws-sidebar { overflow-y:auto; }
+  [data-ws-compact-viewport="true"] .ws-room-section { flex:none; min-height:140px; }
+  [data-ws-compact-viewport="true"] .ws-room-list { flex:none; min-height:100px; max-height:180px; }
+}

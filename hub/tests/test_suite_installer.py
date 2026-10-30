@@ -191,3 +191,116 @@ def test_cleanup_can_be_disabled(tmp_path,monkeypatch):
     state = installer.install(root,shortcuts=False,registration=False,startup=False,cleanup_old=False,scan_system=False)
     assert (Path(state['previous_installation'])/'CodexBridge.exe').read_bytes() == b'old bridge'
     assert state['cleanup'] == []
+
+
+def preference_payload(tmp_path, monkeypatch):
+    """Both release manifests own a default; the user edits their old copy."""
+    root = old_and_new_payload(tmp_path, monkeypatch)
+    relative = 'tools/beat-workshop/runtime.json'
+    preference = root / relative
+    preference.parent.mkdir(parents=True)
+    preference.write_bytes(b'{}')
+    manifest_path = root/'bundle-manifest.json'
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    manifest['files'].append({'path':relative,'sha256':installer.digest(preference)})
+    manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+    catalog = {'entries':{installer.digest(root/'CodexBridge.exe'):{'kind':'bridge','version':'1.0.25'}},
+               'manifests':[installer.digest(manifest_path)],'files':{'kling':{},'music':{},'video':{}}}
+    monkeypatch.setattr(installer.upgrade,'load_catalog',lambda:catalog)
+    archive_path = tmp_path/'source/payload.zip'
+    with zipfile.ZipFile(archive_path) as archive:
+        new_manifest = json.loads(archive.read('bundle-manifest.json'))
+        new_exe = archive.read('CodexBridge.exe')
+    new_manifest['files'].append({'path':relative,'sha256':installer.hashlib.sha256(b'{}').hexdigest()})
+    with zipfile.ZipFile(archive_path,'w') as archive:
+        archive.writestr('bundle-manifest.json',json.dumps(new_manifest))
+        archive.writestr('CodexBridge.exe',new_exe)
+        archive.writestr(relative,b'{}')
+    return root, relative, new_manifest
+
+
+def test_upgrade_keeps_exact_local_preferences_and_uninstall_keeps_user_configuration(tmp_path,monkeypatch):
+    root,relative,new_manifest = preference_payload(tmp_path,monkeypatch)
+    existing = '\ufeff{\r\n  "resolveRoot": "D:/用户工具/Resolve", "extra": {"keep": true}\r\n}\r\n'.encode('utf-8')
+    (root/relative).write_bytes(existing)
+    state=installer.install(root,shortcuts=False,registration=False,startup=False,scan_system=False)
+    assert (root/'CodexBridge.exe').read_bytes()==b'new bridge'
+    assert (root/relative).read_bytes()==existing
+    assert relative not in state['files']
+    assert state['local_preferences']=={relative:installer.hashlib.sha256(existing).hexdigest()}
+    assert json.loads((root/'bundle-manifest.json').read_text())==new_manifest
+    state=installer.install(root,shortcuts=False,registration=False,startup=False,scan_system=False)
+    assert (root/relative).read_bytes()==existing
+    installer.uninstall(root)
+    assert not (root/'CodexBridge.exe').exists()
+    assert (root/relative).read_bytes()==existing
+
+
+def test_absent_local_preference_is_not_invented_by_preservation(tmp_path,monkeypatch):
+    root=old_and_new_payload(tmp_path,monkeypatch)
+    state=installer.install(root,shortcuts=False,registration=False,startup=False,scan_system=False)
+    assert state['local_preferences']=={}
+    assert not (root/'tools/beat-workshop/runtime.json').exists()
+
+
+def test_unmodified_shipped_preference_is_user_owned_after_fresh_install(tmp_path,monkeypatch):
+    root,relative,_=preference_payload(tmp_path,monkeypatch)
+    (root/relative).unlink()
+    state=installer.install(root,shortcuts=False,registration=False,startup=False,scan_system=False)
+    assert state['local_preferences']=={} and (root/relative).read_bytes()==b'{}'
+    assert relative not in state['files']
+    (root/relative).write_text('{"resolveRoot":"D:/Resolve"}')
+    installer.uninstall(root)
+    assert (root/relative).read_text()=='{"resolveRoot":"D:/Resolve"}'
+
+
+@pytest.mark.parametrize('relative',['../outside.json','C:/outside.json'])
+def test_local_preference_paths_cannot_escape(tmp_path,relative):
+    with pytest.raises(ValueError):
+        installer.local_preference_path(tmp_path/'install',relative)
+    with pytest.raises(ValueError,match='未声明'):
+        installer.preserve_local_preferences(tmp_path/'stage',{relative:b'private'})
+
+
+@pytest.mark.parametrize('link_kind',['directory','file'])
+def test_linked_local_preferences_rejected_before_install_without_reading_target(tmp_path,monkeypatch,link_kind):
+    root=old_and_new_payload(tmp_path,monkeypatch)
+    outside=tmp_path/'outside';outside.mkdir()
+    private=outside/'runtime.json';private.write_bytes(b'private outside content')
+    tools=root/'tools';tools.mkdir()
+    link=tools/'beat-workshop' if link_kind=='directory' else tools/'beat-workshop/runtime.json'
+    if link_kind=='file':link.parent.mkdir()
+    try:
+        link.symlink_to(outside if link_kind=='directory' else private,target_is_directory=link_kind=='directory')
+    except OSError:
+        if link_kind=='file':
+            pytest.skip('Windows file symlink permission unavailable; directory junction is exercised separately')
+        import subprocess
+        quote=lambda path: "'"+str(path).replace("'","''")+"'"
+        assert link.absolute().is_relative_to(tmp_path.absolute()) and outside.absolute().is_relative_to(tmp_path.absolute())
+        subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-Command',
+            'New-Item -ItemType Junction -Path '+quote(link)+' -Target '+quote(outside)+' | Out-Null'],
+            check=True,capture_output=True,creationflags=subprocess.CREATE_NO_WINDOW)
+    original_read=Path.read_bytes
+    def guarded_read(path):
+        assert not path.resolve().is_relative_to(outside.resolve()), 'Linked preference must not be read'
+        return original_read(path)
+    monkeypatch.setattr(Path,'read_bytes',guarded_read)
+    with pytest.raises(ValueError,match='符号链接'):
+        installer.install(root,shortcuts=False,registration=False,startup=False,scan_system=False)
+    assert (root/'CodexBridge.exe').read_bytes()==b'old bridge'
+    assert not list(root.parent.glob(root.name+'.previous-*'))
+    if link_kind=='directory':
+        link.rmdir()  # Remove only this test junction, never the external target.
+
+
+def test_file_link_marker_is_rejected_before_any_preference_read(tmp_path,monkeypatch):
+    root=old_and_new_payload(tmp_path,monkeypatch)
+    preference=root/'tools/beat-workshop/runtime.json'
+    preference.parent.mkdir(parents=True)
+    preference.write_bytes(b'private')
+    original_is_symlink=Path.is_symlink
+    monkeypatch.setattr(Path,'is_symlink',lambda path:path==preference or original_is_symlink(path))
+    monkeypatch.setattr(Path,'read_bytes',lambda path:pytest.fail('No linked preference content may be read'))
+    with pytest.raises(ValueError,match='符号链接'):
+        installer.read_local_preferences(root)

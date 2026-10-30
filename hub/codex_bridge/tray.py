@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+import threading
 from typing import Any
 
 
@@ -28,7 +29,7 @@ class BridgeTray:
         self.error: Exception | None = None
         self.is_running = False
 
-    def start(self) -> bool:
+    def start(self, *, wait_until_ready: float = 0) -> bool:
         try:
             import pystray
             from PIL import Image
@@ -46,13 +47,55 @@ class BridgeTray:
                 pystray.MenuItem("安全退出", self._call(self.exit_app)),
             )
             self.icon = pystray.Icon("codex_bridge", image, self.title, menu)
-            self.icon.run_detached()
+            if wait_until_ready > 0:
+                ready = threading.Event()
+                errors = []
+                pending_icon = self.icon
+                def setup(icon):
+                    # A late setup after a failed/closed tray cannot resurrect
+                    # an inaccessible hidden application.
+                    if self.icon is not icon:
+                        icon.stop()
+                        return
+                    try:
+                        icon.visible = True
+                        if self.icon is not icon:
+                            icon.visible = False
+                            return
+                    except Exception as exc:
+                        errors.append(exc)
+                    finally:
+                        ready.set()
+                def launch():
+                    # pystray creates its setup/native threads here. Let them
+                    # inherit daemon mode so failed native initialization cannot
+                    # keep a background request alive after its UI has exited.
+                    if self.icon is not pending_icon:
+                        return
+                    try:
+                        pending_icon.run_detached(setup=setup)
+                    except Exception as exc:
+                        errors.append(exc)
+                        ready.set()
+                threading.Thread(target=launch, name='hub-background-tray', daemon=True).start()
+                if not ready.wait(wait_until_ready):
+                    raise RuntimeError('系统托盘未能及时就绪。')
+                if errors:
+                    raise errors[0]
+            else:
+                self.icon.run_detached()
             self.is_running = True
             return True
         except Exception as exc:
             self.error = exc
+            icon = self.icon
             self.icon = None
             self.is_running = False
+            if icon is not None:
+                try:
+                    icon.stop()
+                except Exception:
+                    pass
             return False
 
     def stop(self) -> None:

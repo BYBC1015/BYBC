@@ -12,6 +12,7 @@ import tempfile
 import uuid
 
 from build_desktop import BINARIES, COMPONENTS, OUTPUT, safe_target
+from installer import LOCAL_PREFERENCES
 
 
 def run_installer(exe: Path, args: list[str], environment: dict, log: Path) -> None:
@@ -76,8 +77,22 @@ def verify(release: Path, validation: Path) -> dict:
     personal = install_root / '个人工程/保留.txt'
     personal.parent.mkdir()
     personal.write_text('用户工作必须保留', encoding='utf-8')
+    local_preference = install_root / 'tools/beat-workshop/runtime.json'
+    local_preference.parent.mkdir(parents=True, exist_ok=True)
+    local_preference.write_bytes(b'{"resolveRoot":"D:/Isolated Resolve","test":"keep exact bytes"}\r\n')
+    preference_hash = hashlib.sha256(local_preference.read_bytes()).hexdigest()
     run_installer(release, flags, environment, validation / 'upgrade.log')
     upgraded = json.loads((install_root / '.hub-suite-install.json').read_text(encoding='utf-8'))
+    preserved = {'tools/beat-workshop/runtime.json': preference_hash}
+    if upgraded.get('local_preferences') != preserved:
+        raise AssertionError('Upgrade lost local preference provenance')
+    if json.loads((install_root / 'bundle-manifest.json').read_text(encoding='utf-8')) != manifest:
+        raise AssertionError('Local preferences changed the pristine release manifest')
+    for relative, item in expected.items():
+        path = safe_target(install_root, relative)
+        expected_hash = preserved.get(relative, item['sha256'])
+        if hashlib.sha256(path.read_bytes()).hexdigest() != expected_hash:
+            raise AssertionError('Upgraded hash mismatch: ' + relative)
     if personal.read_text(encoding='utf-8') != '用户工作必须保留' or config.read_bytes() != config_before:
         raise AssertionError('Upgrade lost an isolated user file/configuration')
     previous = Path(upgraded['previous_installation']).resolve()
@@ -91,8 +106,10 @@ def verify(release: Path, validation: Path) -> dict:
     helper = state_root / 'isolated-uninstall.exe'
     shutil.copy2(install_root / 'Uninstall.exe', helper)
     run_installer(helper, ['--remove', str(install_root), '--quiet'], environment, validation / 'uninstall.log')
-    if any((install_root / name).exists() for name in expected):
+    if any((install_root / name).exists() for name in expected if name not in LOCAL_PREFERENCES):
         raise AssertionError('Uninstall left installed owned files')
+    if hashlib.sha256(local_preference.read_bytes()).hexdigest() != preference_hash:
+        raise AssertionError('Uninstall changed an explicit local preference')
     if not personal.exists() or config.read_bytes() != config_before:
         raise AssertionError('Uninstall removed isolated user data/configuration')
     report = {'passed': True, 'installer': str(release), 'installer_bytes': release.stat().st_size,
@@ -100,9 +117,11 @@ def verify(release: Path, validation: Path) -> dict:
         'components': manifest['components'], 'verified_files': len(expected),
         'temporary_directory': str(temporary),
         'isolated_state_directory': str(state_root),
+        'preserved_local_preferences': preserved,
         'checks': ['fresh install in Chinese/spaced directory', 'all installed hashes',
                    'desktop/bridge/runtime companions', 'same-version upgrade and rollback record',
                    'existing configuration byte preservation', 'user file retention',
+                   'explicit local preference bytes retained through upgrade/uninstall',
                    'frozen uninstaller owned-file cleanup', 'no registration/shortcuts/startup/system scan'],
         'live_installation_modified': False, 'paid_api_calls': 0}
     (validation / 'verification.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')

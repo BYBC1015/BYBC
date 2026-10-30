@@ -12,7 +12,7 @@ from test_desktop_progress_browser import running_task, publish, open_room
 from workspace_fixture import seed_workspace
 
 playwright = pytest.importorskip('playwright.sync_api')
-OUTPUT = Path(__file__).resolve().parents[2] / 'output/hub-desktop-polish-20261029/browser'
+OUTPUT = Path(__file__).resolve().parents[2] / 'output/hub-product-maintenance-20261030/ui/reply-states'
 ANIMATION_CAPTURE = '''
 window.__replyAnimations=[];
 document.addEventListener('animationstart',event=>{
@@ -70,7 +70,9 @@ def test_real_reply_states_offline_retention_and_final_delivery(live_hub,repo):
             playwright.expect(card.locator('[data-ws-progress-body]')).to_contain_text('你可以同时补充新的想法')
             family=card.locator('[data-ws-progress-body]').evaluate('node=>getComputedStyle(node).fontFamily')
             assert 'Microsoft YaHei UI' in family and family.endswith('sans-serif')
-            assert 'Georgia' in page.locator('.ws-brand-icon').evaluate('node=>getComputedStyle(node).fontFamily')
+            logo=page.locator('.ws-brand-icon img')
+            assert logo.get_attribute('src').endswith('/static/assets/codex-owl-logo-lite-20260708.png')
+            assert logo.evaluate('node=>node.complete && node.naturalWidth>0')
             session=context.new_cdp_session(page)
             session.send('DOM.enable');session.send('CSS.enable')
             document=session.send('DOM.getDocument')

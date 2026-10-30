@@ -19,7 +19,7 @@ from .client import HubClient
 from .agent_runtime import CodexAgentDecisionRunner, extract_reflection, ExecutionRenewal, read_execution_completion
 from .codex_app_submitter import CodexAppSubmitter
 from .codex_exec import CodexExecResult, CodexExecRunner
-from .attachments import PreparedAttachments, AttachmentPreparationError, prepare_task_attachments
+from .attachments import PreparedAttachments, AttachmentPreparationError, AttachmentPreviewCache, prepare_task_attachments
 from .token_usage import normalize_token_usage
 from .config import BridgeConfig
 from .hermes_exec import HermesExecRunner
@@ -239,6 +239,7 @@ class BridgeRunner:
         self.state = BridgeState.load(config.state_path)
         self._state_lock = threading.RLock()
         self._memory_sync_cache: dict[str, str] = {}
+        self._attachment_previews = AttachmentPreviewCache()
         self._capability_lock = threading.Lock()
         self._next_capability_report = 0.0
         self._model_catalog = CodexModelCatalogProvider(cli_path=config.codex_cli_path)
@@ -730,7 +731,8 @@ class BridgeRunner:
                 prompt = '## Durable Project Memory\n' + memory.strip() + '\n\n' + prompt
             target = self._target_project_slug_for_prompt(prompt, fallback=slug)
             try:
-                attachments = prepare_task_attachments(self.client, self.config, slug, task_id, self._resolve_project_path(target))
+                attachments = prepare_task_attachments(self.client, self.config, slug, task_id, self._resolve_project_path(target),
+                                                       preview_cache=self._attachment_previews)
                 if str(getattr(self.config, 'execution_backend', 'codex')) != 'codex':
                     raise AttachmentPreparationError('持久智能体执行需使用 Codex CLI。')
             except AttachmentPreparationError as exc:
@@ -774,32 +776,40 @@ class BridgeRunner:
             return
         context = dict(receipt['execution'], task_id=task_id, project_slug=slug, receipt_path=str(completion_path))
         prompt_path = Path(receipt['prompt_path'])
-        # Fetch after start is fenced: amendments to queued work cannot leave an old prompt running.
-        try:
-            agent_context = self.client.get_agent_context(slug, task_id)
-            current_task = agent_context.get('task') or {}
-            context.update(execution_route=current_task.get('execution_route', task.get('execution_route', 'direct')),
-                           conversation_id=current_task.get('conversation_id', task.get('conversation_id')),
-                           assigned_agent_kind=(agent_context.get('agent') or {}).get('kind', task.get('assigned_agent_kind')),
-                           controller_read_only=bool(current_task.get('controller_read_only', task.get('controller_read_only', False))),
-                           assigned_agent_id=(agent_context.get('agent') or {}).get('id', task.get('assigned_agent_id')),
-                           device_id=current_task.get('assigned_device_id', task.get('assigned_device_id')),
-                           project_path=str(self._resolve_project_path(receipt['target_project'])))
-            fresh_prompt = self.client.get_task_prompt(slug, task_id) + self._agent_tool_instructions(slug, task_id)
-            prepared = prepare_task_attachments(self.client, self.config, slug, task_id, self._resolve_project_path(receipt['target_project']))
-            fresh_prompt += prepared.prompt()
-            prompt_path.write_text(fresh_prompt,encoding='utf-8')
-            receipt['image_paths']=[str(path) for path in prepared.images]
-            receipt['execution_context'] = context
-            self._save_state()
-        except Exception:
-            failure=CodexExecResult(ok=False,command=[],returncode=None,stdout='',stderr='',
-                last_message='执行前核对最新要求或附件失败，未启动工作进程。',output_path=prompt_path,
-                error='执行前核对最新要求或附件失败，未启动工作进程。')
-            self._save_agent_result(slug,task_id,failure)
-            self._publish_agent_result(slug,task_id,result)
-            return
+        # The start permission already exists: keep it renewed while fetching
+        # fresh requirements and preparing large inputs, not only during CLI work.
         with ExecutionRenewal(self.client, slug, task_id, receipt['execution']) as renewal:
+            # Fetch after start is fenced: amendments to queued work cannot leave an old prompt running.
+            try:
+                agent_context = self.client.get_agent_context(slug, task_id)
+                current_task = agent_context.get('task') or {}
+                context.update(execution_route=current_task.get('execution_route', task.get('execution_route', 'direct')),
+                               conversation_id=current_task.get('conversation_id', task.get('conversation_id')),
+                               assigned_agent_kind=(agent_context.get('agent') or {}).get('kind', task.get('assigned_agent_kind')),
+                               controller_read_only=bool(current_task.get('controller_read_only', task.get('controller_read_only', False))),
+                               assigned_agent_id=(agent_context.get('agent') or {}).get('id', task.get('assigned_agent_id')),
+                               device_id=current_task.get('assigned_device_id', task.get('assigned_device_id')),
+                               project_path=str(self._resolve_project_path(receipt['target_project'])))
+                fresh_prompt = self.client.get_task_prompt(slug, task_id) + self._agent_tool_instructions(slug, task_id)
+                if renewal.cancelled.is_set():
+                    raise AttachmentPreparationError('本次执行许可已撤销。')
+                prepared = prepare_task_attachments(self.client, self.config, slug, task_id, self._resolve_project_path(receipt['target_project']),
+                                                    preview_cache=self._attachment_previews)
+                if renewal.cancelled.is_set():
+                    raise AttachmentPreparationError('本次执行许可已撤销。')
+                fresh_prompt += prepared.prompt()
+                prompt_path.write_text(fresh_prompt,encoding='utf-8')
+                receipt['image_paths']=[str(path) for path in prepared.images]
+                receipt['execution_context'] = context
+                self._save_state()
+            except Exception:
+                detail = ('本次执行许可已撤销，未启动工作进程。' if renewal.cancelled.is_set() else
+                          '执行前核对最新要求或附件失败，未启动工作进程。')
+                failure=CodexExecResult(ok=False,command=[],returncode=None,stdout='',stderr='',
+                    last_message=detail,output_path=prompt_path,error=detail)
+                self._save_agent_result(slug,task_id,failure)
+                self._publish_agent_result(slug,task_id,result)
+                return
             publish = getattr(self.client, 'publish_execution_progress', None)
             sequence = 0
             def progress_callback(kind, text):

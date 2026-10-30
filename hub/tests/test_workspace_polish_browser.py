@@ -9,7 +9,7 @@ from test_workspace_shell_browser import login_page, assert_composer_visible
 from workspace_fixture import seed_workspace
 
 playwright = pytest.importorskip('playwright.sync_api')
-OUTPUT = Path(__file__).resolve().parents[2] / 'output/hub-workspace-polish-20261027'
+OUTPUT = Path(__file__).resolve().parents[2] / 'output/hub-product-maintenance-20261030/ui/feedback'
 
 
 def within_viewport(page):
@@ -46,6 +46,14 @@ def test_feedback_context_keeps_chat_files_and_records_real_feedback(live_hub, r
             page.locator('[data-ws-input]').fill('反馈在新页面打开，不应丢掉当前工作。')
             page.locator('[data-ws-attachment-input]').set_input_files({'name':'待发送资料.txt', 'mimeType':'text/plain', 'buffer':b'keep this draft'})
             feedback_link = page.locator('.ws-head-feedback')
+            if width <= 540:
+                # Narrow layouts keep the contextual feedback action in the
+                # navigation drawer so the conversation title has room.
+                playwright.expect(feedback_link).to_be_hidden()
+                page.locator('[data-ws-sidebar-open]').click()
+                feedback_link = page.locator('.ws-sidebar [data-ws-feedback]')
+                playwright.expect(feedback_link).to_be_visible()
+                page.screenshot(path=str(OUTPUT / f'feedback-navigation-{width}.png'))
             query = parse_qs(urlparse(feedback_link.get_attribute('href')).query)
             assert query['agent_id'] == [str(data['engineer']['id'])]
             assert 'conversation_id' not in query and 'task_id' not in query
@@ -93,6 +101,9 @@ def test_feedback_context_keeps_chat_files_and_records_real_feedback(live_hub, r
             within_viewport(feedback)
             feedback.screenshot(path=str(OUTPUT / f'maintenance-{width}.png'), full_page=True)
             feedback.close()
+
+            if width <= 540:
+                page.keyboard.press('Escape')
 
             page.locator('[data-ws-attachment-remove]').click()
             if width < 900:

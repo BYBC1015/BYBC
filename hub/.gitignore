@@ -12,3 +12,11 @@ output/
 build/
 dist/
 *.egg-info/
+.gradle/
+local.properties
+*.keystore
+*.jks
+*.p12
+*.mobileprovision
+DerivedData/
+xcuserdata/

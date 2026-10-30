@@ -13,29 +13,31 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
   <meta name="color-scheme" content="dark">
   <title>{{ current_conversation.title ~ ' · ' if current_conversation else '' }}{{ project.name }} · Codex Hub</title>
   <link rel="icon" href="{{ app_path('/static/assets/codex-owl-logo-lite-20260708.png') }}">
   <link rel="stylesheet" href="{{ app_path('/static/codex-reading.css') }}?v=20260807-reading3">
   <link rel="stylesheet" href="{{ app_path('/static/agent-workspace.css') }}?v=20261027-agents2">
   <link rel="stylesheet" href="{{ app_path('/static/hub-workspace.css') }}?v=20261027-agents2">
-  <link rel="stylesheet" href="{{ app_path('/static/workspace-shell.css') }}?v=20261029-reply2">
+  <link rel="stylesheet" href="{{ app_path('/static/workspace-shell.css') }}?v=20261030-ui1">
   <link rel="stylesheet" href="{{ app_path('/static/desktop-workspace.css') }}?v=20261029-local1">
   <link rel="stylesheet" href="{{ app_path('/static/reply-activity.css') }}?v=20261029-reply1">
+  <link rel="stylesheet" href="{{ app_path('/static/mobile-workspace.css') }}?v=20261030-ui1">
   <script src="{{ app_path('/static/agent-workspace.js') }}?v=20261027-workspace1" defer></script>
   <script src="{{ app_path('/static/codex-markdown.js') }}?v=20261029-download1" defer></script>
   <script src="{{ app_path('/static/workspace-store.js') }}?v=20261029-local1" defer></script>
-  <script src="{{ app_path('/static/workspace-shell.js') }}?v=20261029-reply-stability2" defer></script>
+  <script src="{{ app_path('/static/workspace-shell.js') }}?v=20261030-ui1" defer></script>
   <script src="{{ app_path('/static/desktop-workspace.js') }}?v=20261029-local1" defer></script>
   <script src="{{ app_path('/static/reply-activity.js') }}?v=20261029-reply1" defer></script>
+  <script src="{{ app_path('/static/mobile-workspace.js') }}?v=20261030-ui1" defer></script>
 </head>
 <body class="workspace-screen hub-detail-screen">
   <a class="ws-skip" href="#ws-messages">跳到工作对话</a>
   <main class="ws-shell" data-ws-shell data-user="{{ user.id }}" data-project="{{ project.slug }}" data-conversation="{{ current_conversation.id if current_conversation else 'new' }}" data-default-agent="{{ default_agent_id or '' }}" data-initial-agent="{{ selected.id or '' }}" data-etag="{{ workspace_etag }}" data-workspace-url="{{ workspace_url }}" data-events-url="{{ workspace_events_url|default('') }}" data-event-version="{{ workspace_event_version|default('') }}" data-project-url="{{ app_path('/projects/' ~ project.slug) }}">
     <button class="ws-backdrop" data-ws-backdrop tabindex="-1" aria-label="关闭侧栏" hidden></button>
     <aside class="ws-sidebar" data-ws-sidebar aria-label="项目与工作导航">
-      <header class="ws-project-switch"><span class="ws-brand-icon" aria-hidden="true">h<span>·</span></span><label><span class="ws-eyebrow">当前项目</span><select aria-label="切换项目" data-ws-project-switch>{% for item in projects %}<option value="{{ app_path('/projects/' ~ item.slug) }}" {% if item.id == project.id %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label><button class="ws-icon ws-mobile-close" data-ws-sidebar-close aria-label="关闭导航">×</button></header>
+      <header class="ws-project-switch"><a class="ws-brand-icon" href="{{ app_path('/projects') }}" aria-label="Hub 项目首页"><img src="{{ app_path('/static/assets/codex-owl-logo-lite-20260708.png') }}" width="192" height="191" alt=""></a><label><span class="ws-eyebrow">当前项目</span><select aria-label="切换项目" data-ws-project-switch>{% for item in projects %}<option value="{{ app_path('/projects/' ~ item.slug) }}" {% if item.id == project.id %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label><button class="ws-icon ws-mobile-close" data-ws-sidebar-close aria-label="关闭导航">×</button></header>
       <section class="ws-team"><div class="ws-section-label"><span>智能体</span><button type="button" data-agents-open>管理 <span aria-hidden="true">↗</span></button></div><div class="ws-agent-dock" data-ws-agent-dock>
         {% for agent in durable_agents[:3] %}<button class="ws-agent-shortcut" type="button" data-ws-agent="{{ agent.id }}" aria-label="查看智能体 {{ agent.name }}" aria-describedby="ws-agent-state-{{ agent.id }}" aria-pressed="false"><span class="ws-agent-portrait">{{ avatar(agent.id) }}<i class="ws-agent-presence ws-agent-presence-{{ agent.connection_state or 'unknown' }}" aria-hidden="true"></i></span><span class="ws-agent-name" title="{{ agent.name }}">{{ agent.name }}</span><small class="ws-agent-state" id="ws-agent-state-{{ agent.id }}">{{ connection_short.get(agent.connection_state, '状态未知') }}</small></button>{% endfor %}
         <button class="ws-agent-add" type="button" data-agents-open data-ws-create-agent aria-label="创建智能体"><span aria-hidden="true">＋</span><small>创建</small></button>

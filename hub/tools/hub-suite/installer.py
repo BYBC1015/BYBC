@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import queue
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -31,6 +32,9 @@ NAME = "Codex Bridge"
 LEGACY_NAME = "Codex Hub 工具箱"
 REGKEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\CodexHubSuite"
 MARKER = ".hub-suite-install.json"
+# This runtime document contains a user's Resolve installation path. Package
+# defaults are verified as shipped, but an existing local document is user data.
+LOCAL_PREFERENCES = ("tools/beat-workshop/runtime.json",)
 
 
 def inside(root: Path, relative: str) -> Path:
@@ -43,6 +47,51 @@ def inside(root: Path, relative: str) -> Path:
 def digest(path):
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def local_preference_path(root: Path, relative: str) -> Path:
+    parts = Path(relative).parts
+    if Path(relative).is_absolute() or any(part in {"..", "."} for part in parts):
+        raise ValueError("本机偏好路径无效")
+    candidate = root
+    # Inspect each lexical segment before resolving/reading it. A directory
+    # junction or a link to any location is not a transferable preference.
+    for part in parts:
+        candidate = candidate / part
+        try:
+            attributes = getattr(candidate.lstat(), "st_file_attributes", 0)
+        except FileNotFoundError:
+            attributes = 0
+        if candidate.is_symlink() or attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            raise ValueError("本机偏好不能位于符号链接或目录联接中")
+    return inside(root, relative)
+
+
+def read_local_preferences(root: Path) -> dict[str, bytes]:
+    saved = {}
+    for relative in LOCAL_PREFERENCES:
+        path = local_preference_path(root, relative)
+        if not path.exists():
+            continue
+        if not path.is_file():
+            raise ValueError("本机偏好必须是普通文件")
+        saved[relative] = path.read_bytes()
+    return saved
+
+
+def preserve_local_preferences(stage: Path, saved: dict[str, bytes]) -> dict[str, str]:
+    hashes = {}
+    for relative, body in saved.items():
+        if relative not in LOCAL_PREFERENCES:
+            raise ValueError("未声明的本机偏好不能迁移")
+        target = local_preference_path(stage, relative)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body)
+        checksum = hashlib.sha256(body).hexdigest()
+        if digest(target) != checksum:
+            raise ValueError("本机偏好保留校验失败")
+        hashes[relative] = checksum
+    return hashes
 
 
 def check_idle(root):
@@ -118,6 +167,7 @@ def install(root, report=lambda text: None, shortcuts=True, registration=True, s
     if root.exists() and any(root.iterdir()) and not (root / MARKER).is_file():
         raise ValueError("所选文件夹已有其他文件，请选择新的空文件夹。")
     check_idle(root)
+    local_preferences = read_local_preferences(root)
     report("正在检测旧软件和已有配置…")
     detected = upgrade.discover(root, legacy_dirs, system=scan_system)
     for candidate in detected.candidates:
@@ -144,7 +194,12 @@ def install(root, report=lambda text: None, shortcuts=True, registration=True, s
                 raise ValueError("安装包校验失败：" + relative)
     original_candidate = next((c for c in detected.candidates if c.root.resolve() == root), None)
     upgrade.carry_user_files(root, stage, original_candidate)
-    state = {"version": VERSION, "root": str(root), "files": list(expected) + ["bundle-manifest.json"], "shortcuts": [], "registration": registration}
+    # The payload and pristine manifest have already been verified above. Keep
+    # exact local bytes separately; never rewrite the public release manifest.
+    preserved = preserve_local_preferences(stage, local_preferences)
+    state = {"version": VERSION, "root": str(root),
+             "files": [name for name in expected if name not in LOCAL_PREFERENCES] + ["bundle-manifest.json"],
+             "local_preferences": preserved, "shortcuts": [], "registration": registration}
     (stage / MARKER).write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     previous = None
     if root.exists():
@@ -199,7 +254,7 @@ def install(root, report=lambda text: None, shortcuts=True, registration=True, s
         state["previous_installation"] = str(previous)
     (root / MARKER).write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     for relative, item in expected.items():
-        if digest(root / relative) != item['sha256']:
+        if digest(root / relative) != preserved.get(relative, item['sha256']):
             raise ValueError("安装后校验失败，旧版本已保留。")
     state['cleanup'] = []
     if cleanup_old:

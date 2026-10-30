@@ -255,6 +255,9 @@
     // old reading positions during background refreshes, not across this send.
     followBottom = true; saveUi();
     input.value = ""; clearAttachments();
+    // Native mobile import caches may release only the batch associated with
+    // this confirmed send. Never emit this for an attempted/uncertain upload.
+    window.dispatchEvent(new CustomEvent('hub:workspace-sent', {detail:{requestKey:key || ''}}));
     location.assign(url);
   }
   function updateCsrf(freshShell) {

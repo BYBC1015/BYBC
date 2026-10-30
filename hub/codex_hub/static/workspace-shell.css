@@ -1,6 +1,6 @@
 /* The workspace belongs to durable identities; connections stay in settings. */
 html:has(body.workspace-screen) { color-scheme:dark; height:100%; background:#101112; }
-html body.workspace-screen { --ws-bg:#101112; --ws-left:#17191b; --ws-main:#1d1f21; --ws-right:#191b1d; --ws-surface:#27292c; --ws-border:#34373b; --ws-text:#eeedea; --ws-muted:#b2b5b7; --ws-dim:#92989b; --ws-accent:#d4c2aa; margin:0; padding:0; min-width:0; height:100dvh; overflow:hidden; background:var(--ws-bg); color:var(--ws-text); font-size:15px; line-height:1.65; font-family:"Segoe UI","Microsoft YaHei UI","Microsoft YaHei","PingFang SC",sans-serif; -webkit-font-smoothing:antialiased; }
+html body.workspace-screen { --ws-bg:#101112; --ws-left:#17191b; --ws-main:#1d1f21; --ws-right:#191b1d; --ws-surface:#27292c; --ws-border:#34373b; --ws-text:#eeedea; --ws-muted:#b2b5b7; --ws-dim:#92989b; --ws-accent:#d4c2aa; --ws-font-sans:"Noto Sans SC","PingFang SC","Microsoft YaHei UI","Microsoft YaHei","Noto Sans CJK SC",sans-serif; margin:0; padding:0; min-width:0; height:100dvh; overflow:hidden; background:var(--ws-bg); color:var(--ws-text); font:400 16px/1.7 var(--ws-font-sans); -webkit-text-size-adjust:100%; text-size-adjust:100%; }
 .workspace-screen * { box-sizing:border-box; }
 .workspace-screen button,.workspace-screen input,.workspace-screen select,.workspace-screen textarea { font:inherit; }
 .workspace-screen button,.workspace-screen a { -webkit-tap-highlight-color:transparent; }
@@ -18,8 +18,8 @@ html body.workspace-screen { --ws-bg:#101112; --ws-left:#17191b; --ws-main:#1d1f
 .ws-sidebar,.ws-center,.ws-inspector { min-width:0; min-height:0; border-radius:24px; overflow:hidden; }
 .ws-sidebar { display:flex; flex-direction:column; padding:22px 16px 12px; background:var(--ws-left); }
 .ws-project-switch { display:flex; align-items:center; gap:10px; margin-bottom:29px; padding:0 3px; }
-.ws-brand-icon { font:500 28px/1 Georgia,serif; color:#e0d6c6; letter-spacing:-4px; width:29px; flex:none; }
-.ws-brand-icon>span { color:#9d9b85; margin-left:1px; }
+.ws-brand-icon { display:grid; place-items:center; width:40px; height:44px; flex:none; border-radius:12px; text-decoration:none; }
+.ws-brand-icon img { display:block; width:38px; height:38px; object-fit:contain; }
 .ws-project-switch label { min-width:0; flex:1; }
 .ws-eyebrow { display:block; font-size:10px; line-height:1.5; color:#858d92; }
 .ws-project-switch select { width:100%; border:0; background:transparent; color:#dadbda; padding:2px 14px 0 0; font-size:14px; font-weight:550; text-overflow:ellipsis; cursor:pointer; }
@@ -411,3 +411,14 @@ html body.workspace-screen .ws-composer:focus-within { border-color:#b6aa97; box
 [data-ws-other-queues] { max-height:100px; overflow:auto; }
 [data-ws-other-queues] a { overflow-wrap:anywhere; margin-top:4px; color:inherit; }
 @media (max-width:599px) { .ws-pending-submission { flex-wrap:wrap; gap:7px; } .ws-pending-submission>div { flex-basis:100%; } [data-ws-other-queues] { max-height:76px; } }
+
+/* Native CJK sans faces keep body copy calm; weight carries hierarchy, not decoration. */
+.ws-chat-title h1,.ws-project-switch select,.ws-profile-top h2,.ws-task-title { font-weight:600; }
+.ws-chat-title h1 { font-size:17px; letter-spacing:.01em; }
+.ws-room strong { font-size:14px; font-weight:500; }
+.ws-room.is-current strong,.ws-message-meta strong,.ws-task-delivery>strong { font-weight:600; }
+.ws-message-prose,.ws-user-bubble,.ws-composer textarea { font-size:16px; font-weight:400; line-height:1.85; }
+.ws-message-prose .codex-markdown :is(h1,h2,h3,h4,strong,b),.ws-result-block .codex-markdown :is(h1,h2,h3,strong,b) { font-weight:600; }
+.ws-message-prose .codex-markdown :is(h1,h2,h3) { line-height:1.6; letter-spacing:.01em; }
+.ws-agent-name { font-weight:500; }
+.ws-reply-head strong { font-weight:600; }

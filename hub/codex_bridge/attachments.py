@@ -8,6 +8,7 @@ import tempfile
 import unicodedata
 import zipfile
 import zlib
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from xml.etree import ElementTree
@@ -29,6 +30,58 @@ IMAGE_SUFFIXES = {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.ti
 
 class AttachmentPreparationError(RuntimeError):
     pass
+
+
+class AttachmentPreviewCache:
+    """Small per-runner cache of verified derived files, never task permissions.
+
+    The current manifest and source bytes are checked on every preparation.
+    Only the expensive preview parsing can be reused; modified or missing
+    derived files are regenerated. No file content is retained in memory.
+    """
+    def __init__(self, max_entries: int = MAX_FILES * 2):
+        self.max_entries = max(1, min(MAX_FILES * 2, int(max_entries)))
+        self._entries = OrderedDict()
+
+    @staticmethod
+    def key(path, item, content_type):
+        return (str(path), item['sha256'].lower(), item['byte_size'], content_type,
+                MAX_IMAGE_PIXELS, MAX_IMAGE_DECODE_PIXELS, IMAGE_INPUT_MAX_EDGE)
+
+    def get(self, key, source: Path, root: Path):
+        cached = self._entries.get(key)
+        if cached is None:
+            return None
+        fields, derivatives = cached
+        try:
+            for filename, size, sha in derivatives:
+                path = _contained(Path(filename), root)
+                if not path.is_file() or path.stat().st_size != size or _digest(path) != sha:
+                    self._entries.pop(key, None)
+                    return None
+            self._entries.move_to_end(key)
+            return dict(fields)
+        except (OSError, ValueError, AttachmentPreparationError):
+            self._entries.pop(key, None)
+            return None
+
+    def store(self, key, record, source: Path, root: Path):
+        fields = {name: record[name] for name in ('image_path', 'text_preview_path', 'note') if name in record}
+        derivatives = []
+        try:
+            for name in ('image_path', 'text_preview_path'):
+                if name not in fields:
+                    continue
+                path = _contained(Path(fields[name]), root)
+                # The current source was already checked against its manifest.
+                if path != source:
+                    derivatives.append((str(path), path.stat().st_size, _digest(path)))
+        except (OSError, ValueError, AttachmentPreparationError):
+            return
+        self._entries[key] = (fields, derivatives)
+        self._entries.move_to_end(key)
+        while len(self._entries) > self.max_entries:
+            self._entries.popitem(last=False)
 
 
 @dataclass
@@ -182,7 +235,8 @@ def _image_input(path: Path, root: Path) -> tuple[Path, str]:
 
 
 def prepare_task_attachments(client, config, project_slug: str, task_id: int,
-                             project_path: Path | None) -> PreparedAttachments:
+                             project_path: Path | None, *,
+                             preview_cache: AttachmentPreviewCache | None = None) -> PreparedAttachments:
     getter = getattr(client, 'get_task_attachments', None)
     if not callable(getter):
         # Older test adapters and non-agent integrations have no attachment API.
@@ -259,6 +313,8 @@ def prepare_task_attachments(client, config, project_slug: str, task_id: int,
             record = {'attachment_id': item['id'], 'filename': item['original_filename'],
                       'local_path': str(path), 'byte_size': item['byte_size']}
             content_type = str(item.get('content_type') or '').split(';', 1)[0].lower()
+            preview_key = AttachmentPreviewCache.key(path, item, content_type)
+            cached_preview = preview_cache.get(preview_key, path, root) if preview_cache is not None else None
             if path.suffix.lower() in IMAGE_SUFFIXES or content_type in {'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff'}:
                 digest = item['sha256'].lower()
                 previous_visual = visual_inputs.get(digest)
@@ -266,15 +322,23 @@ def prepare_task_attachments(client, config, project_slug: str, task_id: int,
                     visual, original_id = previous_visual
                     note = f'与附件 #{original_id} 的已校验原文件字节完全一致，复用同一视觉输入；本文件路径仍保留。'
                 else:
-                    visual, note = _image_input(path, root)
+                    if cached_preview is not None and 'image_path' in cached_preview:
+                        visual, note = Path(cached_preview['image_path']), cached_preview['note']
+                    else:
+                        visual, note = _image_input(path, root)
                     prepared.images.append(visual)
                     visual_inputs[digest] = (visual, item['id'])
                 record.update({'image_path': str(visual), 'note': note})
             else:
-                preview, note = _text_preview(path, root)
-                record['note'] = note
-                if preview:
-                    record['text_preview_path'] = str(preview)
+                if cached_preview is not None:
+                    record.update(cached_preview)
+                else:
+                    preview, note = _text_preview(path, root)
+                    record['note'] = note
+                    if preview:
+                        record['text_preview_path'] = str(preview)
+            if preview_cache is not None:
+                preview_cache.store(preview_key, record, path, root)
             prepared.files.append(record)
         return prepared
     except AttachmentPreparationError:

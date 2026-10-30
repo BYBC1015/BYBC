@@ -39,19 +39,24 @@ from .tray import BridgeTray
 
 
 class BridgeApp:
-    def __init__(self, config_path: Path | None = None, auto_start: bool = False):
+    def __init__(self, config_path: Path | None = None, auto_start: bool = False, *, background: bool = False):
+        self.background = bool(background)
+        self._background_start_failed = False
         self.config_path = config_path or default_config_path()
         if not self.config_path.exists():
             write_sample_config(self.config_path)
         self.config = load_config(self.config_path)
         self.root = tk.Tk()
+        if self.background:
+            self.root.withdraw()
         self.root.title(text("window_title"))
         self.root.geometry("1080x760")
         self.root.minsize(900, 650)
         self._exiting = False
         self._refresh_after_id: str | None = None
         self.startup = StartupManager()
-        self.startup.migrate_legacy(Path(sys.executable), args=["--start"])
+        if not self.background:
+            self.startup.migrate_legacy(Path(sys.executable), args=["--start"])
         set_window_icon(self.root)
         self.persistent_log = PersistentLog(default_app_dir() / "bridge.log")
         self.log_lines: list[str] = self.persistent_log.tail(200)
@@ -71,7 +76,13 @@ class BridgeApp:
             open_hub=lambda: self.root.after(0, self.open_hub),
             exit_app=lambda: self.root.after(0, self.exit_app),
         )
-        tray_started = self.tray.start()
+        tray_started = self.tray.start(wait_until_ready=2) if self.background else self.tray.start()
+        if self.background and not tray_started:
+            self.append_log('后台启动未完成：系统托盘不可用；未启动执行连接。请从正常应用入口打开连接设置。')
+            self._background_start_failed = True
+            self.tray.stop()
+            self.root.destroy()
+            return
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.refresh_ui()
         if tray_started:
@@ -84,7 +95,7 @@ class BridgeApp:
             self.root.after(300, self.agent_service.start)
         # The packaged application opens the full workspace; connection controls
         # remain available from its tray instead of occupying the main window.
-        if getattr(sys, 'frozen', False) and Path(sys.executable).with_name('HubDesktop.exe').is_file():
+        if not self.background and getattr(sys, 'frozen', False) and Path(sys.executable).with_name('HubDesktop.exe').is_file():
             self.root.after(500, self._open_desktop_workspace)
 
     def _init_variables(self) -> None:
@@ -1237,11 +1248,17 @@ class BridgeApp:
         self.root.destroy()
 
     def run(self) -> int:
-        if not self.config.runtime_configs() and not self.agent_service.configured:
-            messagebox.showwarning(
-                text("window_title"), f"{text('missing_token')}\n{self.config_path}"
-            )
+        if self._background_start_failed:
+            return 2
         try:
+            if not self.config.runtime_configs() and not self.agent_service.configured:
+                if self.background:
+                    self.append_log('后台启动未完成：尚无可用执行连接；请从正常应用入口完成配置。')
+                    self.root.destroy()
+                    return 2
+                messagebox.showwarning(
+                    text("window_title"), f"{text('missing_token')}\n{self.config_path}"
+                )
             self.root.mainloop()
         finally:
             self.tray.stop()
@@ -1286,5 +1303,5 @@ def path_text(path: Path | None) -> str:
     return str(path) if path else ""
 
 
-def main(config_path: Path | None = None, auto_start: bool = False) -> int:
-    return BridgeApp(config_path, auto_start=auto_start).run()
+def main(config_path: Path | None = None, auto_start: bool = False, *, background: bool = False) -> int:
+    return BridgeApp(config_path, auto_start=auto_start, background=background).run()

@@ -23,6 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ui", action="store_true", help="Open the local UI.")
     parser.add_argument("--tools", action="store_true", help="Open the bundled Hub toolbox.")
     parser.add_argument("--cli", action="store_true", help="Run the console poller.")
+    parser.add_argument("--background", action="store_true", help="Start in the system tray without opening windows.")
     parser.add_argument(
         "--start",
         action="store_true",
@@ -37,7 +38,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.background and (args.init or args.once or args.cli or args.ui or args.tools):
+        parser.error('--background cannot be combined with --init, --once, --cli, --ui or --tools')
     if args.tools:
         from .local_tools import main as tools_main
         return tools_main(args.config)
@@ -48,14 +52,14 @@ def main(argv: list[str] | None = None) -> int:
 
     instance = SingleInstance()
     if not instance.acquire():
-        if not (args.start or args.once or args.cli or args.ui):
+        if not (args.start or args.once or args.cli or args.ui or args.background):
             from .desktop_window import launch_desktop
             try:
                 if launch_desktop(args.config):
                     return 0
             except (OSError, RuntimeError):
                 pass
-        if not args.start:
+        if not (args.start or args.background):
             notify_already_running()
         return 0
     try:
@@ -67,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
 def _run(args: argparse.Namespace) -> int:
 
     if args.ui or args.start or not (args.once or args.cli):
+        if args.background:
+            return gui_main(args.config, auto_start=args.start, background=True)
         return gui_main(args.config, auto_start=args.start)
 
     if not args.config.exists():

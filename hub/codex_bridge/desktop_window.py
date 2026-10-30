@@ -13,6 +13,7 @@ import html
 import ipaddress
 import json
 import os
+from functools import lru_cache
 from pathlib import Path
 import subprocess
 import sys
@@ -139,15 +140,29 @@ def read_geometry(path: Path, screens=()) -> dict:
     return defaults
 
 
+@lru_cache(maxsize=1)
+def _offline_brand_markup() -> str:
+    # The compact, shipped brand works before any network or WebView session.
+    # Keep the built-in data document under the native navigation size limit.
+    try:
+        logo = Path(__file__).with_name('assets').joinpath('codex-owl-logo-lite.png').read_bytes()
+        if not logo.startswith(b'\x89PNG\r\n\x1a\n') or len(logo) > 98304:
+            raise ValueError('Invalid compact brand resource')
+        return '<img alt="" width="62" height="62" src="data:image/png;base64,' + base64.b64encode(logo).decode('ascii') + '">'
+    except (OSError, ValueError):
+        return '<span class="brand-fallback">BYBC</span>'
+
+
 def offline_page(message='正在连接你的工作区…', *, connecting=True) -> str:
+    brand = _offline_brand_markup()
     title = '正在打开 Hub' if connecting else '暂时连接不上 Hub'
     detail = '聊天、智能体和成果，即将在这里继续。' if connecting else '恢复连接后继续当前页面。登录信息保留在本机；后台工作的实际进度，以重新连接后的记录为准。'
     state = '连接工作区' if connecting else '等待重新连接'
     modifier = ' connecting' if connecting else ''
     return f'''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
-<style>*{{box-sizing:border-box}}html,body{{margin:0;min-height:100%;background:#151819;color:#edf0ed;font:15px "Segoe UI","Microsoft YaHei",sans-serif}}body{{display:grid;place-items:center;min-height:100vh;padding:32px;background:radial-gradient(ellipse at 50% 20%,#27322e70,transparent 60%),#151819}}main{{width:min(540px,100%);padding:40px;border:1px solid #3a444040;border-radius:32px;background:#202725;box-shadow:0 28px 90px #0003}}header{{display:flex;align-items:center;justify-content:space-between;gap:20px}}.mark{{display:grid;place-items:center;width:62px;height:62px;border-radius:22px;background:#cfdbc512;color:#d3dfcb;font:38px Georgia}}.state{{display:flex;align-items:center;gap:9px;font-size:12px;color:#a7b5ad}}.dot{{width:7px;height:7px;border-radius:50%;background:#c6ba96}}.connecting .dot{{background:#b7cbb4;animation:breathe 2.4s ease-in-out infinite}}h1{{font-size:27px;font-weight:550;letter-spacing:.02em;margin:34px 0 16px}}p{{line-height:1.9;color:#b6c1bb;margin:0}}#status{{min-height:28px;margin-top:24px;font-size:13px;color:#ced7cf}}button{{width:100%;margin-top:20px;border:1px solid transparent;border-radius:18px;padding:14px 23px;background:#cbd9c5;color:#1b2a20;font:inherit;font-weight:600;cursor:pointer;transition:background .15s,transform .15s}}button:hover{{background:#dce7d7}}button:active{{transform:translateY(1px)}}button:focus-visible{{outline:2px solid #e2f1db;outline-offset:4px}}button:disabled{{opacity:.6;cursor:wait}}small{{display:block;text-align:center;margin-top:24px;color:#8c9a91;font-size:11px;letter-spacing:.09em}}@keyframes breathe{{50%{{opacity:.35}}}}@media(prefers-reduced-motion:reduce){{*,*::before,*::after{{animation:none!important;transition:none!important}}}}@media(max-width:480px){{body{{padding:18px}}main{{padding:28px;border-radius:26px}}h1{{font-size:24px}}}}</style>
-<main class="{modifier.strip()}"><header><div class="mark" aria-hidden="true">h·</div><span class="state"><span class="dot" aria-hidden="true"></span>{state}</span></header><h1>{title}</h1><p>{detail}</p><p id="status" role="status" aria-live="polite">{html.escape(message)}</p><button id="retry-button" type="button" onclick="retry()">重新连接</button><small>BYBC HUB · 你的智能体工作区</small></main>
+<style>*{{box-sizing:border-box}}html,body{{margin:0;min-height:100%;background:#151819;color:#edf0ed;font:16px "Noto Sans SC","PingFang SC","Microsoft YaHei UI","Microsoft YaHei","Noto Sans CJK SC","Segoe UI",sans-serif}}body{{display:grid;place-items:center;min-height:100vh;padding:32px;background:radial-gradient(ellipse at 50% 20%,#27322e70,transparent 60%),#151819}}main{{width:min(540px,100%);padding:40px;border:1px solid #3a444040;border-radius:32px;background:#202725;box-shadow:0 28px 90px #0003}}header{{display:flex;align-items:center;justify-content:space-between;gap:20px}}.mark{{display:grid;place-items:center;width:62px;height:62px;border-radius:22px;background:#cfdbc512;color:#d3dfcb;overflow:hidden;font-weight:600}}.mark img{{display:block;width:100%;height:100%;object-fit:contain}}.brand-fallback{{font-size:17px}}.state{{display:flex;align-items:center;gap:9px;font-size:12px;color:#a7b5ad}}.dot{{width:7px;height:7px;border-radius:50%;background:#c6ba96}}.connecting .dot{{background:#b7cbb4;animation:breathe 2.4s ease-in-out infinite}}h1{{font-size:27px;font-weight:600;letter-spacing:.01em;margin:34px 0 16px}}p{{line-height:1.9;color:#b6c1bb;margin:0}}#status{{min-height:28px;margin-top:24px;font-size:13px;color:#ced7cf}}button{{width:100%;margin-top:20px;border:1px solid transparent;border-radius:18px;padding:14px 23px;background:#cbd9c5;color:#1b2a20;font:inherit;font-weight:600;cursor:pointer;transition:background .15s,transform .15s}}button:hover{{background:#dce7d7}}button:active{{transform:translateY(1px)}}button:focus-visible{{outline:2px solid #e2f1db;outline-offset:4px}}button:disabled{{opacity:.6;cursor:wait}}small{{display:block;text-align:center;margin-top:24px;color:#8c9a91;font-size:11px;letter-spacing:.09em}}@keyframes breathe{{50%{{opacity:.35}}}}@media(prefers-reduced-motion:reduce){{*,*::before,*::after{{animation:none!important;transition:none!important}}}}@media(max-width:480px){{body{{padding:18px}}main{{padding:28px;border-radius:26px}}h1{{font-size:24px}}}}</style>
+<main class="{modifier.strip()}"><header><div class="mark" aria-hidden="true">{brand}</div><span class="state"><span class="dot" aria-hidden="true"></span>{state}</span></header><h1>{title}</h1><p>{detail}</p><p id="status" role="status" aria-live="polite">{html.escape(message)}</p><button id="retry-button" type="button" onclick="retry()">重新连接</button><small>BYBC HUB · 你的智能体工作区</small></main>
 <script>let retryPending=false;async function retry(){{if(retryPending)return;const status=document.querySelector('#status'),button=document.querySelector('#retry-button');const connect=window.pywebview?.api?.retry_connection;if(typeof connect!=='function'){{status.textContent='桌面连接仍在准备，请稍后重试。';return;}}retryPending=true;button.disabled=true;status.textContent='正在重新连接…';try{{const result=await connect();if(!result?.connecting)throw new Error('unavailable');}}catch{{status.textContent='连接尚未恢复，请稍后重试。';}}finally{{retryPending=false;button.disabled=false;}}}}window.addEventListener('online',retry);</script></html>'''
 
 
@@ -293,6 +308,9 @@ class DesktopHost:
         self._recovery_target = None
         self._geometry_lock = threading.Lock()
         self._geometry = read_geometry(state_dir / 'window.json')
+        self._geometry_timer = None
+        self._geometry_serial = 0
+        self._geometry_dirty = False
         self._children = []
         self._lifecycle_lock = threading.RLock()
         self._closed = threading.Event()
@@ -528,6 +546,7 @@ class DesktopHost:
                 self._retry_timer = None
             children = list(self._children)
             self._children.clear()
+        self._flush_geometry()
         for child in children:
             child.close_children()
             child.window.destroy()
@@ -724,20 +743,61 @@ class DesktopHost:
         if control.CoreWebView2 is not None:
             self.on_native_ready()
 
-    def save_geometry(self, **changes):
+    def _write_geometry_locked(self):
+        if not self._geometry_dirty:
+            return
+        try:
+            _atomic_json(self.state_dir / 'window.json', self._geometry)
+            self._geometry_dirty = False
+        except OSError:
+            # Window position is optional. A full/locked state folder must not
+            # break dragging, closing, or the actual conversation.
+            try:
+                self.log.write('Window position could not be saved; workspace remains available.')
+            except OSError:
+                pass
+
+    def _flush_geometry(self, serial=None):
+        with self._geometry_lock:
+            if serial is not None and serial != self._geometry_serial:
+                return
+            self._geometry_serial += 1
+            if self._geometry_timer:
+                self._geometry_timer.cancel()
+                self._geometry_timer = None
+            self._write_geometry_locked()
+
+    def save_geometry(self, *, defer=False, **changes):
         if self._closed.is_set():
             return
         with self._geometry_lock:
+            if self._closed.is_set():
+                return
             self._geometry.update(changes)
-            _atomic_json(self.state_dir / 'window.json', self._geometry)
+            self._geometry_dirty = True
+            if defer:
+                # Native move/resize bursts update memory immediately, but
+                # coalesce disk writes off the UI callback into one short batch.
+                if self._geometry_timer is None:
+                    self._geometry_serial += 1
+                    serial = self._geometry_serial
+                    self._geometry_timer = threading.Timer(.25, lambda: self._flush_geometry(serial))
+                    self._geometry_timer.daemon = True
+                    self._geometry_timer.start()
+                return
+            self._geometry_serial += 1
+            if self._geometry_timer:
+                self._geometry_timer.cancel()
+                self._geometry_timer = None
+            self._write_geometry_locked()
 
     def on_resize(self, width, height):
         if not self._geometry.get('maximized') and width >= 900 and height >= 620:
-            self.save_geometry(width=int(width), height=int(height))
+            self.save_geometry(defer=True, width=int(width), height=int(height))
 
     def on_move(self, x, y):
         if not self._geometry.get('maximized'):
-            self.save_geometry(x=int(x), y=int(y))
+            self.save_geometry(defer=True, x=int(x), y=int(y))
 
 
 def launch_desktop(config_path: Path | None = None, hub_override: str | None = None):

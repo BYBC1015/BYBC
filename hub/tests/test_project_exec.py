@@ -62,7 +62,7 @@ def test_project_resume_keeps_directory_model_mcp_images_and_receipt(tmp_path):
     assert '--ignore-user-config' not in command and '--last' not in command
     assert options['cwd'] == str(config.projects['project-one'])
     assert 'gpt-6.1-sol' in command and 'model_reasoning_effort="high"' in command
-    assert json.loads(Path(second_ctx['receipt_path']).read_text())['ok']
+    assert json.loads(Path(second_ctx['receipt_path']).read_text(encoding='utf-8'))['ok']
     replay = execute(config, process, second_ctx)
     assert replay.ok and len(process.calls) == 2
 

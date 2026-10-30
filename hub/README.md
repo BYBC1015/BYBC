@@ -2,10 +2,13 @@
 
 Web workspace for persistent agents, shared conversations and device-bound execution.
 
-Source version 2.9.4 (2026-10-29), desktop and worker source 1.2.3. Agents are durable roles, independent of conversations, models and devices.
+Source version 2.9.5 (2026-10-30), desktop and worker source 1.2.4. Agents are durable roles, independent of conversations, models and devices.
 
 This source snapshot does not prove that a particular computer has installed or started the new desktop binaries. Background source/server updates leave the currently running desktop application uninterrupted; a prepared native update takes effect only after that application is subsequently started with the new binaries.
 
+- The owl brand and Chinese sans-serif typography are shared across workspace and native recovery pages; keyboard-aware mobile layout keeps controls accessible.
+- Native window geometry writes are coalesced, and background-only tray startup avoids opening the desktop during maintenance.
+- Attachment preparation renews the execution lease and reuses only authorized, hash-verified previews within one execution.
 - Chat attachments stay in the composer and follow the assigned task.
 - High-resolution image references receive bounded vision copies automatically; verified original files remain intact for production and detailed inspection.
 - Conversation context retains the original brief and a room-scoped reference catalog. The controller can explicitly inherit and read earlier PDF/image inputs without requesting another upload.
@@ -39,7 +42,7 @@ This source snapshot does not prove that a particular computer has installed or 
 - Durable per-task runners overlap independent jobs while shared workspaces and declared external resources remain serialized.
 - Task cards support completion, reversible archiving and paginated history while preserving chat and drafts.
 - Executor presence refreshes in place across avatars, profiles and the composer; dedicated worker heartbeats expire after two minutes.
-- Desktop companion source 1.2.3 hosts the durable agent worker with shared start/stop controls, supervised recovery, local MCP configuration inheritance and same-family CLI path recovery after desktop updates.
+- Desktop companion source 1.2.4 hosts the durable agent worker with shared start/stop controls, supervised recovery, local MCP configuration inheritance and same-family CLI path recovery after desktop updates.
 - Results are published as viewable images and document previews in the conversation.
 
 ## Run locally
@@ -49,9 +52,9 @@ Requires Python 3.10+. Create a virtual environment, install `pip install -e ".[
 `uvicorn codex_hub.main:app --host 127.0.0.1 --port 8797`.
 Use your own deployment configuration; examples contain placeholders, never production credentials.
 
-See `deploy/MAINTENANCE.md` for weekly operations, `deploy/RELEASE-2.9.4.md` for this source revision and `deploy/BRIDGE-1.2.3.md` for native update boundaries.
+See `deploy/MAINTENANCE.md` for weekly operations, `deploy/RELEASE-2.9.5.md` for this source revision and `deploy/BRIDGE-1.2.4.md` for native update boundaries.
 The `codex_bridge` package includes the dedicated agent worker and compatibility code for existing clients.
-Windows desktop source, pinned build instructions and isolated installer verification are included; generated binaries and mobile clients are not part of this source backup.
+Windows desktop source, pinned build instructions and isolated installer verification are included; Android 0.1.25 and independent iOS client source are included. Generated binaries, signing credentials, build caches and user data are excluded. See android/README.md and ios/README.md for build and distribution boundaries.
 
 This backup includes source, required web assets, tests, dependency lock and deployment examples.
 It excludes live databases, user uploads, private logs, environment files, authentication state and
