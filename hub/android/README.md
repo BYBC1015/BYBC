@@ -2,7 +2,17 @@
 
 Android WebView shell for the private Codex Hub.
 
-Current release: `v0.1.25` (`versionCode 26`).
+Current release: `v0.1.26` (`versionCode 27`).
+
+v0.1.26 addresses stale UI after changing networks. Native network changes and
+foreground resume now wake the shared workspace's release/connection check even
+when the main page never failed. A fresh native GET recovery bypasses the HTTP
+cache until HTML commits, then content-addressed resources use normal caching.
+Cookies, IndexedDB drafts, queued sends and imported files are retained.
+The modern workspace never receives legacy Android CSS or the legacy UI adapter.
+An idle old workspace can migrate only after a fresh same-account/same-conversation
+response; draft text, selected/saved files, or a queued/uncertain send keep the page
+open with an update notice. Recovery performs no POST and never repeats a task.
 
 v0.1.25 supports the current Hub workspace and `/projects/{slug}/conversations/{id}`
 addresses. The native attachment picker and cold-start restoration now recognize

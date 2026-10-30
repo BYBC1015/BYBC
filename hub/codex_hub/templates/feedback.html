@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ '维护记录' if mode == 'maintenance' else '反馈与建议' }} · {{ project.name }}</title><link rel="stylesheet" href="{{ app_path('/static/feedback.css') }}?v=20261027-feedback1"><script src="{{ app_path('/static/feedback.js') }}?v=20261027-feedback1" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ '维护记录' if mode == 'maintenance' else '反馈与建议' }} · {{ project.name }}</title><link rel="stylesheet" href="{{ asset_path('/static/feedback.css') }}"><script src="{{ asset_path('/static/feedback.js') }}" defer></script></head>
 <body class="feedback-screen" data-user="{{ user.id }}"><main class="feedback-shell" data-project="{{ project.slug }}" data-user="{{ user.id }}">
   <header class="feedback-header"><div><a href="{{ app_path('/projects/' ~ project.slug) }}">← 回到工作区</a><p>{{ project.name }}</p><h1>{{ '每周维护' if mode == 'maintenance' else '反馈与建议' }}</h1><p>{{ '工程师持续检查、改进，并留下可核对的记录。' if mode == 'maintenance' else '遇到问题，或想到更好的用法，都可以记在这里。' }}</p></div><nav aria-label="反馈与维护"><a href="{{ app_path('/projects/' ~ project.slug ~ '/feedback') }}" {% if mode == 'feedback' %}aria-current="page"{% endif %}>反馈与建议</a><a href="{{ app_path('/projects/' ~ project.slug ~ '/maintenance') }}" {% if mode == 'maintenance' %}aria-current="page"{% endif %}>维护记录</a></nav></header>
   {% if error %}<p class="feedback-alert" role="alert">{{ error }}</p>{% endif %}

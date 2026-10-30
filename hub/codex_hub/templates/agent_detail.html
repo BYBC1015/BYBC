@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ agent.name }} · 身份与经验 - {{ project.name }}{% endblock %}
 {% block body_class %}agent-profile-screen{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{{ app_path('/static/hub-workspace.css') }}?v=20261027-agents2"><link rel="stylesheet" href="{{ app_path('/static/workspace-details.css') }}?v=20261027-shell2"><script src="{{ app_path('/static/agent-model.js') }}?v=20261027-model1" defer></script>{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ asset_path('/static/hub-workspace.css') }}"><link rel="stylesheet" href="{{ asset_path('/static/workspace-details.css') }}"><script src="{{ asset_path('/static/agent-model.js') }}" defer></script>{% endblock %}
 {% block content %}
 {% set status_names = {'open':'待领取','claimed':'已领取','in_progress':'进行中','blocked':'遇到阻碍','review':'待复核','done':'已完成','cancelled':'已取消'} %}
 <div class="agent-profile-shell">

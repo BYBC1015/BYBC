@@ -268,8 +268,8 @@ def test_apk_keeps_download_update_inside_the_existing_more_menu():
     assert "DOWNLOADS_URL" not in android
     assert "addDownloadUpdateButton" not in android
     assert "android-upgrade-fallback" not in template
-    assert 'versionCode 26' in gradle
-    assert 'versionName "0.1.25"' in gradle
+    assert 'versionCode 27' in gradle
+    assert 'versionName "0.1.26"' in gradle
     assert "Select-String -LiteralPath $GradleConfig" in build_script
     assert '[switch]$Clean' in build_script
     assert '@("clean", "assembleDebug")' in build_script

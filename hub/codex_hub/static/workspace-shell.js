@@ -66,6 +66,67 @@
   let deliveryRunning = false;
   let queueSyncRevision = 0;
   let localOffline = Boolean(window.__HUB_DESKTOP_OFFLINE__ || document.documentElement.dataset.hubOffline === 'true' || !navigator.onLine);
+  let pendingRelease = '';
+  let upgradingUI = false;
+  function compareRelease(left, right) {
+    if (!/^\d+\.\d+\.\d+$/.test(left) || !/^\d+\.\d+\.\d+$/.test(right)) return 0;
+    const a = left.split('.').map(Number), b = right.split('.').map(Number);
+    for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1;
+    return 0;
+  }
+  function upgradeNotice() {
+    let notice = document.querySelector('[data-ws-release-update]');
+    if (!notice) {
+      notice = document.createElement('div'); notice.dataset.wsReleaseUpdate = '';
+      notice.className = 'ws-release-update'; notice.setAttribute('role', 'status');
+      const label = document.createElement('span'); label.textContent = '界面已更新，当前工作会保留。';
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = '载入新版';
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        if (!await upgradeUI(true)) label.textContent = pendingSubmission || submitting || deliveryRunning
+          ? '消息正在发送或等待核对，完成后即可更新界面。'
+          : '当前草稿尚未完成保存，已保留在此页，请稍后重试。';
+        button.disabled = false;
+      }); notice.append(label, button);
+      form.parentNode.insertBefore(notice, form);
+    }
+    return notice;
+  }
+  async function upgradeUI(explicit = false) {
+    if (!pendingRelease || upgradingUI || submitting || deliveryRunning || receiptChecking || pendingSubmission || composing || committed) return false;
+    // Never interrupt typing, file selection, an open dialog or selected text.
+    const otherEdits = () => Array.from(document.querySelectorAll('input:not([type="hidden"]),textarea,select')).some(field => {
+      if (form.contains(field) || !field.getClientRects().length) return false;
+      if (field.matches('input[type="checkbox"],input[type="radio"]')) return field.checked !== field.defaultChecked;
+      if (field.tagName === 'SELECT') return Array.from(field.options).some(option => option.selected !== option.defaultSelected);
+      return field.value !== field.defaultValue;
+    });
+    const autoBlocked = () => input.value || attachments.length || drawer || document.activeElement?.matches('input,textarea,select,[contenteditable="true"]') || otherEdits() || document.querySelector('dialog[open]') || form.contains(document.activeElement) || !window.getSelection()?.isCollapsed;
+    if (!explicit && autoBlocked()) return false;
+    if (explicit && otherEdits()) return false;
+    const before = snapshot();
+    const signature = value => JSON.stringify([value.key, value.description, value.title, value.agent_ids, value.files.map(item => [item.id, item.file?.size])]);
+    const original = signature(before);
+    upgradingUI = true;
+    try {
+      if (before.description || before.files.length) {
+        if (!storageAvailable) return false;
+        await saveDraft();
+        const stored = await localStore.read(scope);
+        if (!stored.draft || signature(stored.draft) !== original) return false;
+      }
+      if (signature(snapshot()) !== original || pendingSubmission || submitting || deliveryRunning || composing || committed) return false;
+      if (otherEdits() || document.querySelector('dialog[open]') || (!explicit && autoBlocked())) return false;
+      const guard = `codexHub.ui-upgrade.${scope}.${pendingRelease}`;
+      const previous = Number(sessionStorage.getItem(guard) || 0);
+      if (!explicit && Date.now() - previous < 300000) return false;
+      sessionStorage.setItem(guard, String(Date.now()));
+      saveUi();
+      location.reload();
+      return true;
+    } catch { return false; }
+    finally { upgradingUI = false; }
+  }
   function setWorkspaceConnection(state) {
     if (shell.dataset.wsConnection === state) return;
     shell.dataset.wsConnection = state;
@@ -1033,12 +1094,19 @@
       if (response.status === 401 || (response.redirected && new URL(response.url).pathname.endsWith('/login'))) { showLoginRequired(); return; }
       if (response.status === 304) {
         if (localOffline || loginRequired || shell.dataset.wsConnection !== 'online') { etag = ''; throw new Error('Fresh workspace required'); }
+        if (await upgradeUI()) return;
         shell.querySelector("[data-ws-sync]").textContent = "已同步"; return;
       }
       if (!response.ok) throw new Error();
       const page = new DOMParser().parseFromString(await response.text(), "text/html");
       const freshShell = page.querySelector("[data-ws-shell]");
-      if (!freshShell || freshShell.dataset.conversation !== shell.dataset.conversation || !updateCsrf(freshShell)) throw new Error();
+      if (!freshShell || freshShell.dataset.conversation !== shell.dataset.conversation) throw new Error();
+      if (compareRelease(freshShell.dataset.wsRelease || '', shell.dataset.wsRelease || '') < 0) throw new Error('Stale workspace release');
+      if (!updateCsrf(freshShell)) throw new Error();
+      if (freshShell.dataset.wsRelease && freshShell.dataset.wsRelease !== shell.dataset.wsRelease) {
+        pendingRelease = freshShell.dataset.wsRelease; upgradeNotice();
+        if (await upgradeUI()) return;
+      }
       if (loginRequired || eventSessionExpired) {
         loginRequired = false; eventSessionExpired = false; errors.hidden = true; connectEventStream();
       }

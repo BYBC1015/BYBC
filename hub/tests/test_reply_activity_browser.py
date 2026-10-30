@@ -71,7 +71,7 @@ def test_real_reply_states_offline_retention_and_final_delivery(live_hub,repo):
             family=card.locator('[data-ws-progress-body]').evaluate('node=>getComputedStyle(node).fontFamily')
             assert 'Microsoft YaHei UI' in family and family.endswith('sans-serif')
             logo=page.locator('.ws-brand-icon img')
-            assert logo.get_attribute('src').endswith('/static/assets/codex-owl-logo-lite-20260708.png')
+            assert logo.get_attribute('src').split('?', 1)[0].endswith('/static/assets/codex-owl-logo-lite-20260708.png')
             assert logo.evaluate('node=>node.complete && node.naturalWidth>0')
             session=context.new_cdp_session(page)
             session.send('DOM.enable');session.send('CSS.enable')

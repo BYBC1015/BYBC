@@ -7,11 +7,38 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from typing import Any
 
+from .model_catalog import normalize_provider_health
 
-def annotate_execution(agents: list[dict], tasks: list[dict], members: list[dict]) -> None:
+
+def provider_observation(capabilities: dict, model: str = '', *, now=None) -> dict | None:
+    """Recent observed outcomes are evidence, not a guarantee for the next run."""
+    current = now or datetime.now(timezone.utc)
+    rows = normalize_provider_health(capabilities.get('provider_health'))['models']
+    eligible = []
+    for row in rows:
+        if model and row['model'] != model:
+            continue
+        age = (current - datetime.fromisoformat(row['observed_at'])).total_seconds()
+        if 0 <= age <= 600:
+            eligible.append(row)
+    return max(eligible, key=lambda row: datetime.fromisoformat(row['observed_at'])) if eligible else None
+
+
+def provider_hint(observation: dict | None) -> str:
+    if not observation:
+        return '模型连接尚无近期执行证据；心跳正常不代表模型可用。'
+    detail = {'reachable': '最近执行成功', 'unreachable': '最近执行遇到模型网络连接异常',
+              'auth_required': '最近执行需要更新模型登录', 'rate_limited': '最近执行遇到模型额度或限流'}
+    return f"{observation['model']}：{detail[observation['state']]}；以实际执行结果为准。"
+
+
+def annotate_execution(agents: list[dict], tasks: list[dict], members: list[dict],
+                       capabilities: dict | None = None) -> None:
     connections = {m['device_id']: m for m in members}
+    capabilities = capabilities or {}
     for agent in agents:
         member = connections.get(agent.get('device_id'), {})
         if not agent.get('active'):
@@ -24,6 +51,10 @@ def annotate_execution(agents: list[dict], tasks: list[dict], members: list[dict
             state, label, hint = 'offline', '执行连接离线', '可以提交工作并排队；连接恢复后领取，不会自动重复执行进行中的任务。'
         else:
             state, label, hint = 'connected', '执行连接已接入', '最近收到执行器心跳；任务是否开始以工作记录为准。'
+            observation = provider_observation(capabilities.get(agent.get('device_id'), {}))
+            hint += ' ' + provider_hint(observation)
+            agent['provider_state'] = observation['state'] if observation else 'unknown'
+            agent['provider_model'] = observation['model'] if observation else ''
         agent.update(connection_state=state, connection_label=label, connection_hint=hint)
     by_agent = {a['id']: a for a in agents}
     for task in tasks:
@@ -42,6 +73,11 @@ def annotate_execution(agents: list[dict], tasks: list[dict], members: list[dict
             label, hint = '执行连接中断', '保留已有进度；恢复前需核对执行收据，不会仅因另一连接在线就重复运行。'
         else:
             label, hint = '执行连接已接入', '保留当前执行者；新设备在线不会抢走进行中的工作。'
+        selected = task.get('model_selection') or {}
+        if member.get('is_agent_online') and selected.get('model'):
+            observation = provider_observation(capabilities.get(task.get('assigned_device_id'), {}), selected['model'])
+            if observation:
+                hint += ' ' + provider_hint(observation)
         if task.get('assigned_agent_id') in by_agent:
             task.update(execution_label=label, execution_hint=hint)
 
@@ -99,6 +135,7 @@ def execution_identity(context: dict[str, Any]) -> dict:
         'attachments': context.get('attachments', []),
         'attachment_plan': context.get('attachment_plan', {}),
         'conversation_brief': context.get('conversation_brief', {}),
+        **({'workflow_blueprint': context['workflow_blueprint']} if context.get('workflow_blueprint') else {}),
     }
 
 

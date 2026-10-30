@@ -2,12 +2,40 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from collections.abc import Mapping
 from typing import Any
 
 
 MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$")
 EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+
+
+def normalize_provider_health(payload: Any) -> dict[str, Any]:
+    """Allowlist passive observations; no errors, credentials or request data."""
+    raw = payload if isinstance(payload, dict) else {}
+    rows = raw.get('models') if raw.get('source') == 'cli-outcome' else []
+    reasons = {'reachable': 'turn_completed', 'unreachable': 'transport_error',
+               'auth_required': 'authentication_error', 'rate_limited': 'rate_limit'}
+    models, seen = [], set()
+    for row in rows[:32] if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        model, state = row.get('model'), row.get('state')
+        if not isinstance(model, str) or not MODEL_ID_RE.fullmatch(model) or model in seen:
+            continue
+        if not isinstance(state, str) or state not in reasons or row.get('reason') != reasons[state]:
+            continue
+        value = str(row.get('observed_at') or '')[:40]
+        try:
+            stamp = datetime.fromisoformat(value.replace('Z', '+00:00'))
+            if stamp.tzinfo is None:
+                continue
+        except ValueError:
+            continue
+        models.append(dict(model=model, state=state, reason=reasons[state], observed_at=stamp.isoformat()))
+        seen.add(model)
+    return {'source': 'cli-outcome', 'models': models}
 
 
 def normalize_codex_catalog(payload: Any) -> dict[str, Any]:
@@ -60,6 +88,8 @@ def normalize_device_capabilities(payload: Any) -> dict[str, Any]:
         result['runtime_kind'] = 'durable-agent'
     if raw.get("execution_mode") in {"codex-cli", "codex-desktop", "hermes-cli", "manual"}:
         result["execution_mode"] = raw["execution_mode"]
+    if 'provider_health' in raw:
+        result['provider_health'] = normalize_provider_health(raw['provider_health'])
     return result
 
 

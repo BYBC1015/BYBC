@@ -73,7 +73,7 @@ def test_brand_and_actual_cjk_typography_keep_hierarchy(live_hub, repo):
             page.locator('[data-ws-input]').fill('请继续完善这次的协作体验。')
             logo = page.locator('.ws-brand-icon img')
             playwright.expect(logo).to_be_visible()
-            assert logo.get_attribute('src').endswith('codex-owl-logo-lite-20260708.png')
+            assert logo.get_attribute('src').split('?', 1)[0].endswith('codex-owl-logo-lite-20260708.png')
             assert logo.evaluate('node=>node.complete&&node.naturalWidth===192')
             assert page.locator('.ws-brand-icon').inner_text() == ''
             assert page.locator('.ws-brand-icon').get_attribute('aria-label') == 'Hub 项目首页'

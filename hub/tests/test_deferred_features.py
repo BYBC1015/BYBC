@@ -30,9 +30,9 @@ def test_page_features_are_scoped_and_cache_versioned():
     for feature, references in (("codex-markdown.js", 2), ("codex-video-reader.js", 2),
                                 ("hub-voice.js", 1), ("image-viewer.js", 1),
                                 ("deferred-features.js", 1)):
-        versions = re.findall(re.escape(feature) + r"'\)\s*}}\?v=([^\"\s]+)", project)
+        versions = re.findall(r"asset_path\('/static/(" + re.escape(feature) + r")'\)\s*}}", project)
         assert len(versions) == references
-        assert len(set(versions)) == 1  # Eager and deferred loaders share one revision.
+        assert len(set(versions)) == 1  # Both use the same content-versioned URL helper.
     assert "{% if entries %}<script" in project
     assert "media_library|selectattr('is_inline_video')|list" in project
 

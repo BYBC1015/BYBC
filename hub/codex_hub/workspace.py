@@ -239,10 +239,12 @@ def build_workspace_context(request: Request, user: dict, project: dict, *,
                                          (project['id'],conversation_id)).fetchone()[0] if room else 0
     from .execution_context import annotate_execution
     memberships = annotate_membership_presence(repo.list_project_memberships(project['id']))
-    annotate_execution(agents, tasks + workspace_tasks + message_tasks, memberships)
     from .device_capabilities import load_device_capabilities
     capabilities = load_device_capabilities(request.app.state.settings.data_dir,
-                                           {a['device_id'] for a in agents if a.get('device_id')})
+                                           {a['device_id'] for a in agents if a.get('device_id')} |
+                                           {t['assigned_device_id'] for t in tasks + workspace_tasks + message_tasks
+                                            if t.get('assigned_device_id')})
+    annotate_execution(agents, tasks + workspace_tasks + message_tasks, memberships, capabilities)
     for agent in agents:
         agent['connection_machine'] = capabilities.get(agent.get('device_id'), {}).get('machine_name', '')
     for task in tasks + workspace_tasks + message_tasks:

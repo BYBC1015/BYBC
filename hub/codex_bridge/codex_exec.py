@@ -65,6 +65,12 @@ class CodexExecRunner:
             result = self._run(project_slug, project_path, prompt_path, prompt,
                                execution_preferences, image_paths, execution_context, cancel_event,
                                progress_callback=progress_callback)
+        # Diagnostics must never change a successful result or execution receipt.
+        try:
+            from .provider_health import record_outcome
+            record_outcome(self.config, result)
+        except (OSError, ValueError, TypeError):
+            pass
         if execution_context:
             # Persist the actual process outcome before returning to the worker.
             # A last-message file alone is not evidence that the process exited.

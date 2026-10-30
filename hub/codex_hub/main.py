@@ -1661,6 +1661,8 @@ def render(
             new_csrf = get_repo(request).rotate_session_csrf(raw_session)
             csrf = new_csrf or ""
     context.setdefault("app_path", lambda path: app_path(request, path))
+    from .static_assets import asset_url
+    context.setdefault("asset_path", lambda path: app_path(request, asset_url(BASE_DIR / "static", path)))
     context.setdefault("inbox_url", get_settings(request).inbox_url)
     context.setdefault("csrf_token", csrf)
     from . import __version__
@@ -1705,20 +1707,37 @@ def require_user(request: Request) -> dict[str, Any]:
 def register_security_headers(app: FastAPI) -> None:
     @app.middleware("http")
     async def add_security_headers(request: Request, call_next):
-        response = await call_next(request)
+        path = request.url.path
+        # Old permanent redirects may remain in browser caches. Repair only
+        # navigation requests under the actual /hub mount, never replay a POST.
+        if request.method in {"GET", "HEAD"} and forwarded_prefix(request) == '/hub' and (path == '/hub' or path.startswith('/hub/')):
+            while path == '/hub' or path.startswith('/hub/'):
+                path = path[len('/hub'):]
+            target = app_path(request, path or '/')
+            query = request.scope.get('query_string', b'').decode('latin-1')
+            if query:
+                target += '?' + query
+            response = RedirectResponse(target, status_code=307, headers={'Cache-Control':'no-store'})
+        else:
+            response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         if "/static/" not in request.url.path:
             response.headers.setdefault("Cache-Control", "no-store")
-        if (
-            request.method == "GET"
-            and "/static/" in request.url.path
-            and request.query_params.get("v")
-        ):
-            response.headers.setdefault(
-                "Cache-Control", "public, max-age=31536000, immutable"
-            )
+        if "/static/" in request.url.path and response.headers.get('Cache-Control') != 'no-store':
+            # A calendar label was previously cached forever even when its
+            # contents changed, letting networks/devices retain different UI.
+            from .static_assets import asset_digest
+            immutable = False
+            if request.method in {"GET", "HEAD"} and response.status_code in {200, 304}:
+                try:
+                    relative = request.url.path.split('/static/', 1)[1]
+                    immutable = request.query_params.get('v') == asset_digest(BASE_DIR / 'static', relative)
+                except (OSError, ValueError):
+                    pass
+            response.headers['Cache-Control'] = ('public, max-age=31536000, immutable'
+                if immutable else 'no-cache, must-revalidate')
         return response
 
 

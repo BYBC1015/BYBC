@@ -115,11 +115,21 @@ def find_resolve_root() -> Path:
 
 
 def launch_toolbox(config_path: Path) -> subprocess.Popen:
-    command = ([sys.executable] if getattr(sys, "frozen", False) else
-               [sys.executable, "-m", "codex_bridge.cli"])
+    if getattr(sys, "frozen", False):
+        # HubDesktop is a separate entry point and does not accept --tools.
+        # Use the installed companion, including when called from HubDesktop.
+        bridge = install_root() / "CodexBridge.exe"
+        if not bridge.is_file():
+            raise FileNotFoundError("工具箱组件缺失，请重新安装 Codex Hub。")
+        command = [str(bridge)]
+    else:
+        command = [sys.executable, "-m", "codex_bridge.cli"]
     env = os.environ.copy()
     env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-    return subprocess.Popen(command + ["--tools", "--config", str(config_path)], env=env, shell=False)
+    # Suppress only a console; the toolbox itself must be visible when requested.
+    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    return subprocess.Popen(command + ["--tools", "--config", str(config_path)],
+                            env=env, shell=False, **options)
 
 
 def populate_tools(parent: ttk.Frame) -> dict[str, ttk.Button]:

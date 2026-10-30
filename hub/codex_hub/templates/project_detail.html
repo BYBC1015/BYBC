@@ -3,19 +3,19 @@
 {% block body_class %}hub-detail-screen{% endblock %}
 {% block shared_navigation_script %}{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="{{ app_path('/static/reading-experience.css') }}?v=20260811-scroll-stability1">
-<link rel="stylesheet" href="{{ app_path('/static/codex-reading.css') }}?v=20260807-reading3">
-<link rel="stylesheet" href="{{ app_path('/static/hub-theme.css') }}?v=20260811-ui-controls1">
-<link rel="stylesheet" href="{{ app_path('/static/composer-routing.css') }}?v=20260911-routing1">
-<link rel="stylesheet" href="{{ app_path('/static/agent-workspace.css') }}?v=20261027-agents2">
-<link rel="stylesheet" href="{{ app_path('/static/hub-workspace.css') }}?v=20261028-delivery1">
+<link rel="stylesheet" href="{{ asset_path('/static/reading-experience.css') }}">
+<link rel="stylesheet" href="{{ asset_path('/static/codex-reading.css') }}">
+<link rel="stylesheet" href="{{ asset_path('/static/hub-theme.css') }}">
+<link rel="stylesheet" href="{{ asset_path('/static/composer-routing.css') }}">
+<link rel="stylesheet" href="{{ asset_path('/static/agent-workspace.css') }}">
+<link rel="stylesheet" href="{{ asset_path('/static/hub-workspace.css') }}">
 {% endblock %}
 {% block content %}
 <section class="workbench-shell">
   <header class="workbench-topbar">
     <div class="workbench-brand">
       <a class="brand-mark" href="{{ app_path('/projects?list=1') }}" aria-label="Codex Hub">
-        <img src="{{ app_path('/static/assets/codex-owl-logo-lite-20260708.png') }}" width="192" height="191" alt="">
+        <img src="{{ asset_path('/static/assets/codex-owl-logo-lite-20260708.png') }}" width="192" height="191" alt="">
       </a>
       <strong>Codex Hub</strong>
     </div>
@@ -1888,16 +1888,16 @@
 </script>
 {% endblock %}
 {% block extra_scripts %}
-<script src="{{ app_path('/static/composer-routing.js') }}?v=20260911-routing1" defer></script>
-<script src="{{ app_path('/static/agent-workspace.js') }}?v=20261027-workspace1" defer></script>
-{% if entries %}<script src="{{ app_path('/static/codex-markdown.js') }}?v=20261029-download1" defer></script>{% endif %}
-{% if media_library|selectattr('is_inline_video')|list %}<script src="{{ app_path('/static/codex-video-reader.js') }}?v=20260812-page-features1" defer></script>{% endif %}
+<script src="{{ asset_path('/static/composer-routing.js') }}" defer></script>
+<script src="{{ asset_path('/static/agent-workspace.js') }}" defer></script>
+{% if entries %}<script src="{{ asset_path('/static/codex-markdown.js') }}" defer></script>{% endif %}
+{% if media_library|selectattr('is_inline_video')|list %}<script src="{{ asset_path('/static/codex-video-reader.js') }}" defer></script>{% endif %}
 <script
-  src="{{ app_path('/static/deferred-features.js') }}?v=20260817-image-gallery2"
-  data-image-viewer-src="{{ app_path('/static/image-viewer.js') }}?v=20260817-image-gallery2"
-  data-voice-session-src="{{ app_path('/static/hub-voice.js') }}?v=20260812-page-features1"
-  data-markdown-src="{{ app_path('/static/codex-markdown.js') }}?v=20261029-download1"
-  data-video-reader-src="{{ app_path('/static/codex-video-reader.js') }}?v=20260812-page-features1"
+  src="{{ asset_path('/static/deferred-features.js') }}"
+  data-image-viewer-src="{{ asset_path('/static/image-viewer.js') }}"
+  data-voice-session-src="{{ asset_path('/static/hub-voice.js') }}"
+  data-markdown-src="{{ asset_path('/static/codex-markdown.js') }}"
+  data-video-reader-src="{{ asset_path('/static/codex-video-reader.js') }}"
   defer></script>
-<script src="{{ app_path('/static/reading-experience.js') }}?v=20260811-scroll-stability1" defer></script>
+<script src="{{ asset_path('/static/reading-experience.js') }}" defer></script>
 {% endblock %}

@@ -285,6 +285,11 @@ class DesktopAPI:
         self._host.open_project(project_id)
         return {'opened': True}
 
+    def open_toolbox(self):
+        self._host.require_trusted()
+        self._host.open_toolbox()
+        return {'opened': True}
+
     def retry_connection(self):
         self._host.require_trusted(allow_local=True)
         self._host.schedule_reconnect()
@@ -292,8 +297,9 @@ class DesktopAPI:
 
 
 class DesktopHost:
-    def __init__(self, location: HubLocation, projects: dict, state_dir: Path, *, external_opener=open_external, cache=None, assets=None):
+    def __init__(self, location: HubLocation, projects: dict, state_dir: Path, *, external_opener=open_external, cache=None, assets=None, config_path=None):
         self.location = location
+        self.config_path = Path(config_path or default_config_path()).expanduser().resolve()
         self.projects = {str(slug): Path(path).expanduser().resolve() for slug, path in projects.items()}
         self.state_dir = state_dir
         self.window = None
@@ -316,6 +322,7 @@ class DesktopHost:
         self._closed = threading.Event()
         self._retry_timer = None
         self._retry_serial = 0
+        self._toolbox_process = None
         self._native_ready = False
         self.cache = cache or WorkspaceCache(state_dir / 'workspace-cache')
         self.assets = assets or PackagedAssets()
@@ -344,6 +351,15 @@ class DesktopHost:
         if not path.is_dir():
             raise FileNotFoundError('本机工程目录暂不可用。')
         os.startfile(str(path))
+
+    def open_toolbox(self):
+        with self._lifecycle_lock:
+            if self._closed.is_set():
+                raise PermissionError('窗口已关闭。')
+            if self._toolbox_process is not None and self._toolbox_process.poll() is None:
+                return
+            from .local_tools import launch_toolbox
+            self._toolbox_process = launch_toolbox(self.config_path)
 
     def bring_forward(self):
         if self._closed.is_set():
@@ -450,23 +466,26 @@ class DesktopHost:
             self.window.run_js("document.documentElement.dataset.hubDesktop='true';window.dispatchEvent(new Event('hubdesktopready'));")
 
     def on_navigation(self, sender, args):
-        if self._closed.is_set():
-            args.Cancel = True
-            return
         target = str(args.Uri)
-        if (target in ('about:blank', 'about:srcdoc') and self._local_page) or self.is_local_html_navigation(target):
-            self._active_navigation = int(args.NavigationId)
-            return
-        if self.location.trusted(target):
-            self._cancel_reconnect()
-            self._active_navigation = int(args.NavigationId)
-            self._navigation_target = target
-            if self._can_resume(target):
-                self._resume_url = target
-            self._local_page = False
-            return
-        args.Cancel = True
-        self._cancelled_navigations.add(int(args.NavigationId))
+        # Snapshot preparation runs in a worker. Publish a new navigation epoch
+        # under the same lock used when that worker commits offline state.
+        with self._lifecycle_lock:
+            if self._closed.is_set():
+                args.Cancel = True
+                return
+            if (target in ('about:blank', 'about:srcdoc') and self._local_page) or self.is_local_html_navigation(target):
+                self._active_navigation = int(args.NavigationId)
+                return
+            if self.location.trusted(target):
+                self._cancel_reconnect()
+                self._active_navigation = int(args.NavigationId)
+                self._navigation_target = target
+                if self._can_resume(target):
+                    self._resume_url = target
+                self._local_page = False
+                return
+            args.Cancel = True
+            self._cancelled_navigations.add(int(args.NavigationId))
         # Native navigation events also cover forms, redirects and target=_blank.
         # Unsupported schemes never launch a local application.
         if target.startswith(('https://', 'http://')):
@@ -501,7 +520,7 @@ class DesktopHost:
         from webview.menu import Menu, MenuAction
         # A child preserves the chat's draft/File objects, including during login.
         child = DesktopHost(self.location, self.projects, self.state_dir, external_opener=self.external_opener,
-            cache=self.cache, assets=self.assets)
+            cache=self.cache, assets=self.assets, config_path=self.config_path)
         child._first_load = False
         window = webview.create_window(TITLE + ' · 预览', html=offline_page(), js_api=DesktopAPI(child),
             width=1100, height=800, min_size=(700, 500), background_color='#151819',
@@ -614,10 +633,14 @@ class DesktopHost:
         if snapshot is None:
             self.show_offline('网络连接未完成，请检查连接后重试。')
             return
-        self._offline = True
-        self._offline_since = time.time()
-        self._offline_account = snapshot['account']
-        self._offline_response = snapshot
+        snapshot = self.assets.prepare_snapshot(self.location, snapshot)
+        with self._lifecycle_lock:
+            if self._closed.is_set() or navigation_id != self._active_navigation:
+                return
+            self._offline = True
+            self._offline_since = time.time()
+            self._offline_account = snapshot['account']
+            self._offline_response = snapshot
         if self._closed.is_set() or navigation_id != self._active_navigation:
             self._offline_response = None
             return
@@ -841,11 +864,12 @@ def run_desktop(config_path: Path, *, hub_override=None, webview_module=None):
             import webview as webview_module
         webview = webview_module
         from webview.menu import Menu, MenuAction
-        host = DesktopHost(location, config.projects, state_dir)
+        host = DesktopHost(location, config.projects, state_dir, config_path=config_path)
         geometry = read_geometry(state_dir / 'window.json', webview.screens)
         host._geometry = geometry.copy()
         menu = [Menu('Hub', [MenuAction('上一页', lambda: host.window.run_js('history.back()')),
-            MenuAction('返回工作区', host.navigate_home), MenuAction('重新连接', host.reconnect)])]
+            MenuAction('返回工作区', host.navigate_home), MenuAction('工具箱', host.open_toolbox),
+            MenuAction('重新连接', host.reconnect)])]
         if host.projects:
             menu.append(Menu('本机工程', [MenuAction(path.name, lambda slug=slug: host.open_project(slug))
                 for slug, path in host.projects.items()]))

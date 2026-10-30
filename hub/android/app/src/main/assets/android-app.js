@@ -1,4 +1,7 @@
 (() => {
+  // The current workspace owns its styles, drafts and layout. Never activate
+  // this legacy adapter merely because an old nested element is still present.
+  if (document.querySelector('[data-ws-shell]')) return;
   const body = document.body;
   const shell = document.querySelector(".workbench-shell");
   const grid = document.querySelector(".workbench-grid");

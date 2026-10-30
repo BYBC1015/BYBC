@@ -292,13 +292,17 @@ class AgentStore:
         from .conversation_context import conversation_brief
         from .revision_inputs import task_input_manifest
         inputs=task_input_manifest(Repository(self.db),task)
-        return {'agent': agent, 'task': {k: task[k] for k in ('id','title','description','conversation_id','route_reason','route_engine',
+        brief = conversation_brief(self.db, task)
+        from .workflow_blueprints import workflow_blueprint
+        workflow = workflow_blueprint(task, agent, brief, inputs)
+        context = {'agent': agent, 'task': {k: task[k] for k in ('id','title','description','conversation_id','route_reason','route_engine',
                 'assigned_agent_id','assigned_device_id','execution_route','execution_route_reason')},
                 'execution_scope': {'mode':task.get('execution_mode','shared'),'resources':json.loads(task.get('resource_keys_json') or '[]')},
                 'attachments': inputs['attachments'],
                 'attachment_plan':{key:value for key,value in inputs.items() if key!='attachments'},
-                'conversation_brief': conversation_brief(self.db, task),
-                'role_contracts': {key: {'name': value[0], 'scope': value[1]} for key, value in ROLES.items()}
+                'conversation_brief': brief,
+                'role_contracts': {key: {'name': value[0], 'scope': value[1]} for key, value in ROLES.items()
+                                   if key != 'narrative_direction' or workflow or agent.get('role_key') == key}
                     if enabled(self.db, task['project_id']) else {},
                 'work_assignments': work_context(self.db, task['project_id'], task.get('conversation_id')),
                 'handoff': handoff_context(self.db,task),
@@ -306,6 +310,9 @@ class AgentStore:
                         if agent['kind']=='controller' else [],
                 'experiences': self.relevant_experiences(task),
                 'conversations': [c for c in self.conversations(task['project_id']) if c['status']=='active'][:20]}
+        if workflow:
+            context['workflow_blueprint'] = workflow
+        return context
 
     def relevant_experiences(self, task: dict) -> list[dict]:
         from .execution_context import select_experiences

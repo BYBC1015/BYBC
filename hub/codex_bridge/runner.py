@@ -396,13 +396,21 @@ class BridgeRunner:
         )
 
     def _report_device_capabilities(self) -> None:
+        from .provider_health import health_path, health_revision, read_health
         reporter = getattr(self.client, "post_device_capabilities", None)
-        if not callable(reporter) or time.monotonic() < self._next_capability_report:
+        revision = health_revision(self.config)
+        changed = revision != getattr(self, '_reported_provider_revision', None)
+        now = time.monotonic()
+        if not callable(reporter) or self._next_capability_report == float('inf'):
+            return
+        if now < getattr(self, '_health_report_retry_at', 0):
+            return
+        if now < self._next_capability_report and not changed:
             return
         if not self._capability_lock.acquire(blocking=False):
             return
         try:
-            if time.monotonic() < self._next_capability_report:
+            if time.monotonic() < self._next_capability_report and not changed:
                 return
             backend = str(self.config.execution_backend or "codex")
             mode = (f"{backend}-cli" if self.config.auto_execute_codex else
@@ -410,12 +418,17 @@ class BridgeRunner:
             capabilities: dict[str, Any] = {"execution_backend": backend, "execution_mode": mode}
             if backend == "codex":
                 capabilities["codex"] = self._model_catalog.get_catalog()
+                if health_path(self.config):
+                    capabilities['provider_health'] = read_health(self.config)
             reporter(capabilities)
+            self._reported_provider_revision = revision
+            self._health_report_retry_at = time.monotonic() + 10
             self._next_capability_report = time.monotonic() + 300
         except Exception:
             # An older/offline Hub must not disable inbox delivery. Retry the
             # optional capability announcement at a bounded rate.
             self._next_capability_report = time.monotonic() + 60
+            self._health_report_retry_at = self._next_capability_report
         finally:
             self._capability_lock.release()
 
@@ -902,7 +915,7 @@ class BridgeRunner:
             '"assigned_agent_id":目标智能体数字编号,"title":"明确交付结果",'
             '"description":"任务范围、输入与验收要求","priority":"normal"}。\n'
             '若身份上下文含 role_contracts，必须同时指定 work_type 和稳定的 work_key；'
-            '可省略 assigned_agent_id 由系统按职责选人。work_type 为 engineering、art_direction、visual_production、postproduction、reference_research、general_support。'
+            '可省略 assigned_agent_id 由系统按职责选人。work_type 必须使用当前身份上下文 role_contracts 中的执行角色键，新增专业也以该实际目录为准，不使用过时固定名单。'
             'reference_research 由锦衣卫负责优秀案例研究，优先最近一年，核实来源与日期，交付可借鉴之处；美术总监负责方向取舍。'
             '最后一种只用于专业职责均不适用的交付，必填 fallback_reason；缺配置交工程师，离线或忙碌不换职业。'
             '例：{"action":"delegate","work_type":"visual_production","work_key":"campaign-cover-v1","title":"交付封面","description":"明确素材与验收标准"}。'

@@ -4,19 +4,19 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Codex Hub{% endblock %}</title>
-  <link rel="icon" href="{{ app_path('/static/assets/codex-owl-logo-lite-20260708.png') }}">
-  <link rel="stylesheet" href="{{ app_path('/static/app.css') }}?v=20260820-bybc-video1">
+  <link rel="icon" href="{{ asset_path('/static/assets/codex-owl-logo-lite-20260708.png') }}">
+  <link rel="stylesheet" href="{{ asset_path('/static/app.css') }}">
   {% block extra_head %}{% endblock %}
-  <link rel="stylesheet" href="{{ app_path('/static/hub-refined.css') }}?v=20260911-mobile4">
-  <script src="{{ app_path('/static/hub-refined.js') }}?v=20260911-mobile4" defer></script>
-  {% block shared_navigation_script %}{% if user %}<script src="{{ app_path('/static/hub-navigation.js') }}?v=20260812-core-navigation1" defer></script>{% endif %}{% endblock %}
+  <link rel="stylesheet" href="{{ asset_path('/static/hub-refined.css') }}">
+  <script src="{{ asset_path('/static/hub-refined.js') }}" defer></script>
+  {% block shared_navigation_script %}{% if user %}<script src="{{ asset_path('/static/hub-navigation.js') }}" defer></script>{% endif %}{% endblock %}
   </head>
   <body class="{% block body_class %}{% endblock %}">
     <a class="skip-link" href="#main-content">跳到主要内容</a>
     {% set current_path = request.url.path %}
     <header class="topbar" data-site-header>
       <a class="brand" href="{{ app_path('/projects') }}">
-        <img class="brand-logo" src="{{ app_path('/static/assets/codex-owl-logo-lite-20260708.png') }}" width="192" height="191" alt="">
+        <img class="brand-logo" src="{{ asset_path('/static/assets/codex-owl-logo-lite-20260708.png') }}" width="192" height="191" alt="">
         <span>Codex Hub</span>
       </a>
       <button class="mobile-nav-toggle" type="button" aria-label="打开主导航" aria-controls="primary-navigation" aria-expanded="false" data-nav-toggle>

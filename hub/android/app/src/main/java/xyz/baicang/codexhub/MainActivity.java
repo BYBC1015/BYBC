@@ -111,6 +111,7 @@ public class MainActivity extends Activity {
     private String androidAppCss = "";
     private String androidAppScript = "";
     private String androidWorkspaceScript = "";
+    private String androidRecoveryScript = "";
     private TextToSpeech textToSpeech;
     private boolean textToSpeechReady = false;
     private String pendingSpeechText = "";
@@ -145,6 +146,7 @@ public class MainActivity extends Activity {
         androidAppCss = readTextAsset("android-app.css");
         androidAppScript = readTextAsset("android-app.js");
         androidWorkspaceScript = readTextAsset("android-workspace.js");
+        androidRecoveryScript = readTextAsset("android-recovery.js");
         localData = getSharedPreferences(LOCAL_DATA_PREFERENCES, Context.MODE_PRIVATE);
         sharedAttachmentImporter = new SharedAttachmentImporter(this);
         restoreSharedFiles(savedInstanceState);
@@ -314,6 +316,7 @@ public class MainActivity extends Activity {
             webView.setVisibility(View.VISIBLE);
             webView.invalidate();
             scheduleResumeHealthCheck();
+            notifyWorkspaceNetwork();
             if (mainFrameFailureCount > 0) scheduleMainFrameRetry();
         }
         if (primaryPageReady) {
@@ -503,13 +506,23 @@ public class MainActivity extends Activity {
 
     private void handleNetworkStateChanged() {
         runOnUiThread(() -> {
-            if (!activityResumed || mainFrameFailureCount <= 0) return;
+            if (!activityResumed) return;
+            notifyWorkspaceNetwork();
+            if (mainFrameFailureCount <= 0) return;
             if (!hasUsableNetwork()) {
                 showConnectionRecovery("当前网络不可用，联网后将自动恢复");
                 return;
             }
             retryPrimaryWebViewNow();
         });
+    }
+
+    private void notifyWorkspaceNetwork() {
+        WebView target = webView;
+        if (target == null || !primaryPageReady || primaryLoadInProgress
+                || target.getUrl() == null || !isInternalUrl(Uri.parse(target.getUrl()))) return;
+        target.evaluateJavascript("window.CodexHubNativeRecovery&&window.CodexHubNativeRecovery.wake("
+                + hasUsableNetwork() + ");", null);
     }
 
     private void showConnectionRecovery(String message) {
@@ -530,6 +543,8 @@ public class MainActivity extends Activity {
     }
 
     private void markPrimaryPageVisible() {
+        // Content-addressed assets can use their normal cache after fresh HTML commits.
+        if (webView != null) webView.getSettings().setCacheMode(WebSettings.LOAD_DEFAULT);
         primaryLoadInProgress = false;
         primaryPageReady = true;
         primaryMainFrameFailed = false;
@@ -598,6 +613,8 @@ public class MainActivity extends Activity {
         primaryLoadInProgress = true;
         primaryMainFrameFailed = false;
         resumeProbeGeneration += 1L;
+        // Recover GET from the network; never clear cookies, IndexedDB or file imports.
+        target.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
         target.loadUrl(url);
     }
 
@@ -1724,7 +1741,7 @@ public class MainActivity extends Activity {
             injectAndroidCss(view);
             String script = "window.CodexHubAndroidVersion="
                     + JSONObject.quote(BuildConfig.VERSION_NAME) + ";"
-                    + androidWorkspaceScript + ";" + androidAppScript;
+                    + androidWorkspaceScript + ";" + androidAppScript + ";" + androidRecoveryScript;
             view.evaluateJavascript(script, null);
         }
 
@@ -1754,6 +1771,9 @@ public class MainActivity extends Activity {
         String script = "(function(){"
                 + "if(!document.body)return;"
                 + "document.documentElement.classList.add('codex-hub-android');"
+                + "if(document.querySelector('[data-ws-shell]')){"
+                + "document.getElementById('" + MOBILE_LAYOUT_STYLE_ID + "')?.remove();"
+                + "document.body.classList.remove('android-chat-mode','android-tools-mode');return;}"
                 + "if(document.body.classList.contains('hub-detail-screen'))"
                 + "document.body.classList.add('android-chat-mode');"
                 + "var s=document.getElementById('" + MOBILE_LAYOUT_STYLE_ID + "');"
@@ -2025,7 +2045,7 @@ public class MainActivity extends Activity {
             webView.stopLoading();
             webView.clearHistory();
             showConnectionRecovery("正在连接新服务器…");
-            webView.loadUrl(normalized);
+            loadPrimaryUrl(webView, normalized);
         }
         Toast.makeText(this, "服务器地址已保存", Toast.LENGTH_SHORT).show();
         return true;

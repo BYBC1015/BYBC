@@ -16,7 +16,7 @@ def test_signature_theme_loads_after_reading_styles():
     theme = template.index("/static/hub-theme.css")
 
     assert reading < markdown < theme
-    assert "20260811-ui-controls1" in template
+    assert "asset_path('/static/hub-theme.css')" in template
     assert THEME.is_file()
 
 

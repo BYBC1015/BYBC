@@ -59,9 +59,10 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
             let available = path.status == .satisfied
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let wasOffline = !self.networkAvailable
                 self.networkAvailable = available
-                if available && wasOffline { self.resume() }
+                // Wi-Fi/cellular/VPN route changes can remain "satisfied" throughout.
+                // Ask the shared workspace to verify its release on every usable path.
+                if available { self.resume() }
             }
         }
         if connectAutomatically {
@@ -89,10 +90,8 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     private func loadRecovery() {
         retry?.cancel()
-        var request = URLRequest(url: recoveryURL)
-        request.timeoutInterval = 30
         // Only GET recovery is automatic. A failed form submission is never replayed here.
-        webView.load(request)
+        webView.load(policy.pageRequest(recoveryURL))
     }
 
     func goBack() {
@@ -103,7 +102,7 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         }
     }
 
-    func openHome() { webView.load(URLRequest(url: policy.baseURL)) }
+    func openHome() { webView.load(policy.pageRequest(policy.baseURL)) }
 
     static let backScript = """
     (() => {
@@ -161,6 +160,7 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         guard let url = webView.url, policy.isInternal(url) else { return }
         if policy.canRecover(url) { recoveryURL = url }
         if policy.isWorkspace(url) { UserDefaults.standard.set(url.absoluteString, forKey: lastLocationKey) }
+        resume()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {

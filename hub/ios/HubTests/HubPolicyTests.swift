@@ -36,4 +36,15 @@ final class HubPolicyTests: XCTestCase {
         XCTAssertEqual(HubPolicy.safeFilename(" 成果.png "), "成果.png")
         XCTAssertEqual(HubPolicy.safeFilename(String(repeating: "字", count: 180)).count, 160)
     }
+
+    func testRecoveryRequestsFreshHTMLWithoutReplayingForms() {
+        let target = url("projects/demo/conversations/31")
+        let request = policy.pageRequest(target)
+        XCTAssertEqual(request.url, target)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertNil(request.httpBody)
+        XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Cache-Control"), "no-cache")
+        XCTAssertEqual(request.timeoutInterval, 30)
+    }
 }

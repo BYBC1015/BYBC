@@ -1,0 +1,30 @@
+.ws-sidebar-bottom .ws-toolbox-entry{min-height:50px;gap:10px;padding:9px 10px;margin-bottom:5px;border:1px solid #3c4549;background:#252c2f;color:#e5e9e8;font-size:14px}
+.ws-toolbox-entry>svg{flex:0 0 18px;color:#c8c3b6}
+.ws-toolbox-entry>span:nth-child(2){display:grid;gap:3px}
+.ws-toolbox-entry small{color:#a9b3b6;font-size:11px;font-weight:400}
+.ws-toolbox-entry .ws-toolbox-arrow{margin-left:auto;color:#c8c3b6}
+.ws-toolbox-entry[aria-disabled="true"]{opacity:.65;cursor:progress}
+.ws-sidebar-bottom .ws-toolbox-entry:hover{background:#30393d;border-color:#647271}
+.ws-toolbox-status{font-size:12px;line-height:1.5;color:#b8cfca;margin:5px 8px 10px}
+.ws-toolbox-dialog{box-sizing:border-box;width:min(500px,calc(100vw - 32px));max-height:calc(var(--ws-viewport-height,100dvh) - 32px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));overflow:auto;overscroll-behavior:contain;border:1px solid #485357;border-radius:24px;padding:24px;background:#202729;color:#e8eeeb;box-shadow:0 28px 100px #0008;font-family:inherit;font-size:15px;line-height:1.65}
+.ws-toolbox-dialog::backdrop{background:#080d11b8;backdrop-filter:blur(5px)}
+.ws-toolbox-dialog{position:fixed;inset-inline:0;top:calc(var(--ws-viewport-top,0px) + var(--ws-viewport-height,100dvh)/2);bottom:auto;margin:0 auto;transform:translateY(-50%)}
+.ws-toolbox-dialog header{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.ws-toolbox-dialog header{position:sticky;top:0;z-index:1;padding-bottom:8px;background:#202729;box-shadow:0 -24px 0 #202729}
+.ws-toolbox-dialog h2{font-size:24px;font-weight:600;line-height:1.3;margin:4px 0 0;color:#f0f3ee}
+.ws-toolbox-dialog [data-ws-toolbox-close]{flex:0 0 44px;width:44px;height:44px;border:1px solid #414b50;border-radius:50%;background:#2a3337;color:#d8e1e0;font:inherit;font-size:24px;cursor:pointer}
+.ws-toolbox-dialog>p{color:#bcc8c7;margin:20px 0}
+.ws-toolbox-list{display:grid;gap:0;padding:0;margin:0;list-style:none}
+.ws-toolbox-list li{display:flex;gap:14px;align-items:center;padding:13px 0;border-top:1px solid #364144}
+.ws-toolbox-list li>span{display:grid;place-items:center;flex:0 0 38px;height:38px;border-radius:12px;background:#303c3f;color:#d3d1bd;font-size:23px}
+.ws-toolbox-list strong{font-weight:600;font-size:15px}
+.ws-toolbox-list p{font-size:13px;line-height:1.5;color:#aebcbd;margin:3px 0 0}
+.ws-toolbox-dialog .ws-toolbox-note{font-size:12px;margin:12px 0 20px;color:#aebcbd}
+.ws-toolbox-actions{display:flex;flex-wrap:wrap;gap:10px}
+.ws-toolbox-actions>a,.ws-toolbox-actions>button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;border:1px solid #5a6668;border-radius:14px;padding:8px 16px;font:inherit;font-size:14px;font-weight:500;text-decoration:none;color:#e5ece8;background:#303b3e;cursor:pointer}
+.ws-toolbox-actions>button{color:#1f292a;background:#d4d0be;border-color:#d4d0be}
+.ws-toolbox-actions>button:disabled{opacity:.65;cursor:progress}
+.ws-toolbox-dialog :focus-visible,.ws-toolbox-entry:focus-visible{outline:2px solid #d0cbb4;outline-offset:3px}
+.ws-toolbox-dialog [hidden]{display:none!important}
+@media(max-width:540px){.ws-toolbox-dialog{padding:20px;border-radius:22px}.ws-toolbox-actions>*{width:100%}}
+@media(prefers-reduced-motion:no-preference){.ws-toolbox-entry{transition:background .15s,border-color .15s}.ws-toolbox-dialog[open]{animation:ws-toolbox-appear .16s ease-out}@keyframes ws-toolbox-appear{from{opacity:0;transform:translateY(calc(-50% + 6px))}to{opacity:1;transform:translateY(-50%)}}}

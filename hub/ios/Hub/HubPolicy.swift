@@ -46,6 +46,14 @@ struct HubPolicy {
         return !isDownload(url) && !["api", "static", "logout"].contains(parts.first ?? "")
     }
 
+    func pageRequest(_ url: URL) -> URLRequest {
+        // A page recovery is a new GET, never a replay of a submitted form.
+        // Keep the website data store and content-addressed resource cache intact.
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        return request
+    }
+
     static func safeFilename(_ value: String) -> String {
         let forbidden = CharacterSet.controlCharacters.union(CharacterSet(charactersIn: "/\\:"))
         let sanitized = String(String.UnicodeScalarView(value.unicodeScalars.map { forbidden.contains($0) ? Unicode.Scalar(95)! : $0 }))

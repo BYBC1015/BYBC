@@ -1,4 +1,6 @@
 from __future__ import annotations
+from codex_hub.static_assets import asset_url
+from codex_hub.main import BASE_DIR
 
 import socket
 import threading
@@ -81,7 +83,7 @@ def test_shared_navigation_marks_the_current_section(client, repo):
     assert '<a href="/devices" aria-current="page">设备</a>' in devices.text
     assert '<a href="/inbox" aria-current="page">设备收件箱</a>' in inbox.text
     assert 'aria-controls="primary-navigation"' in projects.text
-    assert "/static/hub-navigation.js?v=20260812-core-navigation1" in projects.text
+    assert asset_url(BASE_DIR / 'static', '/static/hub-navigation.js') in projects.text
 
 
 def test_inbox_opens_the_first_device_instead_of_an_empty_placeholder(client, repo):

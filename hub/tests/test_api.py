@@ -1,3 +1,5 @@
+from codex_hub.static_assets import asset_url
+from codex_hub.main import BASE_DIR
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -1749,7 +1751,7 @@ def test_versioned_static_assets_are_immutable_and_large_pages_use_gzip(client, 
     detail = client.get(
         "/projects/compressed-chat?view=archive", headers={"Accept-Encoding": "gzip"}
     )
-    static = client.get("/static/app.css?v=performance1")
+    static = client.get(asset_url(BASE_DIR / 'static', '/static/app.css'))
 
     assert detail.status_code == 200
     assert detail.headers["content-encoding"] == "gzip"
@@ -1815,8 +1817,8 @@ def test_forwarded_prefix_is_used_for_static_links_and_redirects(client):
         follow_redirects=False,
     )
 
-    assert 'href="/hub/static/app.css?v=20260820-bybc-video1"' in response.text
-    assert 'src="/hub/static/pixel-auth.js?v=20260812-page-features1"' in response.text
+    assert 'href="/hub' + asset_url(BASE_DIR / 'static', '/static/app.css') + '"' in response.text
+    assert 'src="/hub' + asset_url(BASE_DIR / 'static', '/static/pixel-auth.js') + '"' in response.text
     assert "hub-voice.js" not in response.text
     assert "image-viewer.js" not in response.text
     assert login.headers["location"] == "/hub/projects"
@@ -1834,7 +1836,7 @@ def test_untrusted_forwarded_prefix_cannot_create_external_redirect(client):
     )
 
     assert response.headers["location"] == "/projects"
-    assert 'href="/static/app.css?v=20260820-bybc-video1"' in traversal.text
+    assert 'href="' + asset_url(BASE_DIR / 'static', '/static/app.css') + '"' in traversal.text
     assert "evil.example" not in response.headers["location"]
 
 

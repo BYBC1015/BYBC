@@ -60,7 +60,9 @@ def test_bundle_matches_path_query_and_content_and_resolves_css_dependency(tmp_p
     (static / 'desktop-assets.json').write_text(json.dumps(manifest))
     assets = PackagedAssets(static)
     hub = HubLocation('https://hub/hub')
-    assert assets.read(hub, hub.base + '/static/app.js?v=2')[0] == b'window.nativeAsset=true'
+    identity = manifest['assets']['app.js']['sha256'][:16]
+    assert assets.read(hub, hub.base + '/static/app.js?v=' + identity)[0] == b'window.nativeAsset=true'
+    assert assets.read(hub, hub.base + '/static/app.js?v=2') is None
     assert assets.read(hub, hub.base + '/static/app.js?v=3') is None
     assert assets.read(hub, 'https://other/hub/static/app.js?v=2') is None
     assert assets.read(hub, hub.base + '/static/%2e%2e/private') is None

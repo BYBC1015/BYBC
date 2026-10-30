@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ task.title }} - {{ project.name }}{% endblock %}
 {% block body_class %}task-profile-screen{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{{ app_path('/static/workspace-details.css') }}?v=20261027-shell2"><script src="{{ app_path('/static/codex-markdown.js') }}?v=20261029-download1" defer></script>{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ asset_path('/static/workspace-details.css') }}"><script src="{{ asset_path('/static/codex-markdown.js') }}" defer></script>{% endblock %}
 {% block content %}
 {% set status_names = {'open':'待领取','claimed':'已领取','in_progress':'进行中','blocked':'遇到阻碍','review':'待复核','done':'已完成','cancelled':'已取消'} %}
 {% set execution_route_labels = {'project':'本地工程','direct':'单次执行','chat':'聊天协调'} %}

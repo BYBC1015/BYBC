@@ -15,29 +15,32 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
   <meta name="color-scheme" content="dark">
+  <meta name="hub-ui-release" content="{{ app_version }}">
   <title>{{ current_conversation.title ~ ' · ' if current_conversation else '' }}{{ project.name }} · Codex Hub</title>
-  <link rel="icon" href="{{ app_path('/static/assets/codex-owl-logo-lite-20260708.png') }}">
-  <link rel="stylesheet" href="{{ app_path('/static/codex-reading.css') }}?v=20260807-reading3">
-  <link rel="stylesheet" href="{{ app_path('/static/agent-workspace.css') }}?v=20261027-agents2">
-  <link rel="stylesheet" href="{{ app_path('/static/hub-workspace.css') }}?v=20261027-agents2">
-  <link rel="stylesheet" href="{{ app_path('/static/workspace-shell.css') }}?v=20261030-ui1">
-  <link rel="stylesheet" href="{{ app_path('/static/desktop-workspace.css') }}?v=20261029-local1">
-  <link rel="stylesheet" href="{{ app_path('/static/reply-activity.css') }}?v=20261029-reply1">
-  <link rel="stylesheet" href="{{ app_path('/static/mobile-workspace.css') }}?v=20261030-ui1">
-  <script src="{{ app_path('/static/agent-workspace.js') }}?v=20261027-workspace1" defer></script>
-  <script src="{{ app_path('/static/codex-markdown.js') }}?v=20261029-download1" defer></script>
-  <script src="{{ app_path('/static/workspace-store.js') }}?v=20261029-local1" defer></script>
-  <script src="{{ app_path('/static/workspace-shell.js') }}?v=20261030-ui1" defer></script>
-  <script src="{{ app_path('/static/desktop-workspace.js') }}?v=20261029-local1" defer></script>
-  <script src="{{ app_path('/static/reply-activity.js') }}?v=20261029-reply1" defer></script>
-  <script src="{{ app_path('/static/mobile-workspace.js') }}?v=20261030-ui1" defer></script>
+  <link rel="icon" href="{{ asset_path('/static/assets/codex-owl-logo-lite-20260708.png') }}">
+  <link rel="stylesheet" href="{{ asset_path('/static/codex-reading.css') }}">
+  <link rel="stylesheet" href="{{ asset_path('/static/agent-workspace.css') }}">
+  <link rel="stylesheet" href="{{ asset_path('/static/hub-workspace.css') }}">
+  <link rel="stylesheet" href="{{ asset_path('/static/workspace-shell.css') }}">
+  <link rel="stylesheet" href="{{ asset_path('/static/desktop-workspace.css') }}">
+  <link rel="stylesheet" href="{{ asset_path('/static/reply-activity.css') }}">
+  <link rel="stylesheet" href="{{ asset_path('/static/mobile-workspace.css') }}">
+  <link rel="stylesheet" href="{{ asset_path('/static/toolbox.css') }}">
+  <script src="{{ asset_path('/static/agent-workspace.js') }}" defer></script>
+  <script src="{{ asset_path('/static/codex-markdown.js') }}" defer></script>
+  <script src="{{ asset_path('/static/workspace-store.js') }}" defer></script>
+  <script src="{{ asset_path('/static/workspace-shell.js') }}" defer></script>
+  <script src="{{ asset_path('/static/desktop-workspace.js') }}" defer></script>
+  <script src="{{ asset_path('/static/reply-activity.js') }}" defer></script>
+  <script src="{{ asset_path('/static/mobile-workspace.js') }}" defer></script>
+  <script src="{{ asset_path('/static/toolbox.js') }}" defer></script>
 </head>
 <body class="workspace-screen hub-detail-screen">
   <a class="ws-skip" href="#ws-messages">跳到工作对话</a>
-  <main class="ws-shell" data-ws-shell data-user="{{ user.id }}" data-project="{{ project.slug }}" data-conversation="{{ current_conversation.id if current_conversation else 'new' }}" data-default-agent="{{ default_agent_id or '' }}" data-initial-agent="{{ selected.id or '' }}" data-etag="{{ workspace_etag }}" data-workspace-url="{{ workspace_url }}" data-events-url="{{ workspace_events_url|default('') }}" data-event-version="{{ workspace_event_version|default('') }}" data-project-url="{{ app_path('/projects/' ~ project.slug) }}">
+  <main class="ws-shell" data-ws-shell data-ws-release="{{ app_version }}" data-user="{{ user.id }}" data-project="{{ project.slug }}" data-conversation="{{ current_conversation.id if current_conversation else 'new' }}" data-default-agent="{{ default_agent_id or '' }}" data-initial-agent="{{ selected.id or '' }}" data-etag="{{ workspace_etag }}" data-workspace-url="{{ workspace_url }}" data-events-url="{{ workspace_events_url|default('') }}" data-event-version="{{ workspace_event_version|default('') }}" data-project-url="{{ app_path('/projects/' ~ project.slug) }}">
     <button class="ws-backdrop" data-ws-backdrop tabindex="-1" aria-label="关闭侧栏" hidden></button>
     <aside class="ws-sidebar" data-ws-sidebar aria-label="项目与工作导航">
-      <header class="ws-project-switch"><a class="ws-brand-icon" href="{{ app_path('/projects') }}" aria-label="Hub 项目首页"><img src="{{ app_path('/static/assets/codex-owl-logo-lite-20260708.png') }}" width="192" height="191" alt=""></a><label><span class="ws-eyebrow">当前项目</span><select aria-label="切换项目" data-ws-project-switch>{% for item in projects %}<option value="{{ app_path('/projects/' ~ item.slug) }}" {% if item.id == project.id %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label><button class="ws-icon ws-mobile-close" data-ws-sidebar-close aria-label="关闭导航">×</button></header>
+      <header class="ws-project-switch"><a class="ws-brand-icon" href="{{ app_path('/projects') }}" aria-label="Hub 项目首页"><img src="{{ asset_path('/static/assets/codex-owl-logo-lite-20260708.png') }}" width="192" height="191" alt=""></a><label><span class="ws-eyebrow">当前项目</span><select aria-label="切换项目" data-ws-project-switch>{% for item in projects %}<option value="{{ app_path('/projects/' ~ item.slug) }}" {% if item.id == project.id %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label><button class="ws-icon ws-mobile-close" data-ws-sidebar-close aria-label="关闭导航">×</button></header>
       <section class="ws-team"><div class="ws-section-label"><span>智能体</span><button type="button" data-agents-open>管理 <span aria-hidden="true">↗</span></button></div><div class="ws-agent-dock" data-ws-agent-dock>
         {% for agent in durable_agents[:3] %}<button class="ws-agent-shortcut" type="button" data-ws-agent="{{ agent.id }}" aria-label="查看智能体 {{ agent.name }}" aria-describedby="ws-agent-state-{{ agent.id }}" aria-pressed="false"><span class="ws-agent-portrait">{{ avatar(agent.id) }}<i class="ws-agent-presence ws-agent-presence-{{ agent.connection_state or 'unknown' }}" aria-hidden="true"></i></span><span class="ws-agent-name" title="{{ agent.name }}">{{ agent.name }}</span><small class="ws-agent-state" id="ws-agent-state-{{ agent.id }}">{{ connection_short.get(agent.connection_state, '状态未知') }}</small></button>{% endfor %}
         <button class="ws-agent-add" type="button" data-agents-open data-ws-create-agent aria-label="创建智能体"><span aria-hidden="true">＋</span><small>创建</small></button>
@@ -47,7 +50,7 @@
       <section class="ws-room-section"><div class="ws-section-label"><span>工作对话</span><span data-ws-room-count>本页 {{ room_page_count|default(rooms|length) }}</span></div><div class="ws-room-list" data-ws-conversations>
         {% for room in rooms %}<a class="ws-room {% if current_conversation and room.id == current_conversation.id %}is-current{% endif %}" href="{{ app_path('/projects/' ~ project.slug ~ '/conversations/' ~ room.id) }}" data-ws-room="{{ room.id }}" data-room-search="{{ room.title }} {{ room.participants or '' }}" {% if current_conversation and room.id == current_conversation.id %}aria-current="page"{% endif %}><span class="ws-room-mark" aria-hidden="true">◌</span><span><strong>{{ room.title }}</strong><small>{% if room.outside_room_page %}当前对话 · {% endif %}{{ room.participants or '新的协作' }}</small></span></a>{% else %}<p class="ws-nav-empty">新的想法，从一次工作开始。</p>{% endfor %}
       <nav class="ws-room-pagination" aria-label="工作对话分页">{% if latest_rooms_url %}<a href="{{ latest_rooms_url }}">最近对话</a>{% endif %}{% if older_rooms_url %}<a href="{{ older_rooms_url }}">更早对话 →</a>{% endif %}</nav></div><p class="ws-no-rooms" data-ws-no-rooms hidden>没有匹配的对话</p></section>
-      <nav class="ws-sidebar-bottom" aria-label="项目资料与其他入口"><a href="{{ app_path('/projects/' ~ project.slug ~ '?view=archive') }}" data-ws-archive><span aria-hidden="true">◷</span> 历史设备对话 <span aria-hidden="true">↗</span></a><div><a href="{{ app_path('/projects/' ~ project.slug ~ '?view=archive#files') }}"><span aria-hidden="true">▤</span> 资料</a><a href="{{ app_path('/projects/' ~ project.slug ~ '?view=archive#members') }}"><span aria-hidden="true">⚙</span> 设置</a></div><div class="ws-support-links"><a href="{{ app_path('/projects/' ~ project.slug ~ '/feedback?kind=bug') }}" data-ws-feedback target="_blank" rel="noopener noreferrer"><span aria-hidden="true">◈</span> 反馈与建议</a><a href="{{ app_path('/projects/' ~ project.slug ~ '/maintenance') }}"><span aria-hidden="true">↻</span> 维护</a></div><footer><a href="{{ app_path('/projects?list=1') }}">Codex Hub <small>{{ app_version }}</small></a><form method="post" action="{{ app_path('/logout') }}"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><button type="submit">退出</button></form></footer></nav>
+      <nav class="ws-sidebar-bottom" aria-label="项目资料与其他入口"><a class="ws-toolbox-entry" href="{{ app_path('/downloads') }}" data-ws-toolbox aria-haspopup="dialog" aria-controls="ws-toolbox-panel"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6V4h6v2M4 6h16v14H4zM4 11h16M10 10v3h4v-3"/></svg><span>工具箱<small>视频 · 音乐 · 调色</small></span><span class="ws-toolbox-arrow" aria-hidden="true">↗</span></a><p class="ws-toolbox-status" data-ws-toolbox-status role="status" hidden></p><a href="{{ app_path('/projects/' ~ project.slug ~ '?view=archive') }}" data-ws-archive><span aria-hidden="true">◷</span> 历史设备对话 <span aria-hidden="true">↗</span></a><div><a href="{{ app_path('/projects/' ~ project.slug ~ '?view=archive#files') }}"><span aria-hidden="true">▤</span> 资料</a><a href="{{ app_path('/projects/' ~ project.slug ~ '?view=archive#members') }}"><span aria-hidden="true">⚙</span> 设置</a></div><div class="ws-support-links"><a href="{{ app_path('/projects/' ~ project.slug ~ '/feedback?kind=bug') }}" data-ws-feedback target="_blank" rel="noopener noreferrer"><span aria-hidden="true">◈</span> 反馈与建议</a><a href="{{ app_path('/projects/' ~ project.slug ~ '/maintenance') }}"><span aria-hidden="true">↻</span> 维护</a></div><footer><a href="{{ app_path('/projects?list=1') }}">Codex Hub <small>{{ app_version }}</small></a><form method="post" action="{{ app_path('/logout') }}"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><button type="submit">退出</button></form></footer></nav>
     </aside>
 
     <section class="ws-center" aria-label="工作对话"><button type="button" class="ws-new-messages" data-ws-new-messages hidden>有新消息 · 查看 ↓</button>
@@ -107,6 +110,18 @@
       </div>
     </aside>
   </main>
+  <dialog id="ws-toolbox-panel" class="ws-toolbox-dialog" data-ws-toolbox-dialog aria-labelledby="ws-toolbox-title" aria-describedby="ws-toolbox-description">
+    <header><div><span class="ws-eyebrow">创作与后期</span><h2 id="ws-toolbox-title">工具箱</h2></div><button type="button" data-ws-toolbox-close aria-label="关闭工具箱说明" autofocus>×</button></header>
+    <p id="ws-toolbox-description" data-ws-toolbox-description>这些工具需要在 Windows 桌面版运行。回到电脑上的 Hub，点击「工具箱」即可打开。</p>
+    <ul class="ws-toolbox-list">
+      <li><span aria-hidden="true">↦</span><div><strong>视频末帧延长</strong><p>延长视频尾帧，支持批量处理。</p></div></li>
+      <li><span aria-hidden="true">◈</span><div><strong>可灵批处理</strong><p>场景替换、抽帧检查与逐镜头返修。</p></div></li>
+      <li><span aria-hidden="true">♫</span><div><strong>音乐制作 · 节拍工坊</strong><p>鼓机、乐器伴奏与自然环境声。</p></div></li>
+      <li><span aria-hidden="true">◐</span><div><strong>达芬奇调色 · 节点预设</strong><p>应用风格与节点模板，保留原版本。</p></div></li>
+    </ul>
+    <p class="ws-toolbox-note">音乐与调色工具需安装达芬奇 Studio 21.1。</p>
+    <div class="ws-toolbox-actions"><button type="button" data-ws-toolbox-retry hidden>重新打开工具箱</button><a href="{{ app_path('/downloads') }}" target="_blank" rel="noopener noreferrer">获取 Windows 桌面版 <span aria-hidden="true">↗</span></a></div>
+  </dialog>
   {% include "partials/agent_workspace.html" %}
 </body>
 </html>

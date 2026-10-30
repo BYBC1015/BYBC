@@ -96,6 +96,8 @@ def test_toolbox_launch_keeps_bridge_running_and_resets_runtime(tmp_path, monkey
     calls = []
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", str(tmp_path / "Bridge 安装" / "CodexBridge.exe"))
+    Path(sys.executable).parent.mkdir()
+    Path(sys.executable).write_bytes(b"installed companion")
     monkeypatch.setattr(subprocess, "Popen", lambda args, **kw: calls.append((args, kw)))
     config = tmp_path / "用户 配置.json"
     local_tools.launch_toolbox(config)
@@ -103,6 +105,42 @@ def test_toolbox_launch_keeps_bridge_running_and_resets_runtime(tmp_path, monkey
     assert args == [sys.executable, "--tools", "--config", str(config)]
     assert options["shell"] is False
     assert options["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+
+
+def test_desktop_toolbox_launch_uses_bridge_entry_point_not_desktop(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    desktop = tmp_path / "带空格 安装目录" / "HubDesktop.exe"
+    desktop.parent.mkdir()
+    bridge = desktop.with_name("CodexBridge.exe")
+    bridge.write_bytes(b"installed companion")
+    monkeypatch.setattr(sys, "executable", str(desktop))
+    calls = []
+    monkeypatch.setattr(subprocess, "Popen", lambda args, **kw: calls.append((args, kw)))
+    config = tmp_path / "用户配置" / "config.json"
+    local_tools.launch_toolbox(config)
+    args, options = calls[0]
+    assert args == [str(bridge), "--tools", "--config", str(config)]
+    assert options["shell"] is False
+    assert "startupinfo" not in options  # Must not SW_HIDE the requested GUI.
+    if sys.platform == "win32":
+        assert options["creationflags"] == subprocess.CREATE_NO_WINDOW
+
+
+def test_toolbox_missing_companion_never_relaunches_desktop(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "HubDesktop.exe"))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: pytest.fail("wrong entry point launched"))
+    with pytest.raises(FileNotFoundError, match="重新安装 Codex Hub"):
+        local_tools.launch_toolbox(tmp_path / "config.json")
+
+
+def test_source_toolbox_launch_uses_module_cli(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    calls = []
+    monkeypatch.setattr(subprocess, "Popen", lambda args, **kw: calls.append((args, kw)))
+    config = tmp_path / "config.json"
+    local_tools.launch_toolbox(config)
+    assert calls[0][0] == [sys.executable, "-m", "codex_bridge.cli", "--tools", "--config", str(config)]
 
 
 def test_bridge_main_page_keeps_original_tabs_and_opens_toolbox(tmp_path, monkeypatch, tk_root):

@@ -1,4 +1,6 @@
 /* The workspace belongs to durable identities; connections stay in settings. */
+.ws-release-update { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 16px; margin-bottom:8px; border:1px solid var(--ws-border); border-radius:16px; background:var(--ws-surface); color:var(--ws-muted); font-size:13px; }
+.ws-release-update button { flex-shrink:0; min-height:44px; border:0; border-radius:12px; padding:8px 12px; background:var(--ws-accent); color:var(--ws-bg); font:inherit; cursor:pointer; }
 html:has(body.workspace-screen) { color-scheme:dark; height:100%; background:#101112; }
 html body.workspace-screen { --ws-bg:#101112; --ws-left:#17191b; --ws-main:#1d1f21; --ws-right:#191b1d; --ws-surface:#27292c; --ws-border:#34373b; --ws-text:#eeedea; --ws-muted:#b2b5b7; --ws-dim:#92989b; --ws-accent:#d4c2aa; --ws-font-sans:"Noto Sans SC","PingFang SC","Microsoft YaHei UI","Microsoft YaHei","Noto Sans CJK SC",sans-serif; margin:0; padding:0; min-width:0; height:100dvh; overflow:hidden; background:var(--ws-bg); color:var(--ws-text); font:400 16px/1.7 var(--ws-font-sans); -webkit-text-size-adjust:100%; text-size-adjust:100%; }
 .workspace-screen * { box-sizing:border-box; }

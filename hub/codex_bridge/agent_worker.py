@@ -154,6 +154,10 @@ def main(argv: list[str] | None = None, *, stop_event=None, status_callback=None
         if len(runtimes) != 1:
             raise ValueError("专用 worker 必须选择一个配置完整的执行连接。")
         config = runtimes[0]
+        # Both polling lanes and isolated task runners share outcome evidence.
+        # This is process-local configuration, never a rewrite of user settings.
+        config = replace(config, backend_options={**config.backend_options,
+            'provider_health_path': str(config.state_path.parent / 'provider-health.json')})
         if config.execution_backend != "codex" or not config.auto_execute_codex:
             raise ValueError("专用 worker 需要启用 Codex CLI 自动执行。")
         if config.ignore_existing_on_first_run:
