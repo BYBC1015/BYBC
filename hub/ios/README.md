@@ -28,11 +28,13 @@ bash hub/ios/scripts/verify-ios.sh
 
 ## 交付状态与后续条件
 
-2026-10-30 在 BYBC-YOLO（Windows）完成源工程和 Windows 可用的文件/结构检查；本机没有 Xcode / Swift SDK，因此本记录不宣称已通过原生编译或真机测试。macOS CI 的实际 build / test 结论以对应运行记录为准。
+2026-10-30 已在 GitHub macOS runner 使用 **Xcode 26.6 / build 17F113** 完成 unsigned simulator 原生编译及 **4 项 XCTest，0 失败**：[验证运行 40981287956](https://github.com/BYBC1015/BYBC/actions/runs/40981287956)，源码提交 `8fa835f0f94a84fee1457567972bf2360d99fda8`。测试覆盖对话恢复、下载与恢复边界、可信地址与路径限制、文件名处理；不把这些策略测试说成完整真机交互验收。
+
+该次证据包 `Hub-iOS-0.1.0-UNSIGNED-SIMULATOR-ONLY` 包含 `.app`、`.xcresult` 与构建日志，6569519 bytes，SHA-256 `62632b371b8e42b56fa608fb62559d527713b7e79324770675320b40d7bf971f`；GitHub artifact 保留至 2026-11-06 00:48 UTC。它用于模拟器与审计，不是 iPhone 安装包。BYBC-YOLO 本机仍为 Windows，没有本地 Xcode / Swift SDK。
 
 当前没有已验证的 Apple 开发团队、签名证书、profile、已签名 IPA 或 TestFlight 分发。模拟器 `.app` 不能安装到真实 iPhone。签名安装需要可用的 Mac/Xcode + 开发团队与设备/分发配置；正式 TestFlight 还需注册 Bundle ID / App Store Connect 应用及账号权限。不要把密码或验证码写入仓库。
 
-签名前必须用真实 iPhone/iPad 验证：登录恢复、截图和 PDF 选择、键盘与旋转、快速连续消息、后台返回刷新、断网/重连、文件下载和保存、VoiceOver。现有 Owl 图片用于 App 顶栏；App Store 专用 1024px 不透明 AppIcon、商店隐私表及隐私政策尚待发行配置，不把未具备这些条件的构建称为商店成品。
+签名前必须用真实 iPhone/iPad 验证：登录恢复、截图和 PDF 选择、键盘与旋转、快速连续消息、后台返回刷新、断网/重连、文件下载和保存、VoiceOver。App 顶栏保留现有 Owl 图片；主屏幕图标使用内置图像生成工具制作、经目视确认的猫头鹰方形母版，经确定性尺寸导出为 1024×1024 RGB PNG，配置在 `AppIcon.appiconset`，Debug / Release 均指定该图标。此图标补丁还须随下一次 CI 验证其编译产物。商店隐私表及隐私政策仍需发行配置，不把未具备签名与发行条件的构建称为商店成品。
 
 首版不包含 APNs 推送、系统分享扩展、后台文件传输或离线执行器。这些能力须另行接入服务器与 Apple entitlement，并验证真实设备；不依靠模拟器测试冒充已支持。
 
