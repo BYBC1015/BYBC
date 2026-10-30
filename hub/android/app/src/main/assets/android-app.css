@@ -1,0 +1,1450 @@
+html.codex-hub-android,
+html.codex-hub-android body.hub-detail-screen {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background-attachment: scroll !important;
+}
+
+/* Downloads, login and other full pages use normal document scrolling. The
+   fixed-height chat body below owns its internal scrolling independently. */
+html.codex-hub-android {
+  overflow-y: auto;
+}
+
+html.codex-hub-android body.hub-detail-screen .shell,
+html.codex-hub-android body.hub-detail-screen .workbench-shell {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-shell {
+  position: relative;
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-topbar {
+  flex: 0 0 58px;
+  min-height: 58px;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 11px 5px;
+  position: relative;
+  top: auto;
+  border-bottom-width: 3px;
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-brand,
+html.codex-hub-android body.hub-detail-screen .status-pill,
+html.codex-hub-android body.hub-detail-screen .workbench-spacer,
+html.codex-hub-android body.hub-detail-screen .sync-dot,
+html.codex-hub-android body.hub-detail-screen .export-button,
+html.codex-hub-android body.hub-detail-screen .connect-button,
+html.codex-hub-android body.hub-detail-screen .device-switch,
+html.codex-hub-android body.hub-detail-screen .mobile-rail-toggle,
+html.codex-hub-android body.hub-detail-screen .memory-open-button,
+html.codex-hub-android body.hub-detail-screen .connect-panel {
+  display: none !important;
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-title {
+  order: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: block;
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-title-line {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-title h1 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-version-badge {
+  flex: 0 0 auto;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border: 1px solid #111827;
+  border-radius: 4px;
+  background: #fff1a6;
+  color: #111827;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+html.codex-hub-android body.hub-detail-screen .reader-focus-toggle {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  justify-content: center;
+  padding: 0;
+  border-color: #111827;
+}
+
+html.codex-hub-android body.hub-detail-screen .reader-focus-label {
+  display: none;
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-title p {
+  display: none;
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-topbar .icon-button {
+  order: 2;
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 72px;
+  min-height: 38px;
+  padding: 0 12px;
+  justify-self: auto;
+  white-space: nowrap;
+}
+
+html.codex-hub-android body.android-chat-mode .android-tools-back {
+  display: none !important;
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-back {
+  display: inline-flex !important;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-drawer-toggle {
+  order: 0;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border: 2px solid #111827;
+  border-radius: 4px;
+  background: #fff1a6;
+  color: #111827;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 2px 2px 0 rgba(17, 24, 39, 0.18);
+  touch-action: manipulation;
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-grid {
+  flex: 1 1 auto;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  position: relative;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-project-drawer {
+  display: none;
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-grid {
+  display: block;
+  overflow: hidden;
+}
+
+html.codex-hub-android body.android-chat-mode .conversation-pane {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  border: 0;
+}
+
+html.codex-hub-android body.android-chat-mode .project-tabs,
+html.codex-hub-android body.android-chat-mode .control-pane,
+html.codex-hub-android body.android-chat-mode .workbench-sidebar,
+html.codex-hub-android body.android-chat-mode .android-tools-nav {
+  display: none !important;
+}
+
+html.codex-hub-android body.android-chat-mode .android-project-drawer {
+  position: absolute;
+  inset: 58px auto 0 0;
+  z-index: 49;
+  width: min(84vw, 340px);
+  height: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border-right: 3px solid #111827;
+  background: #fffbea;
+  box-shadow: 8px 0 24px rgba(17, 24, 39, 0.24);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  transform: translateX(-105%);
+  visibility: hidden;
+  transition: transform 200ms ease, visibility 0s linear 200ms;
+}
+
+html.codex-hub-android body.android-chat-mode.android-drawer-open .android-project-drawer {
+  transform: translateX(0);
+  visibility: visible;
+  transition: transform 200ms ease;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #111827;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-header strong {
+  font-size: 18px;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcuts {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 8px;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut {
+  width: 100%;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 2px solid #111827;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #111827;
+  text-align: left;
+  text-decoration: none;
+  box-shadow: 2px 2px 0 rgba(17, 24, 39, 0.14);
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut:first-child {
+  background: #fff1a6;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #111827;
+  border-radius: 4px;
+  background: #ffd51d;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut-copy,
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut-copy strong,
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut-copy small {
+  min-width: 0;
+  display: block;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut-copy strong {
+  font-size: 14px;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut-copy small {
+  margin-top: 2px;
+  color: #665e46;
+  font-size: 11px;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-section-label {
+  margin: 2px 2px -2px;
+  color: #665e46;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-header button,
+html.codex-hub-android body.android-chat-mode .android-drawer-manage {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 2px solid #111827;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #111827;
+  font-weight: 800;
+}
+
+html.codex-hub-android body.android-chat-mode .android-project-drawer .project-rail-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+html.codex-hub-android body.android-chat-mode .android-project-drawer .rail-project {
+  padding: 11px 12px;
+  border: 2px solid #111827;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #111827;
+  text-decoration: none;
+  box-shadow: 2px 2px 0 rgba(17, 24, 39, 0.14);
+}
+
+html.codex-hub-android body.android-chat-mode .android-project-drawer .rail-project.is-active {
+  background: #fff1a6;
+  box-shadow: 3px 3px 0 rgba(217, 155, 0, 0.28);
+}
+
+html.codex-hub-android body.android-chat-mode .android-project-drawer .rail-project strong,
+html.codex-hub-android body.android-chat-mode .android-project-drawer .rail-project small {
+  display: block;
+}
+
+html.codex-hub-android body.android-chat-mode .android-project-drawer .rail-project small {
+  margin-top: 3px;
+  color: #665e46;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-manage {
+  flex: 0 0 auto;
+  width: 100%;
+  background: #dce8ff;
+}
+
+html.codex-hub-android body.android-chat-mode .chat-panel {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 8px 10px 8px;
+}
+
+html.codex-hub-android body.android-chat-mode .chat-context-label,
+html.codex-hub-android body.android-chat-mode .day-divider {
+  display: none;
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-chat {
+  flex: 1 1 auto;
+  width: 100%;
+  height: auto !important;
+  min-height: 0;
+  max-height: none !important;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: auto;
+  padding: 4px 2px 10px;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-chat .chat-message {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
+
+html.codex-hub-android body.android-chat-mode .message-card pre {
+  max-height: none;
+  overflow-y: visible;
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-composer {
+  flex: 0 0 auto;
+  position: relative;
+  inset: auto;
+  z-index: 15;
+  width: 100%;
+  margin: 6px 0 0;
+  padding: 7px;
+  gap: 5px;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-tabs {
+  gap: 5px;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-tabs label {
+  min-height: 24px;
+  padding-inline: 7px;
+  font-size: 12px;
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-composer textarea {
+  height: 58px;
+  min-height: 58px;
+  max-height: 96px;
+  resize: none;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-attachments:not([hidden]) {
+  min-height: 62px;
+  display: flex;
+  padding: 3px 1px 1px;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-attachment {
+  min-width: min(190px, 72vw);
+  scroll-snap-align: start;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-tools {
+  display: grid;
+  grid-template-columns: 70px 82px 42px 42px minmax(62px, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-runtime-settings {
+  min-width: 0;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-runtime-settings > summary {
+  width: 70px;
+  height: 42px;
+  min-height: 42px;
+  display: grid;
+  place-content: center;
+  gap: 0;
+  padding: 2px 5px;
+  text-align: center;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-runtime-settings > summary small {
+  max-width: 58px;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-runtime-panel {
+  position: fixed;
+  inset: auto 10px 126px;
+  width: auto;
+  max-height: min(52dvh, 420px);
+  overflow-y: auto;
+  grid-template-columns: 1fr;
+  padding: 12px;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-runtime-panel p {
+  grid-column: 1;
+}
+
+html.codex-hub-android body.android-chat-mode .tool-icons {
+  display: none;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-target {
+  display: block;
+  width: 82px;
+  min-width: 82px;
+  min-height: 42px;
+  margin: 0;
+  padding: 0;
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-target > span {
+  display: none;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-target select {
+  width: 100%;
+  min-width: 82px;
+  max-width: 82px;
+  height: 42px;
+  min-height: 42px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 9px;
+  border: 1px solid #aaa9a2;
+  border-radius: 8px;
+  background-color: #fafaf8;
+  color: #5d5c57;
+  font-size: 13px;
+  touch-action: manipulation;
+}
+
+html.codex-hub-android body.android-chat-mode .send-button {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+  justify-self: end;
+  touch-action: manipulation;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-action {
+  width: 42px;
+  height: 42px;
+  min-height: 42px;
+  box-sizing: border-box;
+  justify-self: end;
+  touch-action: manipulation;
+}
+
+html.codex-hub-android body.android-chat-mode .mention-menu {
+  left: 8px;
+  right: 8px;
+  bottom: 150px;
+  width: auto;
+  max-height: min(280px, 42dvh);
+}
+
+html.codex-hub-android body.android-tools-mode .workbench-grid {
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #fffbea;
+}
+
+html.codex-hub-android body.android-tools-mode .conversation-pane {
+  display: none !important;
+}
+
+html.codex-hub-android body.android-tools-mode .control-pane,
+html.codex-hub-android body.android-tools-mode .workbench-sidebar {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  display: none;
+  overflow: visible;
+  border: 0;
+  padding: 12px;
+}
+
+html.codex-hub-android body.android-tools-mode .control-pane.android-tool-container-active {
+  display: grid;
+  gap: 12px;
+  position: static;
+  inset: auto;
+  z-index: auto;
+  max-height: none;
+  transform: none;
+  transition: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+html.codex-hub-android body.android-tools-mode .control-pane.android-tool-container-active > .memory-drawer-head {
+  display: none;
+}
+
+html.codex-hub-android body.android-tools-mode .control-pane > section {
+  display: none;
+}
+
+html.codex-hub-android body.android-tools-mode .control-pane > section.android-tool-section-active {
+  display: block;
+}
+
+html.codex-hub-android body.android-tools-mode .workbench-sidebar.android-tool-section-active {
+  display: grid;
+  gap: 16px;
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-nav {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  padding: 9px 10px;
+  border-bottom: 2px solid #111827;
+  background: rgba(255, 251, 234, 0.98);
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-nav button {
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 7px;
+  border: 2px solid #111827;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+  box-shadow: 2px 2px 0 rgba(217, 155, 0, 0.25);
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-nav button:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 rgba(217, 155, 0, 0.25);
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-nav button[aria-current="page"] {
+  background: #ffd51d;
+  box-shadow: 2px 2px 0 rgba(17, 24, 39, 0.28);
+}
+
+@media (max-width: 360px) {
+  html.codex-hub-android body.android-chat-mode .composer-tools {
+    grid-template-columns: 42px 42px minmax(0, 1fr) 42px;
+    gap: 6px;
+  }
+
+  html.codex-hub-android body.android-chat-mode .composer-runtime-settings {
+    grid-column: 1 / 3;
+  }
+
+  html.codex-hub-android body.android-chat-mode .composer-runtime-settings > summary {
+    width: 100%;
+  }
+
+  html.codex-hub-android body.android-chat-mode .composer-target {
+    grid-column: 3 / 5;
+    width: 100%;
+    min-width: 0;
+  }
+
+  html.codex-hub-android body.android-chat-mode .composer-target select {
+    min-width: 0;
+    max-width: none;
+  }
+
+  html.codex-hub-android body.android-chat-mode .send-button {
+    grid-column: 3 / 5;
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-height: 600px) {
+  html.codex-hub-android body.android-chat-mode .workbench-topbar {
+    flex-basis: 52px;
+    min-height: 52px;
+  }
+
+  html.codex-hub-android body.android-chat-mode .workbench-composer textarea {
+    height: 46px;
+    min-height: 46px;
+  }
+}
+
+/* Native shell polish. These rules intentionally stay scoped to the APK WebView. */
+html.codex-hub-android {
+  color-scheme: light;
+  -webkit-text-size-adjust: 100%;
+  font-synthesis: none;
+}
+
+html.codex-hub-android :where(button, a, summary, select, label) {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html.codex-hub-android :where(button, a, summary, select):focus-visible {
+  outline: 3px solid #4f7cff;
+  outline-offset: 2px;
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-topbar {
+  flex-basis: 60px;
+  min-height: 60px;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #deded8;
+  background: rgba(252, 252, 250, 0.98);
+  box-shadow: 0 1px 8px rgba(32, 32, 30, 0.06);
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-title-line {
+  gap: 6px;
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-title h1 {
+  font-size: 17px;
+  font-weight: 720;
+  letter-spacing: -0.01em;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-version-badge {
+  min-height: 20px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 7px;
+  background: #efefe9;
+  color: #6f6f68;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-connection-state {
+  flex: 0 0 auto;
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #eaf7ee;
+  color: #237342;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-connection-state i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2da765;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-connection-state.is-offline {
+  background: #fff0e4;
+  color: #a14324;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-connection-state.is-offline i {
+  background: #d15b35;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-drawer-toggle {
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  min-height: 48px;
+  border: 1px solid #d8d8d2;
+  border-radius: 13px;
+  background: #f4f4f0;
+  font-size: 21px;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-topbar .icon-button {
+  min-width: 88px;
+  min-height: 48px;
+  border-radius: 13px;
+}
+
+html.codex-hub-android body.android-chat-mode .android-project-drawer {
+  inset: 60px auto 64px 0;
+  z-index: 61;
+  width: min(88vw, 360px);
+  gap: 14px;
+  padding: 16px 14px 18px;
+  border-right: 0;
+  background: #f8f8f5;
+  box-shadow: 14px 0 38px rgba(30, 30, 28, 0.22);
+  transition: transform 220ms cubic-bezier(0.2, 0.78, 0.2, 1), visibility 0s linear 220ms;
+}
+
+html.codex-hub-android body.android-chat-mode.android-drawer-open .android-project-drawer {
+  transition: transform 220ms cubic-bezier(0.2, 0.78, 0.2, 1);
+}
+
+html.codex-hub-android body.hub-detail-screen .android-drawer-scrim {
+  position: absolute;
+  inset: 60px 0 64px;
+  z-index: 60;
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: rgba(20, 20, 18, 0.34);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 180ms ease, visibility 0s linear 180ms;
+}
+
+html.codex-hub-android body.android-drawer-open .android-drawer-scrim {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 180ms ease;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-header {
+  min-height: 48px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #deded8;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-header strong {
+  font-size: 20px;
+  letter-spacing: -0.015em;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-header button,
+html.codex-hub-android body.android-chat-mode .android-drawer-manage {
+  min-height: 48px;
+  border: 1px solid #d8d8d2;
+  border-radius: 13px;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut {
+  min-height: 64px;
+  padding: 10px 12px;
+  border: 1px solid #d8d8d2;
+  border-radius: 15px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(35, 35, 31, 0.05);
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut:first-child {
+  background: #fff7d8;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut-icon {
+  border: 0;
+  border-radius: 11px;
+  background: #ffe36b;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut-copy strong {
+  font-size: 15px;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut-copy small,
+html.codex-hub-android body.android-chat-mode .android-project-drawer .rail-project small {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+html.codex-hub-android body.android-chat-mode .android-project-drawer .rail-project {
+  min-height: 56px;
+  padding: 11px 12px;
+  border: 1px solid #d8d8d2;
+  border-radius: 14px;
+  box-shadow: none;
+}
+
+html.codex-hub-android body.android-chat-mode .android-project-drawer .rail-project.is-active {
+  border-color: #d3b13d;
+  background: #fff7d8;
+  box-shadow: none;
+}
+
+html.codex-hub-android body.android-chat-mode .chat-panel {
+  padding: 8px 10px 7px;
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-chat {
+  padding: 5px 1px 12px;
+  scroll-padding-block: 12px;
+}
+
+html.codex-hub-android body.android-chat-mode .message-card {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-composer {
+  margin-top: 7px;
+  padding: 8px;
+  gap: 7px;
+  border: 1px solid #d7d7d1;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 4px 18px rgba(32, 32, 30, 0.09);
+}
+
+html.codex-hub-android body.android-offline .workbench-composer {
+  border-color: #d99778;
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-composer textarea {
+  height: 54px;
+  min-height: 54px;
+  max-height: 112px;
+  padding: 10px 10px 4px;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-tools {
+  grid-template-columns: 64px 76px 48px 48px minmax(48px, 1fr);
+  gap: 6px;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-runtime-settings > summary {
+  width: 64px;
+  height: 48px;
+  min-height: 48px;
+  border-radius: 12px;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-target {
+  width: 76px;
+  min-width: 76px;
+  min-height: 48px;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-target select {
+  min-width: 76px;
+  max-width: 76px;
+  height: 48px;
+  min-height: 48px;
+  border-color: #d2d2cc;
+  border-radius: 12px;
+  background-color: #f7f7f4;
+  font-size: 13px;
+}
+
+html.codex-hub-android body.android-chat-mode .send-button,
+html.codex-hub-android body.android-chat-mode .composer-action {
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  min-height: 48px;
+  border-radius: 12px;
+}
+
+html.codex-hub-android body.android-chat-mode .send-button[aria-busy="true"] {
+  opacity: 0.72;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-status {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 80;
+  width: max-content;
+  max-width: calc(100vw - 36px);
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: transparent;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 5px);
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-status:not(:empty) {
+  min-height: 38px;
+  padding: 9px 14px;
+  background: #2d2d2a;
+  color: #ffffff;
+  box-shadow: 0 5px 18px rgba(25, 25, 22, 0.22);
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+html.codex-hub-android body.android-chat-mode .composer-status.is-success:not(:empty) {
+  background: #236c42;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-status.is-error:not(:empty) {
+  background: #9f3f27;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-bottom-nav {
+  flex: 0 0 64px;
+  z-index: 55;
+  width: 100%;
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  padding: 4px max(8px, env(safe-area-inset-right)) 3px max(8px, env(safe-area-inset-left));
+  border-top: 1px solid #deded8;
+  background: rgba(252, 252, 250, 0.98);
+  box-shadow: 0 -3px 14px rgba(32, 32, 30, 0.06);
+}
+
+html.codex-hub-android body.hub-detail-screen .android-bottom-nav button {
+  min-width: 0;
+  min-height: 56px;
+  display: grid;
+  place-content: center;
+  gap: 2px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: #74746e;
+  font-size: 11px;
+  line-height: 1;
+  box-shadow: none;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-bottom-nav button > span {
+  min-height: 22px;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-bottom-nav button > strong {
+  font-size: 11px;
+  font-weight: 720;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-bottom-nav button[aria-current="page"] {
+  background: #fff3b6;
+  color: #3d3416;
+}
+
+html.codex-hub-android body.android-tools-mode .workbench-grid {
+  background: #f7f7f4;
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-nav {
+  position: static;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 16px 14px;
+  border-bottom: 1px solid #deded8;
+  background: #f7f7f4;
+}
+
+html.codex-hub-android body.android-tools-mode[data-android-view="projects"] .android-tools-nav {
+  display: none;
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-intro {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 3px;
+  padding: 2px 2px 5px;
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-intro strong {
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-intro small {
+  color: #72726b;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-nav button {
+  min-height: 68px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid #d8d8d2;
+  border-radius: 15px;
+  background: #ffffff;
+  text-align: left;
+  box-shadow: 0 2px 8px rgba(35, 35, 31, 0.05);
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-nav button > span {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: #f0f0eb;
+  font-size: 18px;
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-nav button > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-nav button[aria-current="page"] {
+  border-color: #d3b13d;
+  background: #fff7d8;
+  box-shadow: none;
+}
+
+html.codex-hub-android body.android-tools-mode .control-pane,
+html.codex-hub-android body.android-tools-mode .workbench-sidebar {
+  padding: 14px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+html.codex-hub-android body.android-tools-mode :where(button, .button, input, select, summary) {
+  min-height: 48px;
+}
+
+@media (max-width: 370px) {
+  html.codex-hub-android body.hub-detail-screen .android-version-badge {
+    display: none;
+  }
+
+  html.codex-hub-android body.android-chat-mode .composer-tools {
+    grid-template-columns: 60px 70px 46px 46px minmax(46px, 1fr);
+    gap: 4px;
+  }
+
+  html.codex-hub-android body.android-chat-mode .composer-runtime-settings > summary {
+    width: 60px;
+  }
+
+  html.codex-hub-android body.android-chat-mode .composer-target,
+  html.codex-hub-android body.android-chat-mode .composer-target select {
+    width: 70px;
+    min-width: 70px;
+    max-width: 70px;
+  }
+}
+
+@media (max-height: 600px) {
+  html.codex-hub-android body.android-chat-mode .workbench-topbar {
+    flex-basis: 54px;
+    min-height: 54px;
+  }
+
+  html.codex-hub-android body.android-chat-mode .android-project-drawer,
+  html.codex-hub-android body.hub-detail-screen .android-drawer-scrim {
+    top: 54px;
+  }
+
+  html.codex-hub-android body.android-chat-mode .workbench-composer textarea {
+    height: 50px;
+    min-height: 50px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.codex-hub-android body.hub-detail-screen .android-project-drawer,
+  html.codex-hub-android body.hub-detail-screen .android-drawer-scrim,
+  html.codex-hub-android body.hub-detail-screen .composer-status {
+    transition: none;
+  }
+}
+
+/* v0.1.23: bundled visual layer, applied after the shared website styles. */
+html.codex-hub-android {
+  --android-canvas: #fffefa;
+  --android-surface: #f1f3e9;
+  --android-line: #dde2d1;
+  --android-ink: #263020;
+  --android-muted: #67725e;
+  --android-yellow: #f3d650;
+  background: var(--android-canvas);
+}
+
+html.codex-hub-android body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: var(--android-ink);
+}
+
+html.codex-hub-android body.hub-detail-screen {
+  --hub-canvas: var(--android-canvas);
+  --hub-surface: var(--android-canvas);
+  --hub-sidebar: var(--android-surface);
+  --hub-ink: var(--android-ink);
+  --hub-muted: var(--android-muted);
+  --hub-line: var(--android-line);
+  background: var(--android-canvas);
+  background-image: none;
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-shell {
+  padding: 0;
+}
+
+html.codex-hub-android body.hub-detail-screen .hub-more {
+  display: none;
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-topbar,
+html.codex-hub-android body.hub-detail-screen .android-bottom-nav {
+  background: var(--android-canvas);
+  border-color: var(--android-line);
+  box-shadow: none;
+}
+
+html.codex-hub-android body.hub-detail-screen .workbench-title h1 {
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-version-badge {
+  background: var(--android-surface);
+  color: var(--android-muted);
+  font-size: 10px;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-drawer-toggle,
+html.codex-hub-android body.hub-detail-screen .android-tools-back {
+  background: var(--android-surface);
+  color: #48543e;
+  border: 1px solid var(--android-line);
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-bottom-nav button {
+  color: var(--android-muted);
+  border-radius: 10px;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-bottom-nav button > strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+html.codex-hub-android body.hub-detail-screen .android-bottom-nav button[aria-current="page"] {
+  color: #3c482b;
+  background: #f8edb1;
+}
+
+html.codex-hub-android body.android-chat-mode .android-project-drawer {
+  background: var(--android-surface);
+  border-right: 1px solid var(--android-line);
+  box-shadow: 8px 0 28px rgba(38, 48, 32, 0.12);
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-header {
+  border-bottom: 1px solid var(--android-line);
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut,
+html.codex-hub-android body.android-chat-mode .android-drawer-header button,
+html.codex-hub-android body.android-chat-mode .android-drawer-manage,
+html.codex-hub-android body.android-chat-mode .android-project-drawer .rail-project {
+  border: 1px solid var(--android-line);
+  border-radius: 10px;
+  background: var(--android-canvas);
+  color: var(--android-ink);
+  box-shadow: none;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut:first-child,
+html.codex-hub-android body.android-chat-mode .android-project-drawer .rail-project.is-active {
+  border-color: #ddcf87;
+  background: #f8edb1;
+  box-shadow: none;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut-icon {
+  border: 0;
+  border-radius: 8px;
+  background: #faf3d4;
+  color: #746322;
+}
+
+html.codex-hub-android body.android-chat-mode .android-drawer-shortcut-copy small,
+html.codex-hub-android body.android-chat-mode .android-project-drawer .rail-project small {
+  color: var(--android-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-chat {
+  gap: 24px;
+  background: var(--android-canvas);
+}
+
+html.codex-hub-android body.android-chat-mode .empty-chat {
+  padding: 24px 20px;
+  border: 1px solid var(--android-line);
+  border-radius: 12px;
+  background: #f7f8f2;
+  color: var(--android-muted);
+  box-shadow: none;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+html.codex-hub-android body.android-chat-mode .empty-chat strong {
+  color: var(--android-ink);
+  font-weight: 650;
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-chat .chat-message {
+  max-width: none;
+  padding: 0 2px;
+  gap: 9px;
+  grid-template-columns: 28px minmax(0, 1fr);
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-chat .chat-message.from-user {
+  grid-template-columns: minmax(0, 1fr) 28px;
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-chat .avatar {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #cdd8bb;
+  border-radius: 8px;
+  background: #e9efdf;
+  color: #476137;
+  box-shadow: none;
+  font-size: 13px;
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-chat .chat-message.from-device .message-card {
+  border: 0;
+  padding-left: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-chat .chat-message.from-user .message-card {
+  padding: 12px 14px;
+  border: 1px solid #e6dca7;
+  border-radius: 12px 12px 3px 12px;
+  background: #faf3d4;
+  color: #414631;
+  box-shadow: none;
+}
+
+html.codex-hub-android body.android-chat-mode .message-markdown,
+html.codex-hub-android body.android-chat-mode .codex-markdown {
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+html.codex-hub-android body.android-chat-mode .codex-markdown h2 {
+  font-size: 21px;
+  line-height: 1.5;
+}
+
+html.codex-hub-android body.android-chat-mode .codex-markdown h3 {
+  font-size: 17px;
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-composer {
+  max-width: none;
+  border-color: #cbd5bd;
+  border-radius: 12px;
+  background: var(--android-canvas);
+  box-shadow: 0 3px 12px rgba(64, 80, 38, 0.04);
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-composer:focus-within {
+  border-color: #9da876;
+  box-shadow: 0 0 0 2px #e8edda;
+}
+
+html.codex-hub-android body.android-chat-mode .workbench-composer textarea:focus,
+html.codex-hub-android body.android-chat-mode .workbench-composer textarea:focus-visible {
+  outline: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+html.codex-hub-android body.android-offline .workbench-composer {
+  border-color: #d99778;
+}
+
+/* Five 48 px touch targets fit on narrow phones without inherited grid spans. */
+html.codex-hub-android body.android-chat-mode .composer-tools {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 76px) 48px 48px minmax(48px, 1fr);
+  padding: 0;
+  gap: 4px;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-tools > * {
+  grid-column: auto;
+  min-width: 0;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-runtime-settings > summary {
+  width: 64px;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-target,
+html.codex-hub-android body.android-chat-mode .composer-target select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+html.codex-hub-android body.android-chat-mode .composer-target select,
+html.codex-hub-android body.android-chat-mode .composer-runtime-settings > summary,
+html.codex-hub-android body.android-chat-mode .composer-action {
+  border: 1px solid var(--android-line);
+  border-radius: 9px;
+  background: #f6f8ef;
+  color: #5c6850;
+  box-shadow: none;
+}
+
+html.codex-hub-android body.android-chat-mode .send-button {
+  width: 48px;
+  min-width: 48px;
+  border: 1px solid #cbb44d;
+  border-radius: 9px;
+  background: var(--android-yellow);
+  color: #353b29;
+  box-shadow: none;
+}
+
+html.codex-hub-android body.android-tools-mode .workbench-grid,
+html.codex-hub-android body.android-tools-mode .android-tools-nav {
+  background: #f7f8f2;
+  border-color: var(--android-line);
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-nav button {
+  border-color: var(--android-line);
+  border-radius: 12px;
+  background: var(--android-canvas);
+  box-shadow: none;
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-nav button > span {
+  border-radius: 8px;
+  background: var(--android-surface);
+}
+
+html.codex-hub-android body.android-tools-mode .android-tools-nav button[aria-current="page"] {
+  border-color: #ddcf87;
+  background: #f8edb1;
+}
+
+html.codex-hub-android body.pixel-auth-screen .pixel-login-card input {
+  min-height: 50px;
+  font-size: 16px;
+}
+
+html.codex-hub-android body.pixel-auth-screen .pixel-login-button {
+  min-height: 50px;
+  font-size: 16px;
+}

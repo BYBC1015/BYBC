@@ -1,0 +1,37 @@
+# Copy to the BYBC repository root .github/workflows/hub-ios.yml.
+# Source package lives at hub/ios; this job never builds a signed IPA.
+name: Hub iOS simulator verification
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'hub/ios/**'
+      - '.github/workflows/hub-ios.yml'
+  pull_request:
+    paths:
+      - 'hub/ios/**'
+      - '.github/workflows/hub-ios.yml'
+permissions:
+  contents: read
+jobs:
+  simulator:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    env:
+      HUB_IOS_OUTPUT: ${{ runner.temp }}/hub-ios-verification
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build unsigned simulator app and run policy tests
+        run: bash hub/ios/scripts/verify-ios.sh
+      - name: Keep build evidence and simulator app
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hub-iOS-0.1.0-UNSIGNED-SIMULATOR-ONLY
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/hub-ios-verification/*.txt
+            ${{ runner.temp }}/hub-ios-verification/*.log
+            ${{ runner.temp }}/hub-ios-verification/*.xcresult
+            ${{ runner.temp }}/hub-ios-verification/DerivedData/Build/Products/Debug-iphonesimulator/Hub.app

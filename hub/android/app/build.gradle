@@ -1,0 +1,26 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "xyz.baicang.codexhub"
+    compileSdk 35
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    defaultConfig {
+        applicationId "xyz.baicang.codexhub"
+        minSdk 23
+        targetSdk 35
+        versionCode 26
+        versionName "0.1.25"
+
+        buildConfigField "String", "HUB_URL", "\"https://203.0.113.10/hub/\""
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+}
