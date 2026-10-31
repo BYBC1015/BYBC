@@ -486,7 +486,12 @@ public final class NativeHubActivity extends Activity {
     private void warmCache(){
         NativeHubState.Ticket ticket=state.ticket();store.warm(ticket.cacheScope(),()->main.post(()->{
             if(destroyed||!state.accepts(ticket)||!state.displays(ticket))return;
-            if(state.screen==NativeHubState.Screen.CHAT)renderChatMessages(false);else renderPage();
+            if(state.screen==NativeHubState.Screen.CHAT){
+                renderChatMessages(false);
+                if(recipientLabel!=null)recipientLabel.setText("交给 "+agentName(selectedAgent)+"  ▾");
+                JSONObject project=workspace().optJSONObject("project");
+                if(project!=null&&chatContext!=null&&chatContext.getChildAt(0) instanceof Button)((Button)chatContext.getChildAt(0)).setText(project.optString("name",state.project)+"  ▾");
+            }else renderPage();
         }));
     }
     private static JSONArray mergeMessages(JSONArray first,JSONArray second){

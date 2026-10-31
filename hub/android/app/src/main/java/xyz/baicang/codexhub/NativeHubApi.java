@@ -44,8 +44,9 @@ final class NativeHubApi {
             int status=c.getResponseCode();if(status!=200)throw new ApiError(status,"文件连接未完成，请重试");
             String type=SharedFilePolicy.safeType(c.getContentType()==null?"":c.getContentType().split(";",2)[0]);
             String disposition=c.getHeaderField("Content-Disposition");
-            if(type.equals("text/html")&&(disposition==null||!disposition.toLowerCase().startsWith("attachment")))throw new IOException("收到登录页面，请重新连接");
-            long expected=c.getContentLengthLong();if(expected>limit)throw new IOException("文件较大，请在电脑上下载");
+            if(type.equals("text/html")&&(disposition==null||!disposition.toLowerCase(java.util.Locale.ROOT).startsWith("attachment")))throw new IOException("收到登录页面，请重新连接");
+            long expected=-1;try{expected=Long.parseLong(c.getHeaderField("Content-Length"));}catch(NumberFormatException ignored){}
+            if(expected>limit)throw new IOException("文件较大，请在电脑上下载");
             temporary=File.createTempFile("native-",".part",directory);long total=0;
             try(InputStream in=c.getInputStream();java.io.FileOutputStream out=new java.io.FileOutputStream(temporary)){
                 byte[] buffer=new byte[65536];int n;while((n=in.read(buffer))!=-1){if(Thread.currentThread().isInterrupted())throw new IOException("下载已取消");total+=n;if(total>limit)throw new IOException("文件超过本机下载限制");out.write(buffer,0,n);}out.getFD().sync();
@@ -126,7 +127,7 @@ final class NativeHubApi {
         int status=connection.getResponseCode();
         if(status>=300&&status<400)throw new ApiError(status,"服务端返回旧页面跳转，请更新 Hub 服务后重试");
         String type=connection.getContentType();
-        if(type==null||!type.toLowerCase().contains("application/json"))throw new ApiError(status,"尚未连接到原生客户端接口，本机页面和草稿仍然保留");
+        if(type==null||!type.toLowerCase(java.util.Locale.ROOT).contains("application/json"))throw new ApiError(status,"尚未连接到原生客户端接口，本机页面和草稿仍然保留");
         InputStream source=status<400?connection.getInputStream():connection.getErrorStream();
         if(source==null)throw new ApiError(status,"连接暂时未完成");
         JSONObject body;

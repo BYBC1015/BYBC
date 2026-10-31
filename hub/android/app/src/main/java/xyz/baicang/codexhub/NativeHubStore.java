@@ -45,7 +45,7 @@ final class NativeHubStore {
                 AtomicFile file=new AtomicFile(new File(directory,NativeHubState.digest(key)+".json"));FileOutputStream output=null;
                 try{output=file.startWrite();output.write(bytes);file.finishWrite(output);}catch(Exception failure){if(output!=null)file.failWrite(output);return;}
                 File[] stored=directory.listFiles((dir,name)->name.endsWith(".json"));
-                if(stored!=null){java.util.Arrays.sort(stored,Comparator.comparingLong(File::lastModified));for(int i=0;i<stored.length-20;i++)new AtomicFile(stored[i]).delete();}
+                if(stored!=null){java.util.Arrays.sort(stored,(left,right)->Long.compare(left.lastModified(),right.lastModified()));for(int i=0;i<stored.length-20;i++)new AtomicFile(stored[i]).delete();}
             } catch(Exception ignored) { }
         });
     }
@@ -55,7 +55,7 @@ final class NativeHubStore {
             if(stored!=null)for(File file:stored)if(file.length()<=1500000)try(FileInputStream input=new AtomicFile(file).openRead();ByteArrayOutputStream output=new ByteArrayOutputStream()){
                 byte[] buffer=new byte[8192];int n;while((n=input.read(buffer))!=-1){if(output.size()+n>1500000)throw new java.io.IOException("bounded cache");output.write(buffer,0,n);}
                 JSONObject record=new JSONObject(output.toString("UTF-8"));JSONObject value=record.optJSONObject("data");String key=record.optString("key");
-                if(value!=null&&!key.isEmpty())synchronized(this){cacheMemory.putIfAbsent(user+":"+key,value);}
+                if(value!=null&&!key.isEmpty())synchronized(this){if(!cacheMemory.containsKey(user+":"+key))cacheMemory.put(user+":"+key,value);}
             }catch(Exception ignored){}
             completion.run();
         });
