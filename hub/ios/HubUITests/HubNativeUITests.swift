@@ -12,7 +12,30 @@ final class HubNativeUITests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["项目"].waitForExistence(timeout: 12))
     }
     override func tearDownWithError() throws { XCUIDevice.shared.orientation = .portrait; app.terminate() }
-    private func capture(_ name: String) { let attachment = XCTAttachment(screenshot: app.screenshot()); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment) }
+    private func capture(_ name: String) { let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment) }
+    private func waitForStableLandscape() {
+        let deadline = Date().addingTimeInterval(12)
+        var previous: [CGRect] = []
+        var stableSince: Date?
+        while Date() < deadline {
+            let window = app.windows.firstMatch.frame
+            let keyboard = app.keyboards.firstMatch.frame
+            let composer = app.textFields["chat.composer"].frame
+            let send = app.buttons["发送消息"].frame
+            let frames = [window, keyboard, composer, send]
+            let landscape = window.width > window.height && keyboard.width > keyboard.height
+            let contained = window.contains(composer) && window.contains(send)
+            let aboveKeyboard = composer.maxY <= keyboard.minY + 1 && send.maxY <= keyboard.minY + 1
+            if landscape && contained && aboveKeyboard && frames == previous {
+                if let since = stableSince, Date().timeIntervalSince(since) >= 1 { return }
+                if stableSince == nil { stableSince = Date() }
+            } else { stableSince = nil }
+            previous = frames
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        capture("landscape-layout-not-stable")
+        XCTFail("Landscape window, keyboard, composer and send frames did not settle: \(previous)")
+    }
 
     func testNativeTabsDetailsAndLocalBackWithoutWebView() {
         XCTAssertEqual(app.webViews.count, 0)
@@ -67,6 +90,7 @@ final class HubNativeUITests: XCTestCase {
         capture("native-portrait-keyboard")
         XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertTrue(app.textFields["chat.composer"].waitForExistence(timeout: 5))
+        waitForStableLandscape()
         XCTAssertTrue(app.keyboards.firstMatch.exists)
         XCTAssertTrue(app.textFields["chat.composer"].isHittable)
         XCTAssertTrue(app.buttons["发送消息"].isHittable)
