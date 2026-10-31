@@ -91,6 +91,7 @@ struct HubConnectionBanner: View {
 
 struct HubChatView: View {
     @ObservedObject var session: HubSession
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var showRooms = false
     @State private var showAgents = false
     @State private var chooseFiles = false
@@ -161,6 +162,10 @@ struct HubChatView: View {
             }
         }
     }
+    private var compactComposer: Bool { verticalSizeClass == .compact }
+    private var composerLayout: AnyLayout {
+        compactComposer ? AnyLayout(HStackLayout(alignment: .center, spacing: 8)) : AnyLayout(VStackLayout(alignment: .leading, spacing: 9))
+    }
     private var composer: some View {
         VStack(alignment: .leading, spacing: 9) {
             if let status = session.statusMessage { Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(3) }
@@ -172,9 +177,6 @@ struct HubChatView: View {
                     else { Button("查收") { Task { await session.checkReceipt() } }; Button("重试", action: session.retryPending) }
                 }.padding(9).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
             }
-            Button { showAgents = true } label: {
-                Label("交给 " + recipientNames, systemImage: "person.crop.circle").font(.subheadline).frame(minHeight: 32)
-            }
             if !session.draft.files.isEmpty {
                 ScrollView(.horizontal) {
                     HStack { ForEach(session.draft.files) { file in
@@ -182,14 +184,22 @@ struct HubChatView: View {
                     } }
                 }
             }
-            TextField("写下目标，或添加图片和文件…", text: $session.draft.text, axis: .vertical).lineLimit(1...5).font(.body).padding(.vertical, 5).disabled(session.draft.awaitingReceipt).focused($composerFocused).accessibilityIdentifier("chat.composer")
-            HStack(spacing: 12) {
-                PhotosPicker(selection: $photos, maxSelectionCount: max(1, 12 - session.draft.files.count), matching: .any(of: [.images, .videos])) { Image(systemName: "photo").frame(width: 44, height: 44) }.disabled(session.draft.awaitingReceipt).accessibilityLabel("添加图片或视频")
-                Button { filePickerScope = session.selectionScope; filePickerAccount = session.accountScope; filePickerGeneration = session.selectionGeneration; chooseFiles = true } label: { Image(systemName: "paperclip").frame(width: 44, height: 44) }.accessibilityLabel("添加文件")
-                Spacer()
-                Button(action: session.send) { Image(systemName: "arrow.up").frame(width: 44, height: 44) }.buttonStyle(.borderedProminent).clipShape(Circle()).disabled(!session.draft.hasContent || session.pending != nil).accessibilityLabel("发送消息")
+            // AnyLayout keeps the same TextField and FocusState when rotating.
+            composerLayout {
+                Button { showAgents = true } label: {
+                    Label("交给 " + recipientNames, systemImage: "person.crop.circle").font(.subheadline).lineLimit(1).frame(minHeight: 44)
+                }.frame(maxWidth: compactComposer ? 120 : nil, alignment: .leading)
+                TextField("写下目标，或添加图片和文件…", text: $session.draft.text, axis: .vertical)
+                    .lineLimit(compactComposer ? 1...2 : 1...5).font(.body).padding(.vertical, 5).frame(maxWidth: .infinity)
+                    .disabled(session.draft.awaitingReceipt).focused($composerFocused).accessibilityIdentifier("chat.composer")
+                HStack(spacing: compactComposer ? 4 : 12) {
+                    PhotosPicker(selection: $photos, maxSelectionCount: max(1, 12 - session.draft.files.count), matching: .any(of: [.images, .videos])) { Image(systemName: "photo").frame(width: 44, height: 44) }.disabled(session.draft.awaitingReceipt).accessibilityLabel("添加图片或视频")
+                    Button { filePickerScope = session.selectionScope; filePickerAccount = session.accountScope; filePickerGeneration = session.selectionGeneration; chooseFiles = true } label: { Image(systemName: "paperclip").frame(width: 44, height: 44) }.accessibilityLabel("添加文件")
+                    if !compactComposer { Spacer() }
+                    Button(action: session.send) { Image(systemName: "arrow.up").frame(width: 44, height: 44) }.buttonStyle(.borderedProminent).clipShape(Circle()).disabled(!session.draft.hasContent || session.pending != nil).accessibilityLabel("发送消息")
+                }.fixedSize(horizontal: compactComposer, vertical: false)
             }
-        }.padding(14).background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 24)).padding(.horizontal, 10).padding(.vertical, 8).background(hubCanvas)
+        }.padding(compactComposer ? 8 : 14).background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 24)).padding(.horizontal, 10).padding(.vertical, 8).background(hubCanvas)
     }
     private var recipientNames: String { (session.workspace?.agents.filter { session.draft.agentIDs.contains($0.id) }.map(\.name) ?? []).joined(separator: "、").isEmpty ? "总控" : (session.workspace?.agents.filter { session.draft.agentIDs.contains($0.id) }.map(\.name) ?? []).joined(separator: "、") }
     private var recipientPicker: some View {

@@ -8,11 +8,50 @@ final class HubNativeUITests: XCTestCase {
         app.launchEnvironment["HUB_TESTING"] = "1"
         app.launchEnvironment["HUB_UI_TESTING"] = "1"
         app.launchEnvironment["HUB_RESET_FIXTURE"] = "1"
+        XCUIDevice.shared.orientation = .portrait
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["项目"].waitForExistence(timeout: 12))
+        waitForStablePortrait()
     }
-    override func tearDownWithError() throws { XCUIDevice.shared.orientation = .portrait; app.terminate() }
+    override func tearDownWithError() throws {
+        if app.state == .runningForeground { XCUIDevice.shared.orientation = .portrait; waitForStablePortrait() }
+        app.terminate()
+    }
     private func capture(_ name: String) { let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment) }
+    private func waitForStablePortrait(keyboard: Bool = false) {
+        let deadline = Date().addingTimeInterval(12)
+        var previous: [CGRect] = []
+        var stableSince: Date?
+        while Date() < deadline {
+            let window = app.windows.firstMatch.frame
+            var frames = [window]
+            var ready = window.height > window.width && window.width > 0
+            if keyboard {
+                let keys = app.keyboards.firstMatch.frame
+                let composer = app.textFields["chat.composer"].frame
+                frames += [keys, composer]
+                ready = ready && keys.height > 0 && window.contains(composer) && composer.maxY <= keys.minY + 1
+            }
+            if ready && frames == previous {
+                if let since = stableSince, Date().timeIntervalSince(since) >= 1 { return }
+                if stableSince == nil { stableSince = Date() }
+            } else { stableSince = nil }
+            previous = frames
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        capture("portrait-layout-not-stable")
+        XCTFail("Portrait layout did not settle: \(previous)")
+    }
+    private func typeDraft(_ text: String, evidence: String) {
+        let composer = app.textFields["chat.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        composer.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        waitForStablePortrait(keyboard: true)
+        composer.typeText(text)
+        capture(evidence)
+        XCTAssertEqual(composer.value as? String, text, "Verify all input reached the native field before testing persistence")
+    }
     private func waitForStableLandscape() {
         let deadline = Date().addingTimeInterval(12)
         var previous: [CGRect] = []
@@ -94,6 +133,9 @@ final class HubNativeUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.exists)
         XCTAssertTrue(app.textFields["chat.composer"].isHittable)
         XCTAssertTrue(app.buttons["发送消息"].isHittable)
+        XCTAssertTrue(app.buttons["添加图片或视频"].isHittable)
+        XCTAssertTrue(app.buttons["添加文件"].isHittable)
+        XCTAssertTrue(app.staticTexts["离线 · 可继续查看和写草稿"].isHittable)
         XCTAssertFalse(app.staticTexts["Siri, Dictation & Privacy"].exists)
         capture("native-offline-draft-landscape")
         app.terminate()
@@ -105,10 +147,10 @@ final class HubNativeUITests: XCTestCase {
         XCTAssertEqual(app.webViews.count, 0)
     }
     func testRoomChangePreservesSeparateDrafts() {
-        app.textFields["chat.composer"].tap(); app.textFields["chat.composer"].typeText("Existing room draft")
+        typeDraft("Existing room draft", evidence: "existing-room-input-before-navigation")
         app.buttons["切换对话"].tap()
         app.buttons["发起新对话"].tap()
-        app.textFields["chat.composer"].tap(); app.textFields["chat.composer"].typeText("New room draft")
+        typeDraft("New room draft", evidence: "new-room-input-before-navigation")
         app.buttons["切换对话"].tap()
         app.buttons["room.1"].tap()
         XCTAssertEqual(app.textFields["chat.composer"].value as? String, "Existing room draft")
