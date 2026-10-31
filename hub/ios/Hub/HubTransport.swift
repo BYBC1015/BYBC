@@ -91,7 +91,7 @@ final class HubTransport: @unchecked Sendable {
               policy.isInternal(url), policy.isDownload(url) else { throw HubNativeError.untrustedURL }
         let directory = disk.temporaryURL(suffix: "preview")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let destination = directory.appendingPathComponent(HubPolicy.safeFilename(attachment.name))
+        let destination = directory.appendingPathComponent(HubPolicy.diskFilename(attachment.name))
         do {
             var request = try self.request("api/mobile/session")
             request.url = url; request.setValue("application/octet-stream, */*", forHTTPHeaderField: "Accept")

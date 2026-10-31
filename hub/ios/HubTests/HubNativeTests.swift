@@ -33,6 +33,19 @@ final class HubNativeTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: disk.fileURL(file.id)), Data([0, 1, 2, 255]))
         XCTAssertFalse(HubNativeRules.acceptsFiles(existing: [], newBytes: 51 * 1024 * 1024))
     }
+    func testLongUnicodeDownloadNameFitsFilesystemAndPreservesExtension() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for name in [String(repeating: "超长中文", count: 70) + ".png", String(repeating: "한글", count: 100) + ".pdf"] {
+            let safe = HubPolicy.diskFilename(name)
+            XCTAssertLessThanOrEqual(safe.decomposedStringWithCanonicalMapping.utf8.count, 240)
+            XCTAssertEqual((safe as NSString).pathExtension, (name as NSString).pathExtension)
+            let url = root.appendingPathComponent(safe)
+            try Data([9,8,7]).write(to: url)
+            XCTAssertEqual(try Data(contentsOf: url), Data([9,8,7]))
+        }
+    }
     @MainActor
     func testExpiredLoginKeepsDraftAndFileOnlyForVerifiedSameUser() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

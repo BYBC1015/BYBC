@@ -74,6 +74,21 @@ struct HubPolicy {
         return request
     }
 
+    static func diskFilename(_ value: String) -> String {
+        let safe = safeFilename(value)
+        let candidate = (safe as NSString).pathExtension
+        let suffix = candidate.isEmpty || candidate.decomposedStringWithCanonicalMapping.utf8.count > 24 ? "" : "." + candidate
+        let stem = suffix.isEmpty ? safe : (safe as NSString).deletingPathExtension
+        var prefix = ""
+        // APFS also normalizes Unicode. Count decomposed bytes, not characters,
+        // and leave headroom under the 255-byte filesystem component limit.
+        for character in stem {
+            let next = prefix + String(character)
+            if (next + suffix).decomposedStringWithCanonicalMapping.utf8.count > 240 { break }
+            prefix = next
+        }
+        return (prefix.isEmpty ? "Hub" : prefix) + suffix
+    }
     static func safeFilename(_ value: String) -> String {
         let forbidden = CharacterSet.controlCharacters.union(CharacterSet(charactersIn: "/\\:"))
         let sanitized = String(String.UnicodeScalarView(value.unicodeScalars.map { forbidden.contains($0) ? Unicode.Scalar(95)! : $0 }))

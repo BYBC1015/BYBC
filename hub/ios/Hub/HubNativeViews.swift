@@ -53,7 +53,8 @@ struct HubNativeRoot: View {
 
 struct HubLoginView: View {
     @ObservedObject var session: HubSession
-    @State private var username = "", password = ""
+    @State private var username = ""
+    @State private var password = ""
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -90,10 +91,13 @@ struct HubConnectionBanner: View {
 
 struct HubChatView: View {
     @ObservedObject var session: HubSession
-    @State private var showRooms = false, showAgents = false, chooseFiles = false
+    @State private var showRooms = false
+    @State private var showAgents = false
+    @State private var chooseFiles = false
     @State private var photos: [PhotosPickerItem] = []
     @State private var followLatest = true
-    @State private var filePickerScope = "", filePickerAccount = ""
+    @State private var filePickerScope = ""
+    @State private var filePickerAccount = ""
     @State private var filePickerGeneration = 0
     var body: some View {
         VStack(spacing: 0) {
@@ -287,7 +291,10 @@ struct HubAgentDetail: View {
 
 struct HubTasksView: View {
     @ObservedObject var session: HubSession
-    @State private var history: [HubTask] = [], before: Int?, loadedHistory = false, historyError: String?
+    @State private var history: [HubTask] = []
+    @State private var before: Int?
+    @State private var loadedHistory = false
+    @State private var historyError: String?
     var body: some View {
         List {
             Section("当前工作") { ForEach(session.workspace?.tasks ?? []) { task in
@@ -315,8 +322,11 @@ struct HubTasksView: View {
 struct HubTaskScreen: View {
     let task: HubTask
     @ObservedObject var session: HubSession
-    @State private var detail: HubTaskDetail?, error: String?
-    @State private var older: [HubMessage] = [], before: Int?, paged = false
+    @State private var detail: HubTaskDetail?
+    @State private var error: String?
+    @State private var older: [HubMessage] = []
+    @State private var before: Int?
+    @State private var paged = false
     var body: some View {
         ScrollView { VStack(alignment: .leading, spacing: 20) {
             Text(task.title).font(.title2.weight(.semibold)); Text((detail?.task ?? task).statusLabel).foregroundStyle(hubAccent)
@@ -368,7 +378,9 @@ struct HubToolScreen: View {
 }
 struct HubLibraryScreen: View {
     @ObservedObject var session: HubSession
-    @State private var attachments: [HubAttachment] = [], before: Int?, error: String?
+    @State private var attachments: [HubAttachment] = []
+    @State private var before: Int?
+    @State private var error: String?
     var body: some View {
         List { ForEach(attachments) { file in Button { session.openAttachment(file) } label: { Label(file.name, systemImage: (file.mimeType ?? "").hasPrefix("image/") ? "photo" : "doc").frame(minHeight: 44) }.disabled(session.downloading) }
             if before != nil { Button("加载更多") { Task { await load(more: true) } } }
@@ -386,7 +398,8 @@ struct HubLibraryScreen: View {
 }
 struct HubDeviceScreen: View {
     @ObservedObject var session: HubSession
-    @State private var devices: [HubDevice] = [], error: String?
+    @State private var devices: [HubDevice] = []
+    @State private var error: String?
     var body: some View {
         List { ForEach(devices) { device in VStack(alignment: .leading, spacing: 8) { Label(device.deviceLabel, systemImage: "desktopcomputer").font(.headline); Text(device.presenceLabel ?? (device.isOnline ? "设备在线" : "设备离线")); Text(device.isAgentOnline ? "执行连接可用" : "执行连接尚未就绪").font(.caption).foregroundStyle(.secondary) }.padding(.vertical, 7) }; if let error { Text(error) } }.task { await load() }.refreshable { await load() }
     }
@@ -394,7 +407,12 @@ struct HubDeviceScreen: View {
 }
 struct HubFeedbackScreen: View {
     @ObservedObject var session: HubSession
-    @State private var title = "", bodyText = "", kind = "bug", key = UUID().uuidString, result: String?, saving = false
+    @State private var title = ""
+    @State private var bodyText = ""
+    @State private var kind = "bug"
+    @State private var key = UUID().uuidString
+    @State private var result: String?
+    @State private var saving = false
     var body: some View {
         Form {
             Picker("类型", selection: $kind) { Text("遇到问题").tag("bug"); Text("改进想法").tag("idea") }
@@ -407,7 +425,8 @@ struct HubFeedbackScreen: View {
 }
 struct HubDownloadsScreen: View {
     @ObservedObject var session: HubSession
-    @State private var releases: [HubRelease] = [], error: String?
+    @State private var releases: [HubRelease] = []
+    @State private var error: String?
     var body: some View {
         List { ForEach(releases) { release in VStack(alignment: .leading, spacing: 9) {
             Text("\(release.platformLabel) · \(release.version)").font(.headline)
