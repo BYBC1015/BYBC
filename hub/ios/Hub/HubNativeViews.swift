@@ -125,7 +125,7 @@ struct HubChatView: View {
                     .refreshable { session.refresh() }
                     .onChange(of: session.messages.last?.id) { _, _ in if followLatest { withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo("latest", anchor: .bottom) } } }
                     .overlay(alignment: .bottomTrailing) {
-                        if !followLatest { Button { proxy.scrollTo("latest", anchor: .bottom) } label: { Label("最新消息", systemImage: "arrow.down") }.buttonStyle(.borderedProminent).padding(12) }
+                        if !followLatest && !(compactComposer && composerFocused) { Button { proxy.scrollTo("latest", anchor: .bottom) } label: { Label("最新消息", systemImage: "arrow.down") }.buttonStyle(.borderedProminent).padding(12) }
                     }
                 }
             }
@@ -166,6 +166,13 @@ struct HubChatView: View {
         }
     }
     private var compactComposer: Bool { verticalSizeClass == .compact }
+    private var draftTextBinding: Binding<String> {
+        let account = session.accountScope, selection = session.selectionScope, requestKey = session.draft.requestKey
+        let originalText = session.draft.text
+        return Binding(get: { session.readDraftText(account: account, selection: selection, requestKey: requestKey, fallback: originalText) }, set: { value in
+            session.updateDraftText(value, account: account, selection: selection, requestKey: requestKey)
+        })
+    }
     private var hasComposerDetails: Bool { session.statusMessage != nil || session.pending != nil || !session.draft.files.isEmpty }
     private var composerDetailSummary: String {
         var parts: [String] = []
@@ -204,14 +211,22 @@ struct HubChatView: View {
                         if compactComposer && hasComposerDetails { Text(composerDetailSummary).font(.caption2).lineLimit(1) }
                     }.frame(minHeight: 44)
                 }.frame(maxWidth: compactComposer ? 120 : nil, alignment: .leading).accessibilityIdentifier("chat.composer-details")
-                TextField("写下目标，或添加图片和文件…", text: $session.draft.text, axis: .vertical)
+                TextField("写下目标，或添加图片和文件…", text: draftTextBinding, axis: .vertical)
                     .lineLimit(compactComposer ? 1...2 : 1...5).font(.body).padding(.vertical, 5).frame(maxWidth: .infinity)
                     .disabled(session.draft.awaitingReceipt).focused($composerFocused).accessibilityIdentifier("chat.composer")
                 HStack(spacing: compactComposer ? 4 : 12) {
                     PhotosPicker(selection: $photos, maxSelectionCount: max(1, 12 - session.draft.files.count), matching: .any(of: [.images, .videos])) { Image(systemName: "photo").frame(width: 44, height: 44) }.disabled(session.draft.awaitingReceipt).accessibilityLabel("添加图片或视频")
                     Button { filePickerScope = session.selectionScope; filePickerAccount = session.accountScope; filePickerGeneration = session.selectionGeneration; chooseFiles = true } label: { Image(systemName: "paperclip").frame(width: 44, height: 44) }.accessibilityLabel("添加文件")
                     if !compactComposer { Spacer() }
-                    Button(action: session.send) { Image(systemName: "arrow.up").frame(width: 44, height: 44) }.buttonStyle(.borderedProminent).clipShape(Circle()).disabled(!session.draft.hasContent || session.pending != nil).accessibilityLabel("发送消息")
+                    if compactComposer {
+                        Button(action: session.send) {
+                            Image(systemName: "arrow.up").frame(width: 44, height: 44)
+                                .foregroundStyle(session.draft.hasContent && session.pending == nil ? hubCanvas : Color.secondary)
+                                .background(session.draft.hasContent && session.pending == nil ? hubAccent : Color.white.opacity(0.09), in: Circle())
+                        }.buttonStyle(.plain).disabled(!session.draft.hasContent || session.pending != nil).accessibilityLabel("发送消息")
+                    } else {
+                        Button(action: session.send) { Image(systemName: "arrow.up").frame(width: 44, height: 44) }.buttonStyle(.borderedProminent).clipShape(Circle()).disabled(!session.draft.hasContent || session.pending != nil).accessibilityLabel("发送消息")
+                    }
                 }.fixedSize(horizontal: compactComposer, vertical: false)
             }
         }.padding(compactComposer ? 8 : 14).background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 24)).padding(.horizontal, 10).padding(.vertical, 8).background(hubCanvas)

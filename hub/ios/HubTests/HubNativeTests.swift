@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 @testable import Hub
 
 final class HubNativeTests: XCTestCase {
@@ -86,6 +87,39 @@ final class HubNativeTests: XCTestCase {
         XCTAssertFalse(HubNativeRules.requestStillCurrent(generation: 2, expected: 1, session: "a", expectedSession: "a", scope: "p/1", expectedScope: "p/1"))
         XCTAssertFalse(HubNativeRules.requestStillCurrent(generation: 2, expected: 2, session: "b", expectedSession: "a", scope: "p/1", expectedScope: "p/1"))
         XCTAssertFalse(HubNativeRules.requestStillCurrent(generation: 2, expected: 2, session: "a", expectedSession: "a", scope: "p/2", expectedScope: "p/1"))
+    }
+    @MainActor
+    func testDraftInputRejectsStaleEditorAndSkipsDuplicatePublication() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [HubNoNetworkProtocol.self]
+        let model = HubSession(baseURL: URL(string: "https://example.invalid/hub/")!, connectAutomatically: false, configuration: config, storageRoot: root)
+        try model.installFixture()
+        let account = model.accountScope, selection = model.selectionScope, key = model.draft.requestKey
+        var notifications = 0
+        let token = model.objectWillChange.sink { notifications += 1 }
+        defer { token.cancel() }
+        model.updateDraftText("最新输入", account: account, selection: selection, requestKey: key)
+        XCTAssertEqual(notifications, 1)
+        model.updateDraftText("最新输入", account: account, selection: selection, requestKey: key)
+        XCTAssertEqual(notifications, 1, "Identical input must not publish or schedule another view update")
+        model.send()
+        XCTAssertEqual(model.pending?.text, "最新输入", "Send reads the latest input synchronously")
+        model.updateDraftText("下一条", account: account, selection: selection, requestKey: model.draft.requestKey)
+        var before = notifications
+        model.updateDraftText("late old editor", account: account, selection: selection, requestKey: key)
+        XCTAssertEqual(model.draft.text, "下一条"); XCTAssertEqual(notifications, before)
+        XCTAssertEqual(model.readDraftText(account: account, selection: selection, requestKey: key, fallback: "原编辑器"), "原编辑器")
+        model.openConversation(nil)
+        before = notifications
+        model.updateDraftText("wrong room", account: account, selection: selection, requestKey: model.draft.requestKey)
+        XCTAssertTrue(model.draft.text.isEmpty); XCTAssertEqual(notifications, before)
+        XCTAssertEqual(model.readDraftText(account: account, selection: selection, requestKey: model.draft.requestKey, fallback: "原编辑器"), "原编辑器")
+        model.expireFixtureSession(); try model.installFixture(userID: 2, login: "other-login")
+        before = notifications
+        model.updateDraftText("wrong login", account: account, selection: model.selectionScope, requestKey: model.draft.requestKey)
+        XCTAssertTrue(model.draft.text.isEmpty); XCTAssertEqual(notifications, before)
+        XCTAssertEqual(model.readDraftText(account: account, selection: model.selectionScope, requestKey: model.draft.requestKey, fallback: "原编辑器"), "原编辑器")
     }
 }
 

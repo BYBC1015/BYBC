@@ -7,6 +7,7 @@ final class HubNativeUITests: XCTestCase {
         app = XCUIApplication()
         app.launchEnvironment["HUB_TESTING"] = "1"
         app.launchEnvironment["HUB_UI_TESTING"] = "1"
+        app.launchEnvironment["HUB_INPUT_DIAGNOSTICS"] = "0"
         app.launchEnvironment["HUB_RESET_FIXTURE"] = "1"
         XCUIDevice.shared.orientation = .portrait
         app.launch()
@@ -187,9 +188,14 @@ final class HubNativeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["查收"].exists)
         XCTAssertTrue(app.buttons["重试"].exists)
         let remove = app.buttons["移除 参考说明.txt"]
-        if !remove.isHittable { app.scrollViews["chat.composer-details-content"].swipeUp() }
-        XCTAssertTrue(remove.isHittable)
         capture("native-landscape-composer-details")
+        app.scrollViews["chat.composer-details-content"].swipeUp()
+        let visibleFile = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let window = self.app.windows.firstMatch.frame
+            return remove.isHittable && window.contains(remove.frame) && remove.frame.maxY < window.maxY - 20
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [visibleFile], timeout: 5), .completed)
+        capture("native-landscape-composer-files-scrolled")
         remove.tap()
         XCTAssertFalse(remove.exists)
         app.navigationBars["本条消息"].buttons["完成"].tap()

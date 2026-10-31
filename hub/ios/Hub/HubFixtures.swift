@@ -28,7 +28,7 @@ enum HubInputDiagnostics {
     private static var observers: [NSObjectProtocol] = []
     static func enable(isFixtureSession: @escaping @MainActor () -> Bool) {
         let environment = ProcessInfo.processInfo.environment
-        guard !enabled, environment["HUB_TESTING"] == "1", environment["HUB_UI_TESTING"] == "1", isFixtureSession() else { return }
+        guard !enabled, environment["HUB_TESTING"] == "1", environment["HUB_UI_TESTING"] == "1", environment["HUB_INPUT_DIAGNOSTICS"] == "1", isFixtureSession() else { return }
         self.isFixtureSession = isFixtureSession
         enabled = true
         for name in [UITextField.textDidChangeNotification, UITextField.textDidBeginEditingNotification, UITextField.textDidEndEditingNotification,

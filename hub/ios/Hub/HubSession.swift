@@ -279,6 +279,15 @@ final class HubSession: ObservableObject {
         saveTask?.cancel(); guard identity != nil, selectedProject != nil else { return }
         saveTask = Task { [weak self] in try? await Task.sleep(for: .milliseconds(250)); guard !Task.isCancelled else { return }; self?.persistDraft() }
     }
+    func updateDraftText(_ text: String, account: String, selection: String, requestKey: String) {
+        guard identity != nil, accountScope == account, selectionScope == selection,
+              draft.requestKey == requestKey, !draft.awaitingReceipt, draft.text != text else { return }
+        draft.text = text
+    }
+    func readDraftText(account: String, selection: String, requestKey: String, fallback: String) -> String {
+        guard identity != nil, accountScope == account, selectionScope == selection, draft.requestKey == requestKey else { return fallback }
+        return draft.text
+    }
     @discardableResult
     private func persistDraft() -> Bool {
         saveTask?.cancel(); guard identity != nil, selectedProject != nil else { return false }
