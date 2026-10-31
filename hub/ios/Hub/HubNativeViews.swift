@@ -96,6 +96,7 @@ struct HubChatView: View {
     @State private var chooseFiles = false
     @State private var photos: [PhotosPickerItem] = []
     @State private var followLatest = true
+    @FocusState private var composerFocused: Bool
     @State private var filePickerScope = ""
     @State private var filePickerAccount = ""
     @State private var filePickerGeneration = 0
@@ -117,6 +118,7 @@ struct HubChatView: View {
                         }.padding(18)
                     }
                     .scrollDismissesKeyboard(.interactively)
+                    .accessibilityIdentifier("chat.messages")
                     .refreshable { session.refresh() }
                     .onChange(of: session.messages.last?.id) { _, _ in if followLatest { withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo("latest", anchor: .bottom) } } }
                     .overlay(alignment: .bottomTrailing) {
@@ -131,6 +133,12 @@ struct HubChatView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) { Button { showRooms = true } label: { Image(systemName: "bubble.left.and.text.bubble.right").frame(width: 44, height: 44) }.accessibilityLabel("切换对话") }
             ToolbarItem(placement: .topBarTrailing) { Image("Owl").resizable().scaledToFit().frame(width: 30, height: 30).accessibilityHidden(true) }
+            ToolbarItem(placement: .topBarTrailing) {
+                if composerFocused {
+                    Button { composerFocused = false } label: { Image(systemName: "keyboard.chevron.compact.down").frame(width: 44, height: 44) }
+                        .accessibilityLabel("收起键盘").accessibilityIdentifier("chat.dismiss-keyboard")
+                }
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { if session.selectedProject != nil { composer } }
         .sheet(isPresented: $showRooms) { HubConversationPicker(session: session, close: { showRooms = false }) }
@@ -174,7 +182,7 @@ struct HubChatView: View {
                     } }
                 }
             }
-            TextField("写下目标，或添加图片和文件…", text: $session.draft.text, axis: .vertical).lineLimit(1...5).font(.body).padding(.vertical, 5).disabled(session.draft.awaitingReceipt).accessibilityIdentifier("chat.composer")
+            TextField("写下目标，或添加图片和文件…", text: $session.draft.text, axis: .vertical).lineLimit(1...5).font(.body).padding(.vertical, 5).disabled(session.draft.awaitingReceipt).focused($composerFocused).accessibilityIdentifier("chat.composer")
             HStack(spacing: 12) {
                 PhotosPicker(selection: $photos, maxSelectionCount: max(1, 12 - session.draft.files.count), matching: .any(of: [.images, .videos])) { Image(systemName: "photo").frame(width: 44, height: 44) }.disabled(session.draft.awaitingReceipt).accessibilityLabel("添加图片或视频")
                 Button { filePickerScope = session.selectionScope; filePickerAccount = session.accountScope; filePickerGeneration = session.selectionGeneration; chooseFiles = true } label: { Image(systemName: "paperclip").frame(width: 44, height: 44) }.accessibilityLabel("添加文件")

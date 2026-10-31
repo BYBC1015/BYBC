@@ -48,11 +48,12 @@ final class HubNativeUITests: XCTestCase {
         XCTAssertTrue(composer.waitForExistence(timeout: 5))
         composer.tap(); composer.typeText("Offline draft 42")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-        // Exercise the actual interactive scroll-to-dismiss gesture. A hidden
-        // tab cannot be tapped through the keyboard (that hits Dictation).
-        let feed = app.scrollViews.firstMatch
-        feed.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).press(forDuration: 0.1,
-            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.86)))
+        // Use the visible native control, never tap a tab through the keyboard.
+        XCTAssertTrue(app.scrollViews["chat.messages"].exists)
+        let dismiss = app.buttons["chat.dismiss-keyboard"]
+        XCTAssertTrue(dismiss.waitForExistence(timeout: 5))
+        XCTAssertTrue(dismiss.isHittable)
+        dismiss.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.tabBars.buttons["工具箱"].isHittable)
         app.tabBars.buttons["工具箱"].tap()
