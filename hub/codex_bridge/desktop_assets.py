@@ -204,7 +204,14 @@ class WorkspaceCache:
             if not identity.user or identity.csrf or self.account_key(identity.user) != data['account']:
                 return None
             return {'url': page['url'], 'html': offline_document(content), 'source_html': content,
+                    'generation': self.generation,
                     'account': data['account'], 'release': identity.release}
+
+    def snapshot_current(self, snapshot):
+        with self.lock:
+            return (snapshot.get('generation') == self.generation
+                    and bool(self.active_account)
+                    and snapshot.get('account') == self.active_account)
 
     def clear_current(self):
         with self.lock:

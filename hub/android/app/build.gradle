@@ -14,11 +14,15 @@ android {
         applicationId "xyz.baicang.codexhub"
         minSdk 23
         targetSdk 35
-        versionCode 27
-        versionName "0.1.26"
+        versionCode 28
+        versionName "0.1.27"
 
         buildConfigField "String", "HUB_URL", "\"https://203.0.113.10/hub/\""
     }
+}
+
+dependencies {
+    implementation "androidx.webkit:webkit:1.12.1"
 }
 
 tasks.withType(JavaCompile).configureEach {

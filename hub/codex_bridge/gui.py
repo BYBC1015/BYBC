@@ -74,6 +74,7 @@ class BridgeApp:
             start_bridge=lambda: self.root.after(0, self.start),
             stop_bridge=lambda: self.root.after(0, self.stop),
             open_hub=lambda: self.root.after(0, self.open_hub),
+            open_toolbox=lambda: self.root.after(0, self.open_toolbox),
             exit_app=lambda: self.root.after(0, self.exit_app),
         )
         tray_started = self.tray.start(wait_until_ready=2) if self.background else self.tray.start()
@@ -780,6 +781,8 @@ class BridgeApp:
             self.root.withdraw()
 
     def open_toolbox(self) -> None:
+        if self._exiting:
+            return
         from .local_tools import launch_toolbox
         try:
             launch_toolbox(self.config_path)

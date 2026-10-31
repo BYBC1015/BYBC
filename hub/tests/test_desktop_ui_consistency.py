@@ -126,7 +126,10 @@ def test_toolbox_api_keeps_config_and_denies_foreign_page_and_closed_host(tmp_pa
     api = DesktopAPI(host)
     assert api.open_toolbox() == {'opened': True}
     assert api.open_toolbox() == {'opened': True}
-    launch.assert_called_once_with(config.resolve())
+    # Every entry must reach the shared launcher so an existing minimized
+    # toolbox is activated instead of silently ignoring the second click.
+    assert launch.call_count == 2
+    launch.assert_called_with(config.resolve())
     host.window.get_current_url.return_value = 'https://other.test/'
     with pytest.raises(PermissionError): api.open_toolbox()
     host._closed.set()

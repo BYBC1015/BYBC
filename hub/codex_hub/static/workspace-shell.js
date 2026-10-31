@@ -33,7 +33,7 @@
   const draftKey = `codexHub.workspace.draft.v1.${scope}`;
   const uiKey = `codexHub.workspace.view.v1.${scope}`;
   const narrow = matchMedia("(max-width:1199px)");
-  const small = matchMedia("(max-width:899px)");
+  const small = matchMedia("(max-width:899px), (max-width:1100px) and (max-height:600px) and (pointer:coarse)");
   const hasServerError = errors.textContent.trim().length > 0;
   const savedUi = read(uiKey);
   let submitting = false;
@@ -357,19 +357,23 @@
     await markOnline();
     return fresh;
   }
-  async function markOnline() {
+  async function markOnline(stillCurrent = () => true) {
     if (window.pywebview?.api?.workspace_online) {
       let verified = false;
       for (const delay of [0, 50, 100, 200, 400]) {
         if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+        if (!stillCurrent()) return false;
         const state = await window.pywebview.api.workspace_online(shell.dataset.user);
+        if (!stillCurrent()) return false;
         if (state?.online === true) { verified = true; break; }
       }
       if (!verified) throw new Error('正在确认本机连接，文字与附件已保留，稍后自动重试。');
     } else if (window.__HUB_DESKTOP_OFFLINE__) {
       throw new Error('桌面连接正在准备，文字与附件已保留，稍后自动重试。');
     }
+    if (!stillCurrent()) return false;
     localOffline = false; window.__HUB_DESKTOP_OFFLINE__ = false; delete document.documentElement.dataset.hubOffline;
+    return true;
   }
   async function checkReceipt() {
     if (!pendingSubmission || receiptChecking) return null;
@@ -617,11 +621,13 @@
   scroll.addEventListener("error", (event) => { if (event.target.tagName === "IMG") messageLayoutChanged(); }, true);
   if (location.hash === "#agents") document.querySelector("[data-agents-open]")?.click();
 
+  let refreshViewGeneration = 0;
   shell.addEventListener("click", (event) => {
     const target = event.target;
     const taskView=target.closest('[data-ws-task-view]');
     if(taskView){
       event.preventDefault();
+      refreshViewGeneration += 1;
       shell.dataset.workspaceUrl=taskView.href;
       history.replaceState(null,'',taskView.href);
       etag='';refreshController?.abort();
@@ -1087,18 +1093,27 @@
     if (refreshController) return;
     eventRefreshPending = false;
     lastRefreshAt = Date.now();
-    refreshController = new AbortController();
-    const timeout = setTimeout(() => refreshController?.abort(), 12000);
+    const controller = new AbortController();
+    refreshController = controller;
+    const requestedUrl = new URL(shell.dataset.workspaceUrl || location.href, location.href);
+    const generation = refreshViewGeneration;
+    const stillCurrent = () => generation === refreshViewGeneration && requestedUrl.href === new URL(shell.dataset.workspaceUrl || location.href, location.href).href;
+    const timeout = setTimeout(() => controller.abort(), 12000);
     try {
-      const response = await fetch(shell.dataset.workspaceUrl || location.href, { headers:etag && !localOffline ? { "If-None-Match":etag } : {"X-Hub-Online-Probe":"1"}, credentials:"same-origin", cache:"no-store", signal:refreshController.signal });
+      const response = await fetch(requestedUrl.href, { headers:etag && !localOffline ? { "If-None-Match":etag } : {"X-Hub-Online-Probe":"1"}, credentials:"same-origin", cache:"no-store", signal:controller.signal });
+      if (!stillCurrent()) return;
       if (response.status === 401 || (response.redirected && new URL(response.url).pathname.endsWith('/login'))) { showLoginRequired(); return; }
+      const responseUrl = new URL(response.url);
+      if (responseUrl.origin !== requestedUrl.origin || responseUrl.pathname !== requestedUrl.pathname) throw new Error('Unexpected workspace destination');
       if (response.status === 304) {
         if (localOffline || loginRequired || shell.dataset.wsConnection !== 'online') { etag = ''; throw new Error('Fresh workspace required'); }
         if (await upgradeUI()) return;
+        if (!stillCurrent()) return;
         shell.querySelector("[data-ws-sync]").textContent = "已同步"; return;
       }
       if (!response.ok) throw new Error();
       const page = new DOMParser().parseFromString(await response.text(), "text/html");
+      if (!stillCurrent()) return;
       const freshShell = page.querySelector("[data-ws-shell]");
       if (!freshShell || freshShell.dataset.conversation !== shell.dataset.conversation) throw new Error();
       if (compareRelease(freshShell.dataset.wsRelease || '', shell.dataset.wsRelease || '') < 0) throw new Error('Stale workspace release');
@@ -1106,11 +1121,12 @@
       if (freshShell.dataset.wsRelease && freshShell.dataset.wsRelease !== shell.dataset.wsRelease) {
         pendingRelease = freshShell.dataset.wsRelease; upgradeNotice();
         if (await upgradeUI()) return;
+        if (!stillCurrent()) return;
       }
       if (loginRequired || eventSessionExpired) {
         loginRequired = false; eventSessionExpired = false; errors.hidden = true; connectEventStream();
       }
-      await markOnline();
+      if (!await markOnline(stillCurrent) || !stillCurrent()) return;
       setWorkspaceConnection('online');
       shell.dataset.eventVersion = freshShell.dataset.eventVersion || '';
       refreshPresence(freshShell);
@@ -1199,10 +1215,17 @@
       shell.querySelector("[data-ws-sync]").textContent = "已同步";
       window.dispatchEvent(new CustomEvent('hub:workspace-updated'));
     } catch (error) {
+      // A view switch cancels only the old read, not the current connection.
+      if (!stillCurrent()) return;
       localOffline = true; presenceUnconfirmed();
       setWorkspaceConnection(loginRequired ? 'expired' : 'offline');
       shell.querySelector("[data-ws-sync]").textContent = error.name === "AbortError" ? "连接超时 · 正在重试" : "等待连接";
-    } finally { clearTimeout(timeout); refreshController = null; refreshTimer = setTimeout(refresh, eventRefreshPending ? 350 : refreshInterval()); }
+    } finally {
+      clearTimeout(timeout);
+      if (refreshController === controller) refreshController = null;
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(refresh, !stillCurrent() ? 50 : eventRefreshPending ? 350 : refreshInterval());
+    }
   }
   refreshTimer = setTimeout(refresh, 2000);
   connectEventStream();

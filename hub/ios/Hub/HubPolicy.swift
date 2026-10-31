@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 struct HubPolicy {
     let baseURL: URL
@@ -32,7 +33,26 @@ struct HubPolicy {
 
     func isWorkspace(_ url: URL) -> Bool {
         guard let parts = components(url), parts.count >= 2, parts[0] == "projects" else { return false }
+        // Archive is a real maintenance screen, not a conversation to snapshot or restore.
+        if URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains(where: { $0.name == "view" && $0.value == "archive" }) == true { return false }
         return parts.count == 2 || (parts.count == 4 && parts[2] == "conversations" && (Int(parts[3]) ?? 0) > 0)
+    }
+
+    func isAuthentication(_ url: URL) -> Bool { components(url).map { $0.count == 1 && ["login", "logout"].contains($0[0]) } ?? false }
+
+    func sameDocument(_ current: URL?, _ next: URL) -> Bool {
+        guard let current, next.fragment != nil,
+              var previous = URLComponents(url: current, resolvingAgainstBaseURL: false),
+              var target = URLComponents(url: next, resolvingAgainstBaseURL: false) else { return false }
+        previous.fragment = nil; target.fragment = nil
+        return previous == target
+    }
+
+    static func currentRelease(_ release: String) -> Bool {
+        let parts = release.split(separator: ".", omittingEmptySubsequences: false)
+        let values = parts.compactMap { Int($0) }
+        return parts.count == 3 && values.count == 3 && values.allSatisfy { $0 >= 0 }
+            && (values[0] > 2 || values[0] == 2 && values[1] >= 11)
     }
 
     func isDownload(_ url: URL) -> Bool {
@@ -66,5 +86,31 @@ struct HubPolicy {
               !path.contains("\\"), !path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
               !path.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0 == "." || $0 == ".." }) else { return nil }
         return path.isEmpty ? "/" : path
+    }
+}
+
+struct HubLocalMessage: Codable { let author: String; let text: String }
+struct HubLocalRecord: Codable, Identifiable {
+    var id: String { url.absoluteString }
+    let url: URL
+    let session: String
+    let user: String
+    let project: String
+    let conversation: String
+    let title: String
+    let messages: [HubLocalMessage]
+    let savedAt: Date
+
+    func readable(policy: HubPolicy, location: URL, session current: String, now: Date = Date()) -> Bool {
+        guard !current.isEmpty, current == session, location == url, policy.isWorkspace(location),
+              savedAt <= now, now.timeIntervalSince(savedAt) <= 7 * 24 * 60 * 60,
+              let parts = policy.components(location), (Int(user) ?? 0) > 0,
+              parts[1] == project else { return false }
+        return parts.count == 2 ? conversation == "new" : parts[3] == conversation
+    }
+
+    static func sessionDigest(_ value: String) -> String {
+        guard !value.isEmpty else { return "" }
+        return SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }

@@ -73,7 +73,8 @@ def test_android_webview_respects_system_bars_cutouts_and_keyboard():
 def test_android_webview_recovers_after_background_or_renderer_loss():
     source = MAIN_ACTIVITY.read_text(encoding="utf-8")
 
-    assert "webView.restoreState(savedInstanceState) == null" in source
+    assert "webView.restoreState(" not in source
+    assert "loadPrimaryUrl(webView, launchUrl)" in source
     assert "protected void onResume()" in source
     assert "webView.resumeTimers()" in source
     assert "scheduleResumeHealthCheck()" in source
@@ -221,7 +222,8 @@ def test_apk_has_dedicated_fixed_chat_and_secondary_tools_modes():
     assert "CodexHubMediaViewer" in script
     assert "CodexHubReadingExperience" in script
     assert "setMediaPlaybackRequiresUserGesture(true)" in android
-    assert 'addJavascriptInterface(new HubMediaBridge(), "HubMedia")' in android
+    assert 'window.HubMedia={share:' in android
+    assert '.addJavascriptInterface(' not in android
     assert "public void openImage(String url, String title)" in android
     assert "openImageViewer(url, title)" in android
     assert "public void haptic()" in android
@@ -244,7 +246,7 @@ def test_apk_has_dedicated_fixed_chat_and_secondary_tools_modes():
     assert "window.HubMedia?.haptic?.()" in script
     assert '["项目与设备", sidebarTargetId, "☷"]' in script
     assert "onPageCommitVisible" in android
-    assert "injectAndroidCss(view)" in android
+    assert "injectAndroidCss(view)" not in android
     assert 'settings.setCacheMode(WebSettings.LOAD_DEFAULT)' in android
     assert 'height:100%;background:#04070d' in android
     assert 'body{display:flex;align-items:center;justify-content:center' in android
@@ -268,8 +270,8 @@ def test_apk_keeps_download_update_inside_the_existing_more_menu():
     assert "DOWNLOADS_URL" not in android
     assert "addDownloadUpdateButton" not in android
     assert "android-upgrade-fallback" not in template
-    assert 'versionCode 27' in gradle
-    assert 'versionName "0.1.26"' in gradle
+    assert 'versionCode 28' in gradle
+    assert 'versionName "0.1.27"' in gradle
     assert "Select-String -LiteralPath $GradleConfig" in build_script
     assert '[switch]$Clean' in build_script
     assert '@("clean", "assembleDebug")' in build_script
@@ -284,7 +286,7 @@ def test_android_uses_private_local_state_and_native_picker_previews():
     css = ANDROID_CSS.read_text(encoding="utf-8")
 
     assert 'LOCAL_DATA_PREFERENCES = "codex_hub_local_data"' in android
-    assert 'addJavascriptInterface(new HubLocalDataBridge(), "HubLocalData")' in android
+    assert 'window.HubLocalData={clearImportedFilesFor:' in android
     assert "public String loadDraft(String key)" in android
     assert "public void saveDraft(String key, String value)" in android
     assert "LAST_INTERNAL_URL" in android
@@ -388,7 +390,7 @@ def test_android_native_voice_uses_microphone_and_text_to_speech_bridge():
     manifest = MANIFEST.read_text(encoding="utf-8")
 
     assert "android.permission.RECORD_AUDIO" in manifest
-    assert 'addJavascriptInterface(new HubVoiceBridge(), "HubVoice")' in android
+    assert 'window.HubVoice={startListening:' in android
     assert "SpeechRecognizer.createSpeechRecognizer" in android
     assert "RecognizerIntent.EXTRA_LANGUAGE" in android
     assert "new TextToSpeech" in android
@@ -459,7 +461,7 @@ def test_android_server_endpoint_can_move_without_rebuilding_the_apk():
     assert "candidatePath.startsWith(basePath)" in endpoint
     assert "HubEndpoint.projectUrl(this, projectSlug)" in service
 
-    assert 'addJavascriptInterface(new HubAppBridge(), "HubApp")' in activity
+    assert 'WebViewCompat.addWebMessageListener' in activity
     assert "showServerSettings()" in activity
     assert 'server.setText("服务器")' in activity
     assert "HubEndpoint.normalize(rawValue)" in activity

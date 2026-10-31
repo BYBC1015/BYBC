@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import os
 import json
+import hashlib
 import subprocess
 import sys
+import threading
 import tkinter as tk
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,7 +116,37 @@ def find_resolve_root() -> Path:
     raise FileNotFoundError("此工具需要达芬奇 Studio 21.1 的本地运行环境。请先安装达芬奇；调色工具可通过 launch.ps1 -ResolveRoot 指定自定义安装目录。")
 
 
-def launch_toolbox(config_path: Path) -> subprocess.Popen:
+_toolbox_launch_lock = threading.Lock()
+_toolbox_processes: dict[str, subprocess.Popen] = {}
+
+
+def _toolbox_instance(config_path: Path | None):
+    from .config import default_config_path
+    from .desktop_window import DesktopInstance
+    config = Path(config_path or default_config_path()).expanduser().resolve()
+    key = hashlib.sha256(os.path.normcase(str(config)).encode('utf-8')).hexdigest()[:24]
+    # This mutex is deliberately independent of Bridge's executor and Hub's
+    # foreground window, but shared by every entry point for this config.
+    return DesktopInstance('toolbox-' + key)
+
+
+def launch_toolbox(config_path: Path) -> subprocess.Popen | None:
+    config_path = Path(config_path).expanduser().resolve()
+    key = os.path.normcase(str(config_path))
+    with _toolbox_launch_lock:
+        process = _toolbox_processes.get(key)
+        if _toolbox_instance(config_path).request_wake():
+            return process if process is not None and process.poll() is None else None
+        # The initial child may still be loading before its wake event exists.
+        # Repeated clicks should not launch a burst of redundant processes.
+        if process is not None and process.poll() is None:
+            return process
+        process = _spawn_toolbox(config_path)
+        _toolbox_processes[key] = process
+        return process
+
+
+def _spawn_toolbox(config_path: Path) -> subprocess.Popen:
     if getattr(sys, "frozen", False):
         # HubDesktop is a separate entry point and does not accept --tools.
         # Use the installed companion, including when called from HubDesktop.
@@ -164,13 +196,40 @@ def main(config_path: Path | None = None) -> int:
     from . import __version__
     from .gui import set_window_icon
 
-    root = tk.Tk()
-    root.title(f"Codex Bridge 附属工具箱 v{__version__}")
-    root.geometry("840x540")
-    root.minsize(720, 490)
-    set_window_icon(root)
-    content = ttk.Frame(root, padding=20)
-    content.pack(fill="both", expand=True)
-    populate_tools(content)
-    root.mainloop()
+    instance = _toolbox_instance(config_path)
+    root = None
+    try:
+        if not instance.acquire():
+            return 0  # acquire wakes the existing toolbox, including minimized.
+        root = tk.Tk()
+        root.title(f"Codex Bridge 附属工具箱 v{__version__}")
+        root.geometry("840x540")
+        root.minsize(720, 490)
+        set_window_icon(root)
+        content = ttk.Frame(root, padding=20)
+        content.pack(fill="both", expand=True)
+        populate_tools(content)
+        wake = threading.Event()
+        instance._watcher = threading.Thread(target=instance.watch, args=(wake.set,),
+                                             name='hub-toolbox-wake', daemon=True)
+        instance._watcher.start()
+
+        def check_wake():
+            # Tk is touched only on its owner thread, never by the event watcher.
+            if wake.is_set():
+                wake.clear()
+                root.deiconify()
+                root.lift()
+                root.focus_force()
+            root.after(100, check_wake)
+
+        root.after(100, check_wake)
+        root.mainloop()
+    finally:
+        instance.close()
+        if root is not None:
+            try:
+                root.destroy()
+            except tk.TclError:
+                pass
     return 0

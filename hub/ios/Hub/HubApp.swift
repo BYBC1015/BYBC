@@ -18,7 +18,7 @@ struct HubApp: App {
         WindowGroup {
             HubScreen(session: session)
                 .preferredColorScheme(.dark)
-                .onChange(of: scenePhase) { _, state in if state == .active { session.resume() } }
+                .onChange(of: scenePhase) { _, state in if state == .active { session.activate() } else { session.pause() } }
         }
     }
 }
@@ -36,6 +36,7 @@ struct HubScreen: View {
                 Menu {
                     Button("回到项目", systemImage: "square.grid.2x2", action: session.openHome)
                     Button("重新连接", systemImage: "arrow.clockwise", action: session.retryNow)
+                    Button("本机对话记录", systemImage: "clock", action: session.showLocalRecord)
                 } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
                 .accessibilityLabel("Hub 操作")
             }
@@ -55,11 +56,44 @@ struct HubScreen: View {
                 Text(message).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10).background(Color.white.opacity(0.06))
             }
-            HubWebView(webView: session.webView)
+            ZStack {
+                HubWebView(webView: session.webView)
+                    .opacity(session.connectionError == nil ? 1 : 0)
+                    .allowsHitTesting(session.connectionError == nil)
+                if session.connectionError != nil {
+                    ScrollView {
+                        VStack(spacing: 20) {
+                            Image("Owl").resizable().scaledToFit().frame(width: 64, height: 64)
+                            Text("工作区仍在这里").font(.title2.weight(.semibold))
+                            Text("连接恢复后将核对最新消息。草稿与待发送附件仍保留在本机。")
+                                .font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                            Button("查看本机对话记录", action: session.showLocalRecord).buttonStyle(.borderedProminent)
+                            if let message = session.localRecordMessage { Text(message).font(.footnote).foregroundStyle(.secondary) }
+                        }.padding(24).frame(maxWidth: .infinity)
+                    }
+                }
+            }
         }
         .background(Color(red: 0.07, green: 0.08, blue: 0.09))
         .sheet(item: $session.downloadedFile, onDismiss: session.closeDownloadSheet) { file in
             HubShareSheet(file: file.url)
+        }
+        .sheet(item: $session.localRecord) { record in
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        Text("本机只读记录 · \(record.savedAt.formatted())\n不是实时状态，联网后将核对最新消息。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        ForEach(Array(record.messages.enumerated()), id: \.offset) { _, message in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(message.author).font(.subheadline.weight(.semibold))
+                                Text(message.text).font(.body).textSelection(.enabled)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }.padding(20)
+                }.navigationTitle(record.title).navigationBarTitleDisplayMode(.inline)
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("返回") { session.localRecord = nil } } }
+            }.preferredColorScheme(.dark)
         }
     }
 }

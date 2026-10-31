@@ -223,6 +223,13 @@ class DesktopInstance:
                 break
 
     def request_close(self) -> bool:
+        return self._signal(self.close_name)
+
+    def request_wake(self) -> bool:
+        return self._signal(self.event_name)
+
+    @staticmethod
+    def _signal(name) -> bool:
         if sys.platform != 'win32':
             return False
         from ctypes import wintypes
@@ -231,7 +238,7 @@ class DesktopInstance:
         kernel.OpenEventW.restype = wintypes.HANDLE
         kernel.SetEvent.argtypes = [wintypes.HANDLE]
         kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-        handle = kernel.OpenEventW(0x0002, False, self.close_name)
+        handle = kernel.OpenEventW(0x0002, False, name)
         if not handle:
             return False
         try:
@@ -322,7 +329,6 @@ class DesktopHost:
         self._closed = threading.Event()
         self._retry_timer = None
         self._retry_serial = 0
-        self._toolbox_process = None
         self._native_ready = False
         self.cache = cache or WorkspaceCache(state_dir / 'workspace-cache')
         self.assets = assets or PackagedAssets()
@@ -356,10 +362,8 @@ class DesktopHost:
         with self._lifecycle_lock:
             if self._closed.is_set():
                 raise PermissionError('窗口已关闭。')
-            if self._toolbox_process is not None and self._toolbox_process.poll() is None:
-                return
             from .local_tools import launch_toolbox
-            self._toolbox_process = launch_toolbox(self.config_path)
+            launch_toolbox(self.config_path)
 
     def bring_forward(self):
         if self._closed.is_set():
@@ -634,8 +638,10 @@ class DesktopHost:
             self.show_offline('网络连接未完成，请检查连接后重试。')
             return
         snapshot = self.assets.prepare_snapshot(self.location, snapshot)
-        with self._lifecycle_lock:
+        with self._lifecycle_lock, self.cache.lock:
             if self._closed.is_set() or navigation_id != self._active_navigation:
+                return
+            if not self.cache.snapshot_current(snapshot):
                 return
             self._offline = True
             self._offline_since = time.time()
@@ -707,8 +713,13 @@ class DesktopHost:
             return
         snapshot = self._offline_response
         if snapshot and canonical_url(url) == snapshot['url'] and str(args.ResourceContext) == 'Document':
-            self._offline_response = None
-            args.Response = self._resource_response(snapshot['html'].encode('utf-8'), 'text/html; charset=utf-8')
+            # The preview and main window share their authenticated cache. A
+            # logout/account switch after preparation must invalidate this
+            # pending response too, not only future disk reads and writes.
+            with self.cache.lock:
+                self._offline_response = None
+                if self.cache.snapshot_current(snapshot):
+                    args.Response = self._resource_response(snapshot['html'].encode('utf-8'), 'text/html; charset=utf-8')
             return
         resource = self.assets.read(self.location, url)
         if resource:

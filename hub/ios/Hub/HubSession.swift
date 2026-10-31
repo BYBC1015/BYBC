@@ -18,6 +18,8 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     @Published var connectionError: String?
     @Published var downloadMessage: String?
     @Published var downloadedFile: HubDownloadedFile?
+    @Published var localRecord: HubLocalRecord?
+    @Published var localRecordMessage: String?
     private var recoveryURL: URL
     private var progressObservation: NSKeyValueObservation?
     private let networkMonitor = NWPathMonitor()
@@ -30,6 +32,14 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     private var presentedDownloadURL: URL?
     private var downloads: [ObjectIdentifier: (WKDownload, URL?)] = [:]
     private let lastLocationKey = "hub.last-workspace"
+    private let lastSessionKey = "hub.last-workspace-session-v1"
+    private let recordKey = "hub.native-current-record-v1"
+    private var recordTask: Task<Void, Never>?
+    private var nativeHistory: [URL] = []
+    private var requestedLocation: URL?
+    private var authenticatedPageSession = ""
+    private var recordPresentationGeneration = 0
+    private var foreground = true
 
     init(baseURL: URL, connectAutomatically: Bool = true) {
         guard let policy = HubPolicy(baseURL: baseURL) else { fatalError("HubBaseURL must be a trusted HTTPS base URL") }
@@ -37,12 +47,9 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.defaultWebpagePreferences.allowsContentJavaScript = true
-        config.applicationNameForUserAgent = "BYBCHubIOS/0.1.0"
+        config.applicationNameForUserAgent = "BYBCHubIOS/0.1.1"
         self.webView = WKWebView(frame: .zero, configuration: config)
-        if let saved = UserDefaults.standard.string(forKey: lastLocationKey),
-           let location = URL(string: saved), policy.isWorkspace(location) {
-            recoveryURL = location
-        } else { recoveryURL = baseURL }
+        recoveryURL = baseURL
         super.init()
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -50,7 +57,8 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         webView.backgroundColor = UIColor(red: 0.07, green: 0.08, blue: 0.09, alpha: 1)
         webView.scrollView.backgroundColor = webView.backgroundColor
         webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.allowsBackForwardNavigationGestures = true
+        // Back uses a fresh GET; WebKit's gesture snapshot can resurrect old HTML.
+        webView.allowsBackForwardNavigationGestures = false
         webView.isInspectable = false
         progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] _, change in
             Task { @MainActor [weak self] in self?.progress = change.newValue ?? 0 }
@@ -67,16 +75,25 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
         }
         if connectAutomatically {
             networkMonitor.start(queue: DispatchQueue(label: "hub.network-state"))
-            loadRecovery()
+            Task { [weak self] in
+                guard let self else { return }
+                let generation = self.navigationGeneration
+                let identity = await self.currentSession()
+                guard generation == self.navigationGeneration else { return }
+                if !identity.isEmpty, identity == UserDefaults.standard.string(forKey: self.lastSessionKey),
+                   let saved = UserDefaults.standard.string(forKey: self.lastLocationKey), let url = URL(string: saved), self.policy.isWorkspace(url) { self.recoveryURL = url }
+                self.loadRecovery()
+            }
         }
     }
 
     func resume() {
-        guard networkAvailable else { return }
+        guard foreground, networkAvailable else { return }
         if connectionError != nil && !isLoading { retryNow() }
         else if let url = webView.url, policy.isInternal(url) {
             // This starts the web app's own fresh-data check; it does not assert synchronization.
             webView.evaluateJavaScript("window.dispatchEvent(new Event('online'))", completionHandler: nil)
+            startRecordCapture()
         }
     }
 
@@ -96,13 +113,118 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     func goBack() {
         guard let url = webView.url, policy.isInternal(url) else { loadRecovery(); return }
+        let generation = navigationGeneration
         webView.evaluateJavaScript(Self.backScript) { [weak self] result, _ in
-            guard let self, (result as? Bool) != true else { return }
-            if self.webView.canGoBack { self.webView.goBack() }
+            guard let self, generation == self.navigationGeneration, url == self.webView.url,
+                  self.foreground, (result as? Bool) != true else { return }
+            if self.nativeHistory.count > 1 {
+                self.nativeHistory.removeLast()
+                self.webView.load(self.policy.pageRequest(self.nativeHistory.last!))
+            }
         }
     }
 
     func openHome() { webView.load(policy.pageRequest(policy.baseURL)) }
+
+    func activate() { foreground = true; resume() }
+
+    func pause() {
+        foreground = false
+        recordPresentationGeneration += 1
+        recordTask?.cancel()
+        localRecord = nil
+    }
+
+    private func currentSession() async -> String {
+        let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
+            webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
+        }
+        let host = policy.baseURL.host?.lowercased() ?? ""
+        guard let cookie = cookies.first(where: {
+            $0.name == "codex_hub_session" && $0.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased() == host
+                && policy.baseURL.path.hasPrefix($0.path) && ($0.expiresDate == nil || $0.expiresDate! > Date())
+        }) else { return "" }
+        return HubLocalRecord.sessionDigest(cookie.value)
+    }
+
+    private func clearLocalRecord() {
+        recordPresentationGeneration += 1
+        recordTask?.cancel(); localRecord = nil
+        for key in [recordKey, lastLocationKey, lastSessionKey] { UserDefaults.standard.removeObject(forKey: key) }
+        nativeHistory.removeAll()
+    }
+
+    private func startRecordCapture() {
+        guard foreground, !isLoading, connectionError == nil, let url = webView.url, policy.isWorkspace(url) else { return }
+        recordTask?.cancel()
+        let generation = navigationGeneration
+        recordTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.navigationGeneration == generation, self.webView.url == url,
+                      !self.isLoading, self.connectionError == nil else { return }
+                let identity = await self.currentSession()
+                guard !Task.isCancelled, generation == self.navigationGeneration, self.webView.url == url else { return }
+                guard !identity.isEmpty, identity == self.authenticatedPageSession else { self.clearLocalRecord(); return }
+                do {
+                    let result = try await self.webView.evaluateJavaScript(Self.recordScript)
+                    guard !Task.isCancelled, generation == self.navigationGeneration, self.webView.url == url,
+                          let values = result as? [String: Any], let user = values["user"] as? String,
+                          let project = values["project"] as? String, let conversation = values["conversation"] as? String else { return }
+                    let rows = (values["messages"] as? [[String: String]] ?? []).suffix(30).map {
+                        HubLocalMessage(author: String(($0["author"] ?? "").prefix(100)), text: String(($0["text"] ?? "").prefix(1800)))
+                    }
+                    let record = HubLocalRecord(url: url, session: identity, user: user, project: project, conversation: conversation,
+                        title: String((values["title"] as? String ?? "本机对话记录").prefix(160)), messages: Array(rows), savedAt: Date())
+                    let finalIdentity = await self.currentSession()
+                    guard !Task.isCancelled, generation == self.navigationGeneration, self.webView.url == url,
+                          !self.isLoading, self.connectionError == nil,
+                          record.readable(policy: self.policy, location: url, session: finalIdentity) else { return }
+                    let data = try JSONEncoder().encode(record)
+                    if data.count <= 240000 {
+                        UserDefaults.standard.set(data, forKey: self.recordKey)
+                        UserDefaults.standard.set(url.absoluteString, forKey: self.lastLocationKey)
+                        UserDefaults.standard.set(identity, forKey: self.lastSessionKey)
+                    }
+                    try await Task.sleep(nanoseconds: 15_000_000_000)
+                } catch { return }
+            }
+        }
+    }
+
+    func showLocalRecord() {
+        guard foreground else { return }
+        recordPresentationGeneration += 1
+        let presentationGeneration = recordPresentationGeneration
+        let generation = navigationGeneration
+        let location = requestedLocation ?? webView.url ?? recoveryURL
+        Task { [weak self] in
+            guard let self else { return }
+            let identity = await self.currentSession()
+            guard generation == self.navigationGeneration, self.foreground,
+                  presentationGeneration == self.recordPresentationGeneration else { return }
+            guard let data = UserDefaults.standard.data(forKey: self.recordKey), data.count <= 240000,
+                  let record = try? JSONDecoder().decode(HubLocalRecord.self, from: data),
+                  record.readable(policy: self.policy, location: location, session: identity) else {
+                self.localRecordMessage = "当前对话尚无可读取的本机记录。"
+                return
+            }
+            self.localRecordMessage = nil
+            self.localRecord = record
+        }
+    }
+
+    static let recordScript = """
+    (() => {
+      const s=document.querySelector('[data-ws-shell]');
+      if(!s?.dataset.wsRelease||!s.dataset.user||!s.dataset.project||!s.dataset.conversation)return null;
+      const messages=Array.from(s.querySelectorAll('[data-ws-live] > .ws-message[data-ws-entry]')).slice(-30).map(n=>({
+        author:(n.querySelector('.ws-message-meta strong')?.textContent||'').trim().slice(0,100),
+        text:(n.querySelector('[data-ws-message-body]')?.innerText||'').trim().slice(0,1800)
+      })).filter(n=>n.text);
+      return {user:s.dataset.user,project:s.dataset.project,conversation:s.dataset.conversation,
+        title:(s.querySelector('.ws-chat-title h1')?.textContent||document.title).trim().slice(0,160),messages};
+    })()
+    """
 
     static let backScript = """
     (() => {
@@ -119,13 +241,25 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
+        if navigationAction.targetFrame?.isMainFrame == true, policy.isAuthentication(url) { clearLocalRecord() }
         if policy.isInternal(url) {
+            if navigationAction.targetFrame?.isMainFrame == true, navigationAction.request.httpMethod == "GET", policy.canRecover(url) {
+                requestedLocation = url
+                recoveryURL = url
+            }
             if policy.isDownload(url) && (navigationAction.shouldPerformDownload || navigationAction.navigationType == .linkActivated || navigationAction.targetFrame == nil) { decisionHandler(.download) }
+            else if navigationAction.targetFrame?.isMainFrame == true,
+                    navigationAction.request.httpMethod == "GET", policy.canRecover(url),
+                    navigationAction.request.cachePolicy != .reloadIgnoringLocalCacheData,
+                    !policy.sameDocument(webView.url, url) {
+                decisionHandler(.cancel)
+                webView.load(policy.pageRequest(url))
+            }
             else { decisionHandler(.allow) }
             return
         }
         decisionHandler(.cancel)
-        if navigationAction.navigationType == .linkActivated && ["https", "http", "mailto", "tel"].contains(url.scheme?.lowercased() ?? "") {
+        if navigationAction.targetFrame?.isMainFrame != false && navigationAction.navigationType == .linkActivated && ["https", "http", "mailto", "tel"].contains(url.scheme?.lowercased() ?? "") {
             UIApplication.shared.open(url)
         }
     }
@@ -149,6 +283,11 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         activeNavigation = navigation
         navigationGeneration += 1
+        recordPresentationGeneration += 1
+        authenticatedPageSession = ""
+        recordTask?.cancel()
+        localRecord = nil
+        if let url = webView.url, policy.isAuthentication(url) { clearLocalRecord() }
         retry?.cancel()
         failedGeneration = nil
         isLoading = true
@@ -156,11 +295,33 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard navigation === activeNavigation, failedGeneration != navigationGeneration else { return }
-        isLoading = false; connectionError = nil; retryCount = 0
         guard let url = webView.url, policy.isInternal(url) else { return }
-        if policy.canRecover(url) { recoveryURL = url }
-        if policy.isWorkspace(url) { UserDefaults.standard.set(url.absoluteString, forKey: lastLocationKey) }
-        resume()
+        let generation = navigationGeneration
+        webView.evaluateJavaScript("(()=>{const s=document.querySelector('[data-ws-shell]');return {workspace:!!s,release:s?.dataset.wsRelease||document.documentElement.dataset.hubRelease||''};})()") { [weak self] modern, _ in
+            guard let self, generation == self.navigationGeneration, url == self.webView.url,
+                  self.failedGeneration != generation else { return }
+            let state = modern as? [String: Any] ?? [:]
+            let release = state["release"] as? String ?? ""
+            if self.policy.isWorkspace(url) && ((state["workspace"] as? Bool) != true || !HubPolicy.currentRelease(release))
+                || !release.isEmpty && !HubPolicy.currentRelease(release) {
+                self.fail("正在连接新版工作区，稍后重试。可以查看本机只读记录。")
+                return
+            }
+            self.isLoading = false; self.connectionError = nil; self.retryCount = 0
+            if self.policy.canRecover(url) { self.recoveryURL = url }
+            if self.policy.isAuthentication(url) { self.clearLocalRecord() }
+            else if self.policy.canRecover(url), self.nativeHistory.last != url {
+                self.nativeHistory.append(url)
+                if self.nativeHistory.count > 40 { self.nativeHistory.removeFirst() }
+            }
+            Task { [weak self] in
+                guard let self else { return }
+                let identity = await self.currentSession()
+                guard generation == self.navigationGeneration, url == self.webView.url else { return }
+                self.authenticatedPageSession = identity
+                self.resume()
+            }
+        }
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
@@ -204,7 +365,9 @@ final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDe
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         guard navigationAction.targetFrame == nil, let url = navigationAction.request.url else { return nil }
-        if policy.isInternal(url) { webView.load(navigationAction.request) }
+        if policy.isInternal(url) {
+            webView.load(navigationAction.request.httpMethod == "GET" ? policy.pageRequest(url) : navigationAction.request)
+        }
         else if navigationAction.navigationType == .linkActivated && ["https", "http"].contains(url.scheme ?? "") { UIApplication.shared.open(url) }
         return nil
     }

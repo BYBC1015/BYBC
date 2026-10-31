@@ -20,9 +20,9 @@
       <strong>Codex Hub</strong>
     </div>
     <button class="icon-button mobile-rail-toggle" type="button" data-sidebar-open aria-label="打开项目导航" aria-controls="project-sidebar" aria-expanded="false">☰</button>
-    <button class="icon-button" type="button" onclick="history.length > 1 ? history.back() : location.assign('{{ app_path('/projects?list=1') }}')">返回</button>
+    <a class="button archive-workspace-return" href="{{ app_path('/projects/' ~ project.slug) }}" title="回到聊天">回到聊天</a>
     <div class="workbench-title">
-      <p>项目工作区</p>
+      <p>项目资料与历史</p>
       <div class="workbench-title-line">
         <h1>{{ project.name }}</h1>
         <button class="reader-focus-toggle" type="button" data-focus-reading-toggle aria-pressed="false" aria-label="进入专注阅读" title="专注阅读">
@@ -57,7 +57,7 @@
         </select>
       </span>
     </div>
-        <small>Codex Hub · v2.3.0</small>
+        <small>Codex Hub · v{{ app_version }}</small>
       </div>
     </details>
   </header>
@@ -951,7 +951,7 @@
   const closers = Array.from(document.querySelectorAll("[data-sidebar-close]"));
   if (!sidebar) return;
   const overlayEvent = "codexhub:overlay-open";
-  const mobileQuery = window.matchMedia("(max-width: 860px)");
+      const mobileQuery = window.matchMedia("(max-width: 860px), (max-width: 1100px) and (max-height: 600px) and (pointer: coarse)");
   let lastOpener = null;
 
   const syncAccessibility = (open) => {

@@ -1,15 +1,17 @@
-# BYBC Hub iOS 0.1.0
+# BYBC Hub iOS 0.1.1
 
-独立 SwiftUI + WKWebView App 工程，最低 iOS / iPadOS 17。它复用 Hub 的真实网页工作台和服务器会话，不是添加到主屏幕的 PWA，也不在手机运行 Codex CLI。构建目标名 `Hub`，默认 Bundle ID `xyz.baicang.codexhub.ios`；该 ID 仍须由实际 Apple 开发团队确认注册。
+独立 SwiftUI + WKWebView App 工程，最低 iOS / iPadOS 17，要求 Hub 网页 2.11.0 或更新版本。它复用 Hub 的真实网页工作台和服务器会话，不是添加到主屏幕的 PWA，也不在手机运行 Codex CLI。构建目标名 `Hub`，默认 Bundle ID `xyz.baicang.codexhub.ios`；该 ID 仍须由实际 Apple 开发团队确认注册。
 
 ## 已实现
 
-- 原生外壳保留一个 WKWebView，持久化登录 Cookie；回到 App 时触发网页的数据更新，冷启动返回最后一个有效项目/对话。
+- 本机记录页可离线阅读当前对话末 30 条已发送的用户与智能体文字。仅存有界纯文本，标出保存时间和非实时状态，不运行旧 HTML，不包含 Cookie 明文、草稿和附件文件；按服务器/登录摘要/用户/项目/对话隔离，7 天过期，登录/登出清除。异步捕获、返回和后台切换均有代次检查。
+
+- 原生外壳保留一个 WKWebView，持久化登录 Cookie；回到 App 时触发网页的数据更新，冷启动仅恢复与当前登录会话一致的项目/对话地址。
 - 恢复页面时使用绕过本地 HTTP 缓存的 GET；Wi-Fi、蜂窝网络等路径切换即使一直可用也会唤醒网页版本校验。保留 Cookie、IndexedDB 草稿与附件，不将网络重连当成重新发送任务。2026-10-31 新增请求策略 XCTest，需本轮 macOS CI 验证。
 - 原生小猫头鹰顶栏、系统黑体、44 pt 操作区域、系统安全区与键盘布局。正文、手机抽屉、输入框由共享 `mobile-workspace` 统一适配。
 - 聊天输入框的图片/文件选择使用 WebKit 系统选择器；不申请整个文件库读取权限，不建立第二套草稿数据库。
 - 文件下载通过保留当前登录态的 WKDownload；完成后显示原生分享面板，可选“存储到文件”。原对话不跳到外部浏览器。只接受同一 Hub 的文件路由；登录跳转、外站跳转不会被保存为成果。
-- 返回先关闭图片预览、对话框、导航抽屉或工作详情，再返回网页历史。外部用户链接才交给 Safari。
+- 返回先关闭图片预览、对话框、导航抽屉或工作详情，再以 fresh GET 打开原生历史地址，禁用会恢复旧页面快照的 WebKit 滑动历史。外部用户链接才交给 Safari。
 - 连接故障显示清楚的恢复信息，最多 3 次自动 GET 重试；旧导航回调不能覆盖新导航状态；不自动重复发送 POST 消息。
 - URL、恢复目标、文件路径边界有 XCTest；包含版本化隐私清单的 UserDefaults 使用理由。
 
@@ -28,6 +30,8 @@ bash hub/ios/scripts/verify-ios.sh
 公开 BYBC 仓库可把 `ci/ios-simulator.yml` 放到仓库根 `.github/workflows/hub-ios.yml`，通过 `workflow_dispatch` 运行。它使用 macOS runner、只读仓库权限、25 分钟超时，不需要签名密钥，不创建 Apple 账号，不生产 IPA，不推送 TestFlight。产物名称明确包含 `UNSIGNED-SIMULATOR-ONLY`。
 
 ## 交付状态与后续条件
+
+2026-10-31 的 0.1.1 / build 2 源码新增本地记录、最低网页发行版检查、账号恢复隔离及异步生命周期保护，XCTest 从 5 项扩充为 9 项。本轮仍需新的 macOS CI 构建/测试，不沿用以下历史版本结果宣称本版验证完成。
 
 2026-10-30 已在 GitHub macOS runner 使用 **Xcode 26.6 / build 17F113** 完成 unsigned simulator 原生编译及 **4 项 XCTest，0 失败**：[验证运行 40981287956](https://github.com/BYBC1015/BYBC/actions/runs/40981287956)，源码提交 `8fa835f0f94a84fee1457567972bf2360d99fda8`。测试覆盖对话恢复、下载与恢复边界、可信地址与路径限制、文件名处理；不把这些策略测试说成完整真机交互验收。
 

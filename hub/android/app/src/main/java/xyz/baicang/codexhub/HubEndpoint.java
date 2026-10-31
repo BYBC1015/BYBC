@@ -44,6 +44,8 @@ public final class HubEndpoint {
         if (authority == null || authority.contains("@")) return null;
         String path = uri.getPath();
         if (path == null || path.isEmpty()) path = "/";
+        if (path.indexOf('\\') >= 0) return null;
+        for (int index = 0; index < path.length(); index++) if (Character.isISOControl(path.charAt(index))) return null;
         if (!path.startsWith("/")) return null;
         for (String segment : path.split("/", -1)) {
             if (".".equals(segment) || "..".equals(segment)) return null;
@@ -84,8 +86,9 @@ public final class HubEndpoint {
         String basePath = configured.getPath();
         String candidatePath = candidate.getPath();
         if (basePath == null || candidatePath == null) return false;
-        return candidatePath.equals(basePath.substring(0, basePath.length() - 1))
-                || candidatePath.startsWith(basePath);
+        return (candidatePath.equals(basePath.substring(0, basePath.length() - 1))
+                || candidatePath.startsWith(basePath))
+                && HubNavigationPolicy.internal(current(context), candidate.toString());
     }
 
     public static String projectUrl(Context context, String projectSlug) {

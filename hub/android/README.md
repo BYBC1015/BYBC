@@ -2,7 +2,25 @@
 
 Android WebView shell for the private Codex Hub.
 
-Current release: `v0.1.26` (`versionCode 27`).
+Current release: `v0.1.27` (`versionCode 28`), requiring Hub UI 2.11.0 or newer.
+
+v0.1.27 restores addresses with fresh GET requests rather than serialized WebView
+pages or history snapshots. The native back stack keeps conversation navigation
+without resubmitting POSTs. Legitimate archive/maintenance routes remain available.
+Older UI responses show the native retry screen instead of legacy CSS overlays.
+
+The recovery screen reads the last 30 sent messages from the current conversation,
+including user and agent replies. This is bounded plain text, labelled with save
+time and **not live**. It is tied to server, session digest, user, project and room,
+expires after seven days, and clears on login/logout or server change. No cookie
+values, draft fields or attachment bytes are copied. Account/navigation changes
+fence capture and presentation callbacks.
+
+Native actions use AndroidX WebKit's message listener with an exact trusted origin,
+main-frame identity and a per-page nonce. No JavaScriptInterface is registered.
+Unsupported WebViews keep browser capabilities without an unsafe bridge fallback.
+The shared web UI still owns drafts, uploads and message delivery. Changing servers
+cannot silently delete an outstanding native import queue.
 
 v0.1.26 addresses stale UI after changing networks. Native network changes and
 foreground resume now wake the shared workspace's release/connection check even

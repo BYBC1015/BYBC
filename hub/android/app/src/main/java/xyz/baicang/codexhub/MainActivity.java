@@ -42,7 +42,8 @@ import android.view.HapticFeedbackConstants;
 import android.view.WindowInsets;
 import android.webkit.CookieManager;
 import android.webkit.ConsoleMessage;
-import android.webkit.JavascriptInterface;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -58,6 +59,7 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.ScrollView;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -96,6 +98,7 @@ public class MainActivity extends Activity {
     private FrameLayout rootView;
     private WebView webView;
     private LinearLayout connectionRecoveryView;
+    private ScrollView connectionRecoveryScroll;
     private TextView connectionRecoveryTitle;
     private TextView connectionRecoveryStatus;
     private ValueCallback<Uri[]> pendingFileCallback;
@@ -139,6 +142,16 @@ public class MainActivity extends Activity {
     private ConnectivityManager.NetworkCallback networkCallback;
     private boolean networkCallbackRegistered = false;
     private String lastCommittedInternalUrl = "";
+    private String requestedPageUrl = "";
+    private String pageNonce = "";
+    private String pageSession = "";
+    private String localRecordScript = "";
+    private Button localRecordButton;
+    private AlertDialog localRecordDialog;
+    private long recordGeneration = 0L;
+    private final ArrayList<String> nativeHistory = new ArrayList<>();
+    private static final String RECORD_KEY = "native_current_record_v1";
+    private static final String LAST_SESSION = "last_workspace_session_v1";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -147,6 +160,7 @@ public class MainActivity extends Activity {
         androidAppScript = readTextAsset("android-app.js");
         androidWorkspaceScript = readTextAsset("android-workspace.js");
         androidRecoveryScript = readTextAsset("android-recovery.js");
+        localRecordScript = readTextAsset("local-record.js");
         localData = getSharedPreferences(LOCAL_DATA_PREFERENCES, Context.MODE_PRIVATE);
         sharedAttachmentImporter = new SharedAttachmentImporter(this);
         restoreSharedFiles(savedInstanceState);
@@ -160,21 +174,24 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
-        rootView.setBackgroundColor(Color.rgb(255, 254, 250));
+        rootView.setBackgroundColor(Color.rgb(21, 25, 28));
 
         webView = createPrimaryWebView();
         rootView.addView(webView);
         connectionRecoveryView = createConnectionRecoveryView();
-        rootView.addView(connectionRecoveryView);
+        connectionRecoveryScroll = new ScrollView(this);
+        connectionRecoveryScroll.setFillViewport(true);
+        connectionRecoveryScroll.addView(connectionRecoveryView);
+        connectionRecoveryScroll.setVisibility(View.GONE);
+        rootView.addView(connectionRecoveryScroll, new FrameLayout.LayoutParams(-1, -1));
         setContentView(rootView);
         configureWindowInsets();
         configureWebView();
 
         String launchUrl = initialUrl(getIntent());
         lastCommittedInternalUrl = launchUrl;
-        if (savedInstanceState == null || webView.restoreState(savedInstanceState) == null) {
-            loadPrimaryUrl(webView, launchUrl);
-        }
+        // Restore only a session-bound location, never a serialized old WebView page/history.
+        loadPrimaryUrl(webView, launchUrl);
         if (savedInstanceState == null) receiveSharedFiles(getIntent());
     }
 
@@ -184,7 +201,7 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
-        view.setBackgroundColor(Color.rgb(255, 254, 250));
+        view.setBackgroundColor(Color.rgb(21, 25, 28));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             view.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_BOUND, false);
         }
@@ -200,9 +217,9 @@ public class MainActivity extends Activity {
         panel.setClickable(true);
         panel.setContentDescription("连接恢复面板");
         GradientDrawable card = new GradientDrawable();
-        card.setColor(Color.rgb(255, 254, 250));
+        card.setColor(Color.rgb(27, 32, 36));
         card.setCornerRadius(dp(18));
-        card.setStroke(dp(1), Color.rgb(221, 226, 209));
+        card.setStroke(dp(1), Color.rgb(66, 76, 82));
         panel.setBackground(card);
         panel.setVisibility(View.GONE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -212,14 +229,14 @@ public class MainActivity extends Activity {
         TextView recoveryIcon = new TextView(this);
         recoveryIcon.setText("↻");
         recoveryIcon.setGravity(Gravity.CENTER);
-        recoveryIcon.setTextColor(Color.rgb(116, 99, 34));
+        recoveryIcon.setTextColor(Color.rgb(207, 190, 163));
         recoveryIcon.setTextSize(28);
         panel.addView(recoveryIcon, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
         connectionRecoveryTitle = new TextView(this);
         connectionRecoveryTitle.setText("正在恢复连接");
         connectionRecoveryTitle.setGravity(Gravity.CENTER);
-        connectionRecoveryTitle.setTextColor(Color.rgb(38, 48, 32));
+        connectionRecoveryTitle.setTextColor(Color.rgb(232, 231, 226));
         connectionRecoveryTitle.setTextSize(20);
         connectionRecoveryTitle.setTypeface(
                 connectionRecoveryTitle.getTypeface(),
@@ -234,7 +251,7 @@ public class MainActivity extends Activity {
 
         connectionRecoveryStatus = new TextView(this);
         connectionRecoveryStatus.setGravity(Gravity.CENTER);
-        connectionRecoveryStatus.setTextColor(Color.rgb(103, 114, 94));
+        connectionRecoveryStatus.setTextColor(Color.rgb(166, 178, 185));
         connectionRecoveryStatus.setTextSize(15);
         connectionRecoveryStatus.setLineSpacing(0f, 1.15f);
         panel.addView(connectionRecoveryStatus, new LinearLayout.LayoutParams(
@@ -245,7 +262,7 @@ public class MainActivity extends Activity {
         TextView recoveryHint = new TextView(this);
         recoveryHint.setText("未发送的文字会安全保存在本机草稿中");
         recoveryHint.setGravity(Gravity.CENTER);
-        recoveryHint.setTextColor(Color.rgb(103, 114, 94));
+        recoveryHint.setTextColor(Color.rgb(166, 178, 185));
         recoveryHint.setTextSize(13);
         LinearLayout.LayoutParams hintLayout = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -260,9 +277,9 @@ public class MainActivity extends Activity {
         retry.setAllCaps(false);
         retry.setMinHeight(dp(48));
         retry.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
-                Color.rgb(243, 214, 80)
+                Color.rgb(205, 190, 169)
         ));
-        retry.setTextColor(Color.rgb(53, 59, 41));
+        retry.setTextColor(Color.rgb(32, 35, 37));
         retry.setOnClickListener(ignored -> {
             retry.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
             retryPrimaryWebViewNow();
@@ -278,9 +295,9 @@ public class MainActivity extends Activity {
         server.setAllCaps(false);
         server.setMinHeight(dp(48));
         server.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
-                Color.rgb(241, 243, 233)
+                Color.rgb(46, 54, 60)
         ));
-        server.setTextColor(Color.rgb(72, 84, 62));
+        server.setTextColor(Color.rgb(216, 222, 226));
         server.setOnClickListener(ignored -> showServerSettings());
         LinearLayout.LayoutParams serverLayout = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -288,6 +305,14 @@ public class MainActivity extends Activity {
         );
         serverLayout.setMargins(0, dp(8), 0, 0);
         panel.addView(server, serverLayout);
+
+        localRecordButton = new Button(this);
+        localRecordButton.setText("查看本机对话记录");
+        localRecordButton.setAllCaps(false);
+        localRecordButton.setMinHeight(dp(48));
+        localRecordButton.setOnClickListener(ignored -> showLocalRecord());
+        panel.addView(localRecordButton, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(50)));
 
         FrameLayout.LayoutParams layout = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -313,7 +338,7 @@ public class MainActivity extends Activity {
         if (webView != null) {
             webView.onResume();
             webView.resumeTimers();
-            webView.setVisibility(View.VISIBLE);
+            if (!primaryMainFrameFailed) webView.setVisibility(View.VISIBLE);
             webView.invalidate();
             scheduleResumeHealthCheck();
             notifyWorkspaceNetwork();
@@ -321,12 +346,15 @@ public class MainActivity extends Activity {
         }
         if (primaryPageReady) {
             scheduleAuthenticatedBackgroundWork();
+            captureLocalRecord(++recordGeneration);
         }
     }
 
     @Override
     protected void onPause() {
         activityResumed = false;
+        recordGeneration += 1L;
+        if (localRecordDialog != null) localRecordDialog.dismiss();
         resumeProbeGeneration += 1L;
         if (webView != null) {
             webView.onPause();
@@ -533,7 +561,10 @@ public class MainActivity extends Activity {
                 hasUsableNetwork() ? "正在恢复连接" : "等待网络连接"
         );
         connectionRecoveryStatus.setText(message);
+        if (webView != null && primaryMainFrameFailed) webView.setVisibility(View.INVISIBLE);
+        if (localRecordButton != null) localRecordButton.setVisibility(readLocalRecord() == null ? View.GONE : View.VISIBLE);
         connectionRecoveryView.setVisibility(View.VISIBLE);
+        if (connectionRecoveryScroll != null) connectionRecoveryScroll.setVisibility(View.VISIBLE);
         if (wasHidden) {
             connectionRecoveryView.requestFocus();
             connectionRecoveryView.announceForAccessibility(
@@ -544,7 +575,11 @@ public class MainActivity extends Activity {
 
     private void markPrimaryPageVisible() {
         // Content-addressed assets can use their normal cache after fresh HTML commits.
-        if (webView != null) webView.getSettings().setCacheMode(WebSettings.LOAD_DEFAULT);
+        if (webView != null) {
+            webView.getSettings().setCacheMode(Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+                    ? WebSettings.LOAD_DEFAULT : WebSettings.LOAD_NO_CACHE);
+            webView.setVisibility(View.VISIBLE);
+        }
         primaryLoadInProgress = false;
         primaryPageReady = true;
         primaryMainFrameFailed = false;
@@ -553,6 +588,7 @@ public class MainActivity extends Activity {
         if (connectionRecoveryView != null) {
             connectionRecoveryView.setVisibility(View.GONE);
         }
+        if (connectionRecoveryScroll != null) connectionRecoveryScroll.setVisibility(View.GONE);
         scheduleAuthenticatedBackgroundWork();
     }
 
@@ -567,6 +603,7 @@ public class MainActivity extends Activity {
     }
 
     private String recoveryUrl(WebView target) {
+        if (HubNavigationPolicy.recoverable(HubEndpoint.current(this), requestedPageUrl)) return requestedPageUrl;
         String currentUrl = target == null ? "" : String.valueOf(target.getUrl());
         if (!currentUrl.isEmpty() && !"null".equals(currentUrl)) {
             Uri current = Uri.parse(currentUrl);
@@ -609,13 +646,15 @@ public class MainActivity extends Activity {
 
     private void loadPrimaryUrl(WebView target, String url) {
         if (target == null || target != webView) return;
+        requestedPageUrl = HubNavigationPolicy.currentPage(HubEndpoint.current(this), url);
         primaryPageReady = false;
         primaryLoadInProgress = true;
         primaryMainFrameFailed = false;
         resumeProbeGeneration += 1L;
         // Recover GET from the network; never clear cookies, IndexedDB or file imports.
         target.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
-        target.loadUrl(url);
+        target.loadUrl(HubNavigationPolicy.currentPage(HubEndpoint.current(this), url),
+                java.util.Collections.singletonMap("Cache-Control", "no-cache"));
     }
 
     private void configureWindowInsets() {
@@ -718,10 +757,7 @@ public class MainActivity extends Activity {
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
         settings.setMediaPlaybackRequiresUserGesture(true);
-        webView.addJavascriptInterface(new HubVoiceBridge(), "HubVoice");
-        webView.addJavascriptInterface(new HubMediaBridge(), "HubMedia");
-        webView.addJavascriptInterface(new HubLocalDataBridge(), "HubLocalData");
-        webView.addJavascriptInterface(new HubAppBridge(), "HubApp");
+        configureTrustedBridge(webView);
         webView.setWebViewClient(new HubWebViewClient());
         webView.setWebChromeClient(new HubWebChromeClient());
         webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) ->
@@ -731,9 +767,6 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
-        if (webView != null) {
-            webView.saveState(outState);
-        }
         ArrayList<String> imported = new ArrayList<>();
         for (Uri uri : importedSharedFiles) imported.add(uri.toString());
         ArrayList<String> pending = new ArrayList<>();
@@ -765,9 +798,14 @@ public class MainActivity extends Activity {
             super.onBackPressed();
             return;
         }
+        final WebView source = webView;
+        final long generation = filePageGeneration;
+        final String location = webView.getUrl();
         webView.evaluateJavascript(
                 "(function(){return !!(window.CodexHubAndroid && window.CodexHubAndroid.back());})();",
                 handled -> {
+                    if (activityDestroyed || source != webView || generation != filePageGeneration
+                            || !java.util.Objects.equals(location, webView.getUrl())) return;
                     if (!"true".equals(handled)) {
                         performDefaultBackNavigation();
                     }
@@ -776,8 +814,9 @@ public class MainActivity extends Activity {
     }
 
     private void performDefaultBackNavigation() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
+        if (webView != null && nativeHistory.size() > 1) {
+            nativeHistory.remove(nativeHistory.size() - 1);
+            loadPrimaryUrl(webView, nativeHistory.get(nativeHistory.size() - 1));
             return;
         }
         super.onBackPressed();
@@ -1613,7 +1652,8 @@ public class MainActivity extends Activity {
             return data.toString();
         }
         String lastUrl = localData == null ? "" : localData.getString(LAST_INTERNAL_URL, "");
-        if (!lastUrl.isEmpty()) {
+        if (!lastUrl.isEmpty() && !currentSession().isEmpty()
+                && currentSession().equals(localData.getString(LAST_SESSION, ""))) {
             Uri lastUri = Uri.parse(lastUrl);
             if (isRestorableProjectUrl(lastUri)) return lastUrl;
         }
@@ -1654,6 +1694,11 @@ public class MainActivity extends Activity {
             super.onPageStarted(view, url, favicon);
             if (view == webView) {
                 filePageGeneration += 1L;
+                recordGeneration += 1L;
+                pageNonce = java.util.UUID.randomUUID().toString();
+                pageSession = "";
+                if (localRecordDialog != null) localRecordDialog.dismiss();
+                if (HubNavigationPolicy.authentication(HubEndpoint.current(MainActivity.this), url)) clearLocalRecord();
                 returnSharedFilesToQueue();
                 completeFileSelection(null);
             }
@@ -1662,6 +1707,10 @@ public class MainActivity extends Activity {
                 primaryLoadInProgress = true;
                 primaryPageReady = false;
                 primaryMainFrameFailed = false;
+                if (isRestorableProjectUrl(Uri.parse(url))) {
+                    view.setVisibility(View.INVISIBLE);
+                    showConnectionRecovery("正在打开当前工作区…");
+                }
             }
             if (view == webView && connectionRecoveryView != null
                     && connectionRecoveryView.getVisibility() == View.VISIBLE) {
@@ -1676,8 +1725,7 @@ public class MainActivity extends Activity {
                 if (HubNavigationPolicy.recoverable(HubEndpoint.current(MainActivity.this), url)) {
                     lastCommittedInternalUrl = url;
                 }
-                markPrimaryPageVisible();
-                injectAndroidCss(view);
+                // Readiness is decided after inspecting this document, not merely a paint.
             }
         }
 
@@ -1725,7 +1773,8 @@ public class MainActivity extends Activity {
         @Override
         public void onPageFinished(WebView view, String url) {
             super.onPageFinished(view, url);
-            if (view != webView || primaryMainFrameFailed) {
+            if (view != webView) return;
+            if (primaryMainFrameFailed) {
                 primaryLoadInProgress = false;
                 return;
             }
@@ -1733,25 +1782,50 @@ public class MainActivity extends Activity {
             if (!isInternalUrl(uri)) {
                 return;
             }
-            markPrimaryPageVisible();
-            if (isRestorableProjectUrl(uri) && localData != null) {
-                localData.edit().putString(LAST_INTERNAL_URL, url).apply();
-            }
-            CookieManager.getInstance().flush();
-            injectAndroidCss(view);
-            String script = "window.CodexHubAndroidVersion="
-                    + JSONObject.quote(BuildConfig.VERSION_NAME) + ";"
-                    + androidWorkspaceScript + ";" + androidAppScript + ";" + androidRecoveryScript;
-            view.evaluateJavascript(script, null);
+            final long generation = filePageGeneration;
+            view.evaluateJavascript("(()=>{const s=document.querySelector('[data-ws-shell]');return [!!s,s?.dataset.wsRelease||document.documentElement.dataset.hubRelease||''];})()", modern -> {
+                if (view != webView || generation != filePageGeneration || !url.equals(view.getUrl()) || primaryMainFrameFailed) return;
+                boolean modernWorkspace = false;
+                String release = "";
+                try { JSONArray state = new JSONArray(modern); modernWorkspace = state.optBoolean(0); release = state.optString(1); }
+                catch (JSONException invalid) { /* A missing workspace is handled below. */ }
+                if (isRestorableProjectUrl(uri) && (!modernWorkspace || !HubNavigationPolicy.currentRelease(release))
+                        || !release.isEmpty() && !HubNavigationPolicy.currentRelease(release)) {
+                    handleMainFrameLoadFailure("正在连接新版工作区，稍后重试。可以查看本机只读记录。");
+                    return;
+                }
+                markPrimaryPageVisible();
+                pageSession = currentSession();
+                requestedPageUrl = url;
+                if (HubNavigationPolicy.recoverable(HubEndpoint.current(MainActivity.this), url)
+                        && (nativeHistory.isEmpty() || !nativeHistory.get(nativeHistory.size() - 1).equals(url))) {
+                    nativeHistory.add(url);
+                    if (nativeHistory.size() > 40) nativeHistory.remove(0);
+                }
+                if (isRestorableProjectUrl(uri) && localData != null) {
+                    localData.edit().putString(LAST_INTERNAL_URL, url).putString(LAST_SESSION, currentSession()).apply();
+                }
+                CookieManager.getInstance().flush();
+                String script = nativeBridgeScript() + ";window.CodexHubAndroidVersion="
+                        + JSONObject.quote(BuildConfig.VERSION_NAME) + ";"
+                        + androidWorkspaceScript + ";" + androidRecoveryScript;
+                view.evaluateJavascript(script, ignored -> captureLocalRecord(recordGeneration));
+            });
         }
 
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             Uri uri = request.getUrl();
+            if (!request.isForMainFrame()) return !isInternalUrl(uri);
             if (isInternalUrl(uri)) {
+                if ("GET".equals(request.getMethod()) && HubNavigationPolicy.recoverable(HubEndpoint.current(MainActivity.this), uri.toString())
+                        && !sameDocument(view.getUrl(), uri.toString())) {
+                    loadPrimaryUrl(view, uri.toString());
+                    return true;
+                }
                 return false;
             }
-            openExternal(uri);
+            if (request.hasGesture()) openExternal(uri);
             return true;
         }
 
@@ -1762,9 +1836,119 @@ public class MainActivity extends Activity {
             if (isInternalUrl(uri)) {
                 return false;
             }
-            openExternal(uri);
+            // Old WebViews cannot prove frame origin or a user gesture here.
             return true;
         }
+    }
+
+    private static boolean sameDocument(String current, String next) {
+        return current != null && next.contains("#") && current.split("#", 2)[0].equals(next.split("#", 2)[0]);
+    }
+
+    private void configureTrustedBridge(WebView target) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
+        Uri base = Uri.parse(HubEndpoint.current(this));
+        String origin = base.getScheme() + "://" + base.getAuthority();
+        WebViewCompat.addWebMessageListener(target, "HubNativeMessage", java.util.Collections.singleton(origin),
+                (view, message, sourceOrigin, isMainFrame, reply) -> {
+                    try {
+                        String data = message.getData();
+                        if (data == null || data.length() > 20000 || activityDestroyed || view != webView) return;
+                        JSONObject input = new JSONObject(data);
+                        if (!HubNavigationPolicy.trustedBridge(HubEndpoint.current(this), String.valueOf(view.getUrl()),
+                                sourceOrigin.toString(), isMainFrame, primaryPageReady, pageNonce, input.optString("nonce"))) return;
+                        String value = input.optString("value", "");
+                        switch (input.optString("action")) {
+                            case "download": new HubAppBridge().download(value); break;
+                            case "server": showServerSettings(); break;
+                            case "importsConsumed": new HubLocalDataBridge().clearImportedFilesFor(value); break;
+                            case "listen": requestVoiceRecognition(); break;
+                            case "stopListening": stopVoiceRecognition(); break;
+                            case "speak": speakText(value); break;
+                            case "stopSpeaking": stopSpeaking(); break;
+                            case "share": if (HubNavigationPolicy.download(HubEndpoint.current(this), value))
+                                shareMedia(value, input.optString("title")); break;
+                            case "haptic": view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); break;
+                            default: break;
+                        }
+                    } catch (JSONException | RuntimeException invalid) { Log.w(TAG, "Rejected invalid native request"); }
+                });
+    }
+
+    private String nativeBridgeScript() {
+        return "(()=>{if(window!==window.top||!window.HubNativeMessage||!document.querySelector('[data-ws-shell]'))return;"
+                + "const nonce=" + JSONObject.quote(pageNonce) + ";const send=(action,value='',title='')=>HubNativeMessage.postMessage(JSON.stringify({nonce,action,value,title}));"
+                + "window.HubApp={download:url=>send('download',url),openServerSettings:()=>send('server'),currentServer:()=>"
+                + JSONObject.quote(HubEndpoint.current(this)) + "};"
+                + "window.HubLocalData={clearImportedFilesFor:ids=>send('importsConsumed',ids)};"
+                + "window.HubVoice={startListening:()=>send('listen'),stopListening:()=>send('stopListening'),speak:text=>send('speak',text),stopSpeaking:()=>send('stopSpeaking')};"
+                + "window.HubMedia={share:(url,title)=>send('share',url,title),haptic:()=>send('haptic')};})();";
+    }
+
+    private String currentSession() {
+        return HubLocalRecordPolicy.session(CookieManager.getInstance().getCookie(HubEndpoint.current(this)));
+    }
+
+    private void clearLocalRecord() {
+        recordGeneration += 1L;
+        if (localRecordDialog != null) localRecordDialog.dismiss();
+        if (localData != null) localData.edit().remove(RECORD_KEY).remove(LAST_SESSION).remove(LAST_INTERNAL_URL).apply();
+        nativeHistory.clear();
+    }
+
+    private void captureLocalRecord(long generation) {
+        WebView target = webView;
+        if (activityDestroyed || !activityResumed || target == null || generation != recordGeneration
+                || !primaryPageReady || primaryLoadInProgress || !isRestorableProjectUrl(Uri.parse(String.valueOf(target.getUrl())))) return;
+        final String url = target.getUrl(), session = currentSession();
+        if (session.isEmpty() || !session.equals(pageSession)) { clearLocalRecord(); return; }
+        target.evaluateJavascript(localRecordScript, result -> {
+            if (target != webView || activityDestroyed || generation != recordGeneration || !url.equals(target.getUrl())
+                    || !session.equals(currentSession()) || !primaryPageReady || primaryLoadInProgress) return;
+            try {
+                if (result != null && result.length() <= 100000 && !result.equals("null")) {
+                    JSONObject record = new JSONObject(result);
+                    if (HubLocalRecordPolicy.matchesWorkspace(HubEndpoint.current(this), url,
+                            record.optString("user"), record.optString("project"), record.optString("conversation"))) {
+                        record.put("url", url).put("session", session).put("savedAt", System.currentTimeMillis());
+                        localData.edit().putString(RECORD_KEY, record.toString()).apply();
+                    }
+                }
+            } catch (JSONException invalid) { Log.w(TAG, "Unable to save local conversation text"); }
+            target.postDelayed(() -> captureLocalRecord(generation), 15000L);
+        });
+    }
+
+    private JSONObject readLocalRecord() {
+        try {
+            JSONObject record = new JSONObject(localData.getString(RECORD_KEY, "{}"));
+            if (HubLocalRecordPolicy.readable(HubEndpoint.current(this), recoveryUrl(webView), record.optString("url"),
+                    currentSession(), record.optString("session"), record.optLong("savedAt"), System.currentTimeMillis())
+                    && HubLocalRecordPolicy.matchesWorkspace(HubEndpoint.current(this), record.optString("url"),
+                        record.optString("user"), record.optString("project"), record.optString("conversation"))) return record;
+        } catch (JSONException | RuntimeException invalid) { /* No readable current-session record. */ }
+        return null;
+    }
+
+    private void showLocalRecord() {
+        JSONObject record = readLocalRecord();
+        if (record == null) { Toast.makeText(this, "当前对话尚无可读取的本机记录", Toast.LENGTH_SHORT).show(); return; }
+        String saved = java.text.DateFormat.getDateTimeInstance().format(new java.util.Date(record.optLong("savedAt")));
+        StringBuilder text = new StringBuilder("本机只读记录 · " + saved + "\n不是实时状态，联网后将核对最新消息。\n\n");
+        JSONArray entries = record.optJSONArray("messages");
+        if (entries != null) for (int index = 0; index < Math.min(30, entries.length()); index++) {
+            JSONObject item = entries.optJSONObject(index);
+            if (item != null) text.append(item.optString("author")).append("\n").append(item.optString("text")).append("\n\n");
+        }
+        TextView content = new TextView(this);
+        content.setText(text.toString()); content.setTextSize(16); content.setTextIsSelectable(true);
+        content.setLineSpacing(dp(5), 1.1f); content.setPadding(dp(20), dp(12), dp(20), dp(20));
+        ScrollView scroll = new ScrollView(this); scroll.addView(content);
+        localRecordDialog = new AlertDialog.Builder(this).setTitle(record.optString("title", "本机对话记录"))
+                .setView(scroll).setPositiveButton("重新连接", (dialog, which) -> retryPrimaryWebViewNow())
+                .setNegativeButton("返回", null).create();
+        // Recheck immediately before exposing text, including any asynchronous account change.
+        if (readLocalRecord() != null) localRecordDialog.show();
     }
 
     private void injectAndroidCss(WebView view) {
@@ -1785,34 +1969,28 @@ public class MainActivity extends Activity {
     }
 
     private final class HubVoiceBridge {
-        @JavascriptInterface
         public void startListening() {
             runOnUiThread(MainActivity.this::requestVoiceRecognition);
         }
 
-        @JavascriptInterface
         public void stopListening() {
             runOnUiThread(MainActivity.this::stopVoiceRecognition);
         }
 
-        @JavascriptInterface
         public void speak(String text) {
             runOnUiThread(() -> speakText(text));
         }
 
-        @JavascriptInterface
         public void stopSpeaking() {
             runOnUiThread(MainActivity.this::stopSpeaking);
         }
     }
 
     private final class HubMediaBridge {
-        @JavascriptInterface
         public void openImage(String url, String title) {
             runOnUiThread(() -> openImageViewer(url, title));
         }
 
-        @JavascriptInterface
         public void haptic() {
             runOnUiThread(() -> {
                 if (webView != null) {
@@ -1821,14 +1999,12 @@ public class MainActivity extends Activity {
             });
         }
 
-        @JavascriptInterface
         public void share(String url, String title) {
             runOnUiThread(() -> shareMedia(url, title));
         }
     }
 
     private final class HubAppBridge {
-        @JavascriptInterface
         public void download(String url) {
             runOnUiThread(() -> {
                 if (webView == null || activityDestroyed
@@ -1837,19 +2013,16 @@ public class MainActivity extends Activity {
             });
         }
 
-        @JavascriptInterface
         public void openServerSettings() {
             runOnUiThread(MainActivity.this::showServerSettings);
         }
 
-        @JavascriptInterface
         public String currentServer() {
             return HubEndpoint.current(MainActivity.this);
         }
     }
 
     private final class HubLocalDataBridge {
-        @JavascriptInterface
         public void clearImportedFilesFor(String rawIds) {
             if (rawIds == null || rawIds.length() > 16384) return;
             final ArrayList<String> ids = new ArrayList<>();
@@ -1871,7 +2044,6 @@ public class MainActivity extends Activity {
             });
         }
 
-        @JavascriptInterface
         public void clearImportedFiles() {
             runOnUiThread(() -> {
                 if (webView == null || !HubEndpoint.isInternal(MainActivity.this, Uri.parse(webView.getUrl() == null ? "" : webView.getUrl()))) return;
@@ -1882,13 +2054,11 @@ public class MainActivity extends Activity {
             });
         }
 
-        @JavascriptInterface
         public String loadDraft(String key) {
             if (localData == null) return "";
             return localData.getString(draftPreferenceKey(key), "");
         }
 
-        @JavascriptInterface
         public void saveDraft(String key, String value) {
             if (localData == null) return;
             String draft = value == null ? "" : value;
@@ -1896,7 +2066,6 @@ public class MainActivity extends Activity {
             localData.edit().putString(draftPreferenceKey(key), draft).apply();
         }
 
-        @JavascriptInterface
         public void clearDraft(String key) {
             if (localData == null) return;
             localData.edit().remove(draftPreferenceKey(key)).apply();
@@ -2033,15 +2202,22 @@ public class MainActivity extends Activity {
             ).show();
             return false;
         }
+        if (normalized.equals(HubEndpoint.current(this))) return true;
+        if (sharedImportInProgress || !pendingSharedFiles.isEmpty() || !importedSharedFiles.isEmpty()) {
+            Toast.makeText(this, "当前仍有导入附件，请先完成发送或移除附件，再切换服务器。附件会继续保留。", Toast.LENGTH_LONG).show();
+            return false;
+        }
         if (!HubEndpoint.save(this, normalized)) return false;
+        clearLocalRecord();
         sharedImportGeneration += 1L;
-        pendingSharedFiles.clear();
-        importedSharedFiles.clear();
-        localDataExecutor.execute(() -> sharedAttachmentImporter.removeUnreferenced(java.util.Collections.emptyList()));
         lastCommittedInternalUrl = normalized;
         mainFrameFailureCount = 0;
         mainFrameRetryGeneration += 1L;
         if (webView != null) {
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+                WebViewCompat.removeWebMessageListener(webView, "HubNativeMessage");
+                configureTrustedBridge(webView);
+            }
             webView.stopLoading();
             webView.clearHistory();
             showConnectionRecovery("正在连接新服务器…");

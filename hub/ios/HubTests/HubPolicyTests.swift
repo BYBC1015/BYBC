@@ -47,4 +47,50 @@ final class HubPolicyTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Cache-Control"), "no-cache")
         XCTAssertEqual(request.timeoutInterval, 30)
     }
+
+    func testMaintenancePageKeepsItsOwnRouteWithoutConversationRestoration() {
+        let archive = url("projects/demo?view=archive&tab=assets")
+        XCTAssertFalse(policy.isWorkspace(archive))
+        XCTAssertTrue(policy.canRecover(archive))
+        XCTAssertEqual(policy.pageRequest(archive).url, archive)
+        XCTAssertTrue(policy.isAuthentication(url("login")))
+        XCTAssertTrue(policy.isAuthentication(url("logout")))
+        XCTAssertFalse(policy.isAuthentication(url("projects/login")))
+    }
+
+    func testNativeReadOnlyRecordBindsSessionProjectRoomAndAge() {
+        let now = Date(timeIntervalSince1970: 1000000)
+        let location = url("projects/demo/conversations/31")
+        let identity = HubLocalRecord.sessionDigest("test-session-only")
+        let record = HubLocalRecord(url: location, session: identity, user: "2", project: "demo", conversation: "31",
+            title: "当前对话", messages: [HubLocalMessage(author: "你", text: "已发送的消息")], savedAt: now)
+        XCTAssertTrue(record.readable(policy: policy, location: location, session: identity, now: now))
+        XCTAssertFalse(record.readable(policy: policy, location: location, session: "", now: now))
+        XCTAssertFalse(record.readable(policy: policy, location: location, session: HubLocalRecord.sessionDigest("other-account"), now: now))
+        XCTAssertFalse(record.readable(policy: policy, location: url("projects/demo/conversations/32"), session: identity, now: now))
+        XCTAssertFalse(record.readable(policy: policy, location: url("projects/other/conversations/31"), session: identity, now: now))
+        XCTAssertFalse(record.readable(policy: policy, location: location, session: identity, now: now.addingTimeInterval(604801)))
+        XCTAssertFalse(record.readable(policy: policy, location: location, session: identity, now: now.addingTimeInterval(-1)))
+        XCTAssertEqual(identity.count, 64)
+        XCTAssertFalse(identity.contains("test-session"))
+        XCTAssertEqual(HubLocalRecord.sessionDigest(""), "")
+    }
+
+    func testSnapshotWithWrongDOMIdentityCannotBeReadOrSaved() {
+        let now = Date(), location = url("projects/demo/conversations/31")
+        for (user, project, conversation) in [("", "demo", "31"), ("2", "wrong", "31"), ("2", "demo", "32")] {
+            let record = HubLocalRecord(url: location, session: "digest", user: user, project: project, conversation: conversation,
+                title: "Wrong scope", messages: [], savedAt: now)
+            XCTAssertFalse(record.readable(policy: policy, location: location, session: "digest", now: now))
+        }
+    }
+
+    func testOldUIReleaseAndDeepLinkCacheCannotMasqueradeAsCurrent() {
+        XCTAssertTrue(HubPolicy.currentRelease("2.11.0"))
+        XCTAssertTrue(HubPolicy.currentRelease("3.0.0"))
+        XCTAssertFalse(HubPolicy.currentRelease("2.10.99"))
+        XCTAssertFalse(HubPolicy.currentRelease(""))
+        XCTAssertTrue(policy.sameDocument(url("projects/demo"), url("projects/demo#work-entry-7")))
+        XCTAssertFalse(policy.sameDocument(url("projects/demo"), url("projects/demo/conversations/31#work-entry-7")))
+    }
 }

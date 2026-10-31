@@ -92,3 +92,7 @@ html body.agent-profile-screen #agent-model-settings { margin-top:26px; padding-
 html body.agent-profile-screen #agent-model-settings h3 { margin:0 0 18px; font-size:17px; }
 html body.agent-profile-screen #agent-model-settings select:disabled { color:#9da698; background:#1c251d; opacity:.7; cursor:not-allowed; }
 html body.agent-profile-screen .agent-model-error { background:#3c2824; border:1px solid #725046; color:#f0c8ba; padding:12px 14px; border-radius:12px; font-size:13px; line-height:1.7; }
+@media(max-width:899px), (max-width:1100px) and (max-height:600px) and (pointer:coarse) {
+  html body:is(.agent-profile-screen,.task-profile-screen) :is(input:not([type=checkbox]),select,textarea) { font-size:16px; }
+  html body:is(.agent-profile-screen,.task-profile-screen) :is(button,.button) { min-height:44px; }
+}

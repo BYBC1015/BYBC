@@ -385,7 +385,7 @@ body.hub-detail-screen :where(
   outline-offset: 2px;
 }
 
-@media (max-width: 860px) {
+@media (max-width:860px), (max-width:1100px) and (max-height:600px) and (pointer:coarse) {
   body.hub-detail-screen .workbench-topbar {
     border-bottom-width: 2px;
     background: rgba(255, 253, 244, 0.98);

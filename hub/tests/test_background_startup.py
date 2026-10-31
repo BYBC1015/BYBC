@@ -139,7 +139,7 @@ def test_background_tray_requires_actual_ready_and_rejects_late_setup(tmp_path, 
     image = tmp_path / 'owl.png'
     image.write_bytes(png())
     tray = BridgeTray(icon_path=image, title='Isolated tray', **{key: lambda: None for key in
-        ('show_window', 'start_bridge', 'stop_bridge', 'open_hub', 'exit_app')})
+        ('show_window', 'start_bridge', 'stop_bridge', 'open_hub', 'open_toolbox', 'exit_app')})
     assert tray.start(wait_until_ready=.01) == (mode == 'ready')
     if mode == 'ready':
         assert icons[0].visible and tray.is_running
@@ -150,3 +150,41 @@ def test_background_tray_requires_actual_ready_and_rejects_late_setup(tmp_path, 
         if mode == 'late':
             icons[0].setup(icons[0])
             assert not icons[0].visible
+
+
+def test_tray_toolbox_is_adjacent_to_hub_and_uses_only_its_callback(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+    icon = Mock()
+    monkeypatch.setitem(sys.modules, 'pystray', SimpleNamespace(
+        Icon=lambda *args: (setattr(icon, 'menu', args[3]) or icon),
+        Menu=lambda *items: items, MenuItem=lambda label, action, **kw: (label, action)))
+    picture = tmp_path / 'owl.png'; picture.write_bytes(png())
+    callbacks = {key: Mock() for key in
+        ('show_window', 'start_bridge', 'stop_bridge', 'open_hub', 'open_toolbox', 'exit_app')}
+    tray = BridgeTray(icon_path=picture, title='Test', **callbacks)
+    assert tray.start()
+    assert [item[0] for item in icon.menu][:2] == ['打开 Hub', '工具箱']
+    icon.menu[1][1](icon, None)
+    callbacks['open_toolbox'].assert_called_once_with()
+    for key in callbacks.keys() - {'open_toolbox'}:
+        callbacks[key].assert_not_called()
+    tray.stop()
+
+
+def test_background_toolbox_dispatch_stays_hidden_and_never_restarts_workers(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+    launch = Mock()
+    monkeypatch.setattr('codex_bridge.local_tools.launch_toolbox', launch)
+    app, events = app_fixture(tmp_path, monkeypatch)
+    # Simulate a tray click after the main window has been hidden/closed to tray.
+    app.root.callbacks.clear()
+    events.clear()
+    app.tray.callbacks['open_toolbox']()
+    launch.assert_not_called()  # The tray thread only queues onto Tk's owner.
+    assert len(app.root.callbacks) == 1
+    app.root.callbacks.pop()()
+    launch.assert_called_once_with(app.config_path)
+    assert not events
+    app._exiting = True
+    app.open_toolbox()
+    launch.assert_called_once_with(app.config_path)

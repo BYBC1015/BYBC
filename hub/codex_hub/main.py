@@ -2238,7 +2238,7 @@ def attachment_file_response(
 ) -> FileResponse:
     files_root = get_settings(request).files_dir.resolve()
     path = (files_root / attachment["stored_relpath"]).resolve()
-    if files_root not in path.parents or not path.exists():
+    if files_root not in path.parents or not path.is_file():
         raise HTTPException(status_code=404, detail="attachment file not found")
     attachment_media_type = media_type_for(attachment)
     media_type = (
@@ -2247,6 +2247,10 @@ def attachment_file_response(
         else attachment["content_type"]
     ) or attachment["content_type"]
     filename = attachment["original_filename"]
+    from .reading import GENERIC_CONTENT_TYPES, normalized_content_type, attachment_extension
+    if attachment_media_type == 'image' and normalized_content_type(media_type) in GENERIC_CONTENT_TYPES:
+        media_type = {'.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.png':'image/png',
+                      '.webp':'image/webp', '.gif':'image/gif'}.get(attachment_extension(filename), 'application/octet-stream')
     if inline and size in {"thumb", "preview"}:
         derived = thumbnail_path(files_root, attachment, size)
         if derived:
@@ -2254,12 +2258,17 @@ def attachment_file_response(
             media_type = "image/webp"
             filename = f"{Path(filename).stem}-{size}.webp"
     allow_inline = attachment_media_type in {"image", "video"}
+    # Attachments are user/model supplied content, never application documents.
+    # Sandbox also protects original downloads if opened as a document in a client.
+    headers = {"Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff"}
+    if inline:
+        headers["Cache-Control"] = "private, max-age=86400"
     return FileResponse(
         path,
         media_type=media_type,
         filename=filename,
         content_disposition_type="inline" if inline and allow_inline else "attachment",
-        headers={"Cache-Control": "private, max-age=86400"} if inline else None,
+        headers=headers,
     )
 
 

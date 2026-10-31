@@ -1,5 +1,5 @@
 /* The same conversation remains usable above mobile keyboards and safe areas. */
-@media(max-width:899px) {
+@media(max-width:899px), (max-width:1100px) and (max-height:600px) and (pointer:coarse) {
   .ws-shell,.ws-shell.is-inspector-hidden {
     position:fixed; inset-inline:0; top:var(--ws-viewport-top,0px);
     height:var(--ws-viewport-height,100dvh);
@@ -28,7 +28,8 @@
   .ws-reply-footer>.ws-message-source { display:inline-flex; }
   .ws-all-agents { min-height:40px; }
   .ws-room-search input,.ws-project-switch select,.ws-composer textarea { font-size:16px; }
-  .ws-messages { touch-action:pan-y pinch-zoom; -webkit-overflow-scrolling:touch; }
+  /* Horizontal code/table scrollers need both axes at every ancestor. */
+  .ws-messages { touch-action:pan-x pan-y pinch-zoom; -webkit-overflow-scrolling:touch; }
   html body.workspace-screen .agent-workspace {
     inset:auto; top:calc(var(--ws-viewport-top,0px) + 12px + env(safe-area-inset-top));
     left:max(8px,env(safe-area-inset-left)); right:max(8px,env(safe-area-inset-right));
@@ -66,9 +67,15 @@
   .ws-pending-submission button,.ws-attachment button { min-width:40px; min-height:40px; }
 }
 /* Short editing views keep controls visible until the viewport actually recovers. */
-@media(max-width:899px) {
+@media(max-width:899px), (max-width:1100px) and (max-height:600px) and (pointer:coarse) {
   [data-ws-compact-viewport="true"] .ws-center { grid-template-rows:54px minmax(0,1fr) auto; }
-  [data-ws-compact-viewport="true"] .ws-composer-region { padding-top:6px; padding-bottom:6px; }
+  /* Auxiliary notices may arrive together. Reserve a readable part of the chat
+     and scroll the composer instead of pushing its input behind the keyboard. */
+  [data-ws-compact-viewport="true"] .ws-composer-region {
+    min-height:0; max-height:calc(var(--ws-viewport-height,100dvh) - 130px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    padding-top:6px; padding-bottom:6px; overflow:auto; overscroll-behavior:contain;
+    scrollbar-width:thin; scrollbar-color:#59615d transparent;
+  }
   [data-ws-compact-viewport="true"] .ws-composer { padding-top:6px; padding-bottom:6px; border-radius:18px; }
   [data-ws-compact-viewport="true"] .ws-composer textarea { min-height:44px; max-height:64px; padding-top:6px; padding-bottom:3px; line-height:1.65; }
   [data-ws-compact-viewport="true"] .ws-recipient-picker>summary { min-height:32px; }
@@ -82,8 +89,15 @@
   [data-ws-compact-viewport="true"] [data-ws-other-queues] { max-height:48px; }
   [data-ws-compact-viewport="true"] .ws-pending-submission { padding:6px 9px; margin-bottom:5px; }
   [data-ws-compact-viewport="true"] .ws-pending-submission p { max-height:30px; overflow:auto; }
-  [data-ws-compact-viewport="true"] .ws-composer-meta { display:none; }
-  [data-ws-compact-viewport="true"] .ws-recipient-menu { max-height:calc(var(--ws-viewport-height,100dvh) - 145px); }
+  [data-ws-compact-viewport="true"] .ws-composer-meta { min-height:0; margin-top:0; }
+  [data-ws-compact-viewport="true"] .ws-composer-meta:not(:has(.ws-dispatch-error:not([hidden]))) { display:none; }
+  [data-ws-compact-viewport="true"] .ws-keyboard-hint { display:none; }
+  /* A scrolling composer must not clip its recipient popup. */
+  [data-ws-compact-viewport="true"] .ws-recipient-menu {
+    position:fixed; top:calc(var(--ws-viewport-top,0px) + 62px + env(safe-area-inset-top));
+    bottom:auto; left:16px; right:16px; margin-inline:auto; width:min(360px,calc(100vw - 32px));
+    max-height:calc(var(--ws-viewport-height,100dvh) - 126px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
   [data-ws-compact-viewport="true"] .ws-sidebar { overflow-y:auto; }
   [data-ws-compact-viewport="true"] .ws-room-section { flex:none; min-height:140px; }
   [data-ws-compact-viewport="true"] .ws-room-list { flex:none; min-height:100px; max-height:180px; }

@@ -16,6 +16,7 @@ class BridgeTray:
         start_bridge: Callable[[], None],
         stop_bridge: Callable[[], None],
         open_hub: Callable[[], None],
+        open_toolbox: Callable[[], None],
         exit_app: Callable[[], None],
     ):
         self.icon_path = icon_path
@@ -24,6 +25,7 @@ class BridgeTray:
         self.start_bridge = start_bridge
         self.stop_bridge = stop_bridge
         self.open_hub = open_hub
+        self.open_toolbox = open_toolbox
         self.exit_app = exit_app
         self.icon: Any | None = None
         self.error: Exception | None = None
@@ -41,6 +43,7 @@ class BridgeTray:
             image = Image.open(self.icon_path).convert("RGBA")
             menu = pystray.Menu(
                 pystray.MenuItem("打开 Hub", self._call(self.open_hub), default=True),
+                pystray.MenuItem("工具箱", self._call(self.open_toolbox)),
                 pystray.MenuItem("连接与设置", self._call(self.show_window)),
                 pystray.MenuItem("启动后台工作", self._call(self.start_bridge)),
                 pystray.MenuItem("暂停接收工作", self._call(self.stop_bridge)),

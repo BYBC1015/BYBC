@@ -3,6 +3,7 @@ import json
 import time
 from types import SimpleNamespace
 from unittest.mock import Mock
+import pytest
 
 from codex_bridge.desktop_assets import PackagedAssets, WorkspaceCache, build_asset_manifest, offline_document
 from codex_bridge.desktop_window import DesktopHost, HubLocation, DesktopAPI
@@ -170,6 +171,52 @@ def test_navigation_changed_while_reading_snapshot_prevents_restore(tmp_path):
     host.restore_workspace(1, 'https://hub/hub/projects/one')
     host.window.load_url.assert_not_called()
     assert host._offline is False
+
+
+@pytest.mark.parametrize('change', ['logout', 'switch-account', 'logout-and-same-account'])
+def test_account_change_during_snapshot_preparation_cancels_restore(tmp_path, change):
+    host = DesktopHost(HubLocation('https://hub/hub'), {}, tmp_path)
+    host.window = Mock()
+    url = 'https://hub/hub/projects/one'
+    assert host.cache.put(url, page('1'))
+    def prepare(location, snapshot):
+        if change == 'switch-account':
+            host.cache.put(url, page('2'))
+        else:
+            host.cache.clear_current()
+            if change == 'logout-and-same-account': host.cache.put(url, page('1'))
+        return snapshot
+    host.assets.prepare_snapshot = prepare
+    host.restore_workspace(target=url)
+    assert not host._offline and host._offline_response is None
+    host.window.load_url.assert_not_called()
+    host.window.run_js.assert_not_called()
+
+
+@pytest.mark.parametrize('change', ['none', 'logout', 'switch-account', 'logout-and-same-account'])
+def test_pending_offline_document_is_fenced_against_account_changes(tmp_path, change):
+    host = DesktopHost(HubLocation('https://hub/hub'), {}, tmp_path)
+    host.window = Mock()
+    url = 'https://hub/hub/projects/one'
+    host.cache.put(url, page('1'))
+    host.assets.prepare_snapshot = lambda _location, snapshot: snapshot
+    host.restore_workspace(target=url)
+    assert host._offline_response is not None
+    host._resource_response = Mock(return_value='isolated-html-response')
+    if change == 'switch-account':
+        host.cache.put(url, page('2'))
+    elif change != 'none':
+        host.cache.clear_current()
+        if change == 'logout-and-same-account': host.cache.put(url, page('1'))
+    request = SimpleNamespace(Request=SimpleNamespace(Uri=url, Method='GET'),
+                              ResourceContext='Document', Response=None)
+    host.on_resource_requested(None, request)
+    assert host._offline_response is None
+    if change == 'none':
+        assert request.Response == 'isolated-html-response'
+    else:
+        assert request.Response is None
+        host._resource_response.assert_not_called()
 
 
 def test_corrupt_or_partial_snapshot_is_cache_miss(tmp_path):

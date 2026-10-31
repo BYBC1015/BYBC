@@ -26,7 +26,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Hub-iOS-0.1.0-UNSIGNED-SIMULATOR-ONLY
+          name: Hub-iOS-0.1.1-UNSIGNED-SIMULATOR-ONLY
           retention-days: 7
           path: |
             ${{ runner.temp }}/hub-ios-verification/*.txt

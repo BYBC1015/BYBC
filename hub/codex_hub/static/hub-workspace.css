@@ -144,7 +144,7 @@ html body.hub-detail-screen .agent-workspace { width:min(1180px,calc(100vw - 64p
 @media(hover:hover) and (pointer:fine) {
   .agent-workspace .agent-card:hover { transform:translateY(-3px); box-shadow:0 10px 28px #2b2b450c; z-index:1; }
 }
-@media(max-width:860px) {
+@media(max-width:860px), (max-width:1100px) and (max-height:600px) and (pointer:coarse) {
   html body.hub-detail-screen .workbench-grid { grid-template-columns:minmax(0,1fr); }
   html body.hub-detail-screen .workbench-topbar { min-height:64px; gap:8px; padding:0 12px; }
   html body.hub-detail-screen .workbench-brand { display:none; }
@@ -280,7 +280,7 @@ html body.agent-profile-screen button.primary { color:#fff; background:#30333c; 
 .agent-profile-panel .agent-participant-choices label { display:flex; align-items:center; gap:8px; margin:0; padding:8px 12px; border:1px solid #e3e5ed; border-radius:20px; }
 .agent-profile-panel .agent-participant-choices label>span { margin:0; font-size:12px; }
 .agent-profile-panel .agent-participant-choices small { margin:0; font-size:10px; }
-@media(max-width:860px) {
+@media(max-width:860px), (max-width:1100px) and (max-height:600px) and (pointer:coarse) {
   .agent-profile-layout { grid-template-columns:minmax(0,1fr); }
   html body.agent-profile-screen .shell { padding:20px 18px 40px; }
   .agent-workspace.agent-list-view .agent-metrics { padding-top:14px; border-top:1px solid #eeeff3; }

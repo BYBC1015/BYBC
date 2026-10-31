@@ -180,7 +180,9 @@ def test_mobile_composer_sends_without_reload_or_scroll_jump(live_hub: str):
                 "contentVisibility: message.contentVisibility, "
                 "containIntrinsicSize: message.containIntrinsicSize }; }"
             )
-            assert scroll_css["touchAction"] == "pan-y", scroll_css
+            # Both axes keep long code/table results readable by touch. Blink
+            # serializes pan-x + pan-y + pinch-zoom as manipulation.
+            assert scroll_css["touchAction"] == "manipulation", scroll_css
             assert scroll_css["overscrollBehaviorY"] == "contain", scroll_css
             assert scroll_css["contentVisibility"] == "visible", scroll_css
             assert scroll_css["containIntrinsicSize"] == "none", scroll_css

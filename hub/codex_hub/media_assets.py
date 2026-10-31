@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from .media_index import parse_generation_metadata
-from .reading import is_video_attachment, video_content_type
+from .reading import (
+    GENERIC_CONTENT_TYPES, ORDINARY_ATTACHMENT_EXTENSIONS,
+    attachment_extension, is_video_attachment, normalized_content_type, video_content_type,
+)
 
 try:
     from PIL import Image, ImageOps
@@ -26,9 +29,13 @@ THUMBNAIL_SIZES = {"thumb": 360, "preview": 1440}
 
 
 def media_type_for(attachment: dict[str, Any]) -> str:
-    content_type = str(attachment.get("content_type") or "").lower()
-    suffix = Path(str(attachment.get("original_filename") or "")).suffix.lower()
-    if content_type in IMAGE_CONTENT_TYPES or suffix in IMAGE_SUFFIXES:
+    content_type = normalized_content_type(attachment.get("content_type"))
+    suffix = attachment_extension(attachment.get("original_filename"))
+    # A filename alone cannot turn an active document into a same-origin image.
+    if suffix not in ORDINARY_ATTACHMENT_EXTENSIONS and (
+        content_type in IMAGE_CONTENT_TYPES or
+        (content_type in GENERIC_CONTENT_TYPES and suffix in IMAGE_SUFFIXES)
+    ):
         return "image"
     if is_video_attachment(attachment):
         return "video"
