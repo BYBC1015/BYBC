@@ -16,7 +16,7 @@ struct HubApp: App {
         let model = HubSession(baseURL: url, connectAutomatically: !testing, configuration: configuration)
 #if DEBUG
         if testing && ProcessInfo.processInfo.environment["HUB_UI_TESTING"] == "1" {
-            try? model.installFixture(reset: ProcessInfo.processInfo.environment["HUB_RESET_FIXTURE"] == "1")
+            try? model.installFixture(reset: ProcessInfo.processInfo.environment["HUB_RESET_FIXTURE"] == "1", composerDetails: ProcessInfo.processInfo.environment["HUB_COMPOSER_DETAILS_FIXTURE"] == "1")
         }
 #endif
         _session = StateObject(wrappedValue: model)

@@ -158,4 +158,41 @@ final class HubNativeUITests: XCTestCase {
         XCTAssertEqual(app.textFields["chat.composer"].value as? String, "New room draft")
         capture("native-new-room-draft")
     }
+    func testLandscapeAttachmentsPendingAndStatusRemainAccessible() {
+        app.terminate()
+        app.launchEnvironment["HUB_COMPOSER_DETAILS_FIXTURE"] = "1"
+        app.launch()
+        XCTAssertTrue(app.textFields["chat.composer"].waitForExistence(timeout: 8))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let landscape = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let frame = self.app.windows.firstMatch.frame
+            return frame.width > frame.height
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [landscape], timeout: 8), .completed)
+        app.textFields["chat.composer"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        waitForStableLandscape()
+        XCTAssertEqual(app.textFields["chat.composer"].value as? String, "Attachment and pending draft")
+        XCTAssertTrue(app.textFields["chat.composer"].isEnabled)
+        XCTAssertTrue(app.buttons["chat.composer-details"].isHittable)
+        XCTAssertTrue(app.buttons["添加图片或视频"].isHittable)
+        XCTAssertTrue(app.buttons["添加文件"].isHittable)
+        XCTAssertTrue(app.buttons["发送消息"].isHittable)
+        XCTAssertFalse(app.buttons["发送消息"].isEnabled)
+        XCTAssertTrue(app.staticTexts["离线 · 可继续查看和写草稿"].isHittable)
+        capture("native-landscape-attachments-pending-keyboard")
+        app.buttons["chat.composer-details"].tap()
+        XCTAssertTrue(app.navigationBars["本条消息"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["上一条消息待确认"].exists)
+        XCTAssertTrue(app.buttons["查收"].exists)
+        XCTAssertTrue(app.buttons["重试"].exists)
+        let remove = app.buttons["移除 参考说明.txt"]
+        if !remove.isHittable { app.scrollViews["chat.composer-details-content"].swipeUp() }
+        XCTAssertTrue(remove.isHittable)
+        capture("native-landscape-composer-details")
+        remove.tap()
+        XCTAssertFalse(remove.exists)
+        app.navigationBars["本条消息"].buttons["完成"].tap()
+        XCTAssertEqual(app.textFields["chat.composer"].value as? String, "Attachment and pending draft")
+    }
 }

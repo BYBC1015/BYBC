@@ -399,7 +399,7 @@ final class HubSession: ObservableObject {
 #if DEBUG
     // Simulator-only native interaction fixture. Transport is also replaced by
     // HubNoNetworkProtocol in the testing app, so no path can reach production.
-    func installFixture(reset: Bool = false, userID: Int = 1, login: String = "fixture-session") throws {
+    func installFixture(reset: Bool = false, userID: Int = 1, login: String = "fixture-session", composerDetails: Bool = false) throws {
         if reset { disk.clear() }
         fixtureOffline = true
         let value = HubIdentity(apiVersion: 1, release: "2.12.0", user: HubUser(id: userID, username: "native-fixture"), csrfToken: "fixture-csrf", sessionKey: login)
@@ -422,6 +422,13 @@ final class HubSession: ObservableObject {
         let releases = try HubTransport.decoder.decode(HubReleases.self, from: HubFixtures.releases)
         try disk.save(HubCached(session: login, savedAt: Date(), value: releases), key: cacheKey("api/releases"))
         offline = true; selectProject(fixture.project)
+        if composerDetails {
+            draft.text = "Attachment and pending draft"
+            draft.files = [try disk.importFile(data: Data("Native UI fixture attachment".utf8), name: "参考说明.txt", mime: "text/plain", existing: [])]
+            pending = HubDraft(text: "上一条消息已经送出，等待确认回执。", awaitingReceipt: true)
+            statusMessage = "网络暂未恢复。\n上一条消息等待确认。\n本条文字和附件已经保存在本机。"
+            persistDraft()
+        }
     }
     func expireFixtureSession() { resetAccount() }
 #endif

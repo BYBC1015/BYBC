@@ -95,6 +95,8 @@ struct HubChatView: View {
     @State private var showRooms = false
     @State private var showAgents = false
     @State private var chooseFiles = false
+    @State private var showComposerDetails = false
+    @State private var showDetailAgents = false
     @State private var photos: [PhotosPickerItem] = []
     @State private var followLatest = true
     @FocusState private var composerFocused: Bool
@@ -144,6 +146,7 @@ struct HubChatView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) { if session.selectedProject != nil { composer } }
         .sheet(isPresented: $showRooms) { HubConversationPicker(session: session, close: { showRooms = false }) }
         .sheet(isPresented: $showAgents) { recipientPicker }
+        .sheet(isPresented: $showComposerDetails) { composerDetails }
         .fileImporter(isPresented: $chooseFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             guard filePickerScope == session.selectionScope, filePickerAccount == session.accountScope, filePickerGeneration == session.selectionGeneration else { return }
             switch result { case .success(let urls): session.importURLs(urls); case .failure(let error): session.errorMessage = error.localizedDescription }
@@ -163,11 +166,19 @@ struct HubChatView: View {
         }
     }
     private var compactComposer: Bool { verticalSizeClass == .compact }
+    private var hasComposerDetails: Bool { session.statusMessage != nil || session.pending != nil || !session.draft.files.isEmpty }
+    private var composerDetailSummary: String {
+        var parts: [String] = []
+        if !session.draft.files.isEmpty { parts.append("\(session.draft.files.count) 附件") }
+        if session.pending != nil { parts.append("待查收") }
+        return parts.isEmpty ? "状态详情" : parts.joined(separator: " · ")
+    }
     private var composerLayout: AnyLayout {
         compactComposer ? AnyLayout(HStackLayout(alignment: .center, spacing: 8)) : AnyLayout(VStackLayout(alignment: .leading, spacing: 9))
     }
     private var composer: some View {
         VStack(alignment: .leading, spacing: 9) {
+          if !compactComposer {
             if let status = session.statusMessage { Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(3) }
             if let pending = session.pending {
                 HStack {
@@ -184,11 +195,15 @@ struct HubChatView: View {
                     } }
                 }
             }
+          }
             // AnyLayout keeps the same TextField and FocusState when rotating.
             composerLayout {
-                Button { showAgents = true } label: {
-                    Label("交给 " + recipientNames, systemImage: "person.crop.circle").font(.subheadline).lineLimit(1).frame(minHeight: 44)
-                }.frame(maxWidth: compactComposer ? 120 : nil, alignment: .leading)
+                Button { if compactComposer && hasComposerDetails { composerFocused = false; showComposerDetails = true } else { showAgents = true } } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("交给 " + recipientNames, systemImage: "person.crop.circle").font(.subheadline).lineLimit(1)
+                        if compactComposer && hasComposerDetails { Text(composerDetailSummary).font(.caption2).lineLimit(1) }
+                    }.frame(minHeight: 44)
+                }.frame(maxWidth: compactComposer ? 120 : nil, alignment: .leading).accessibilityIdentifier("chat.composer-details")
                 TextField("写下目标，或添加图片和文件…", text: $session.draft.text, axis: .vertical)
                     .lineLimit(compactComposer ? 1...2 : 1...5).font(.body).padding(.vertical, 5).frame(maxWidth: .infinity)
                     .disabled(session.draft.awaitingReceipt).focused($composerFocused).accessibilityIdentifier("chat.composer")
@@ -201,6 +216,38 @@ struct HubChatView: View {
             }
         }.padding(compactComposer ? 8 : 14).background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 24)).padding(.horizontal, 10).padding(.vertical, 8).background(hubCanvas)
     }
+    private var composerDetails: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Button { showDetailAgents = true } label: { Label("交给 " + recipientNames, systemImage: "person.crop.circle").frame(minHeight: 44) }
+                    if let status = session.statusMessage { Text(status).font(.subheadline).foregroundStyle(.secondary) }
+                    if let pending = session.pending {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("上一条消息待确认").font(.headline)
+                            Text(pending.text.isEmpty ? "附件消息" : pending.text).textSelection(.enabled)
+                            HStack {
+                                if session.sending { Button("停止等待", action: session.cancelWaiting) }
+                                else { Button("查收") { Task { await session.checkReceipt() } }; Button("重试", action: session.retryPending) }
+                            }.buttonStyle(.bordered).frame(minHeight: 44)
+                        }
+                    }
+                    if !session.draft.files.isEmpty {
+                        Text("本条附件").font(.headline)
+                        ForEach(session.draft.files) { file in
+                            HStack {
+                                Label(file.name, systemImage: "doc").fixedSize(horizontal: false, vertical: true)
+                                Spacer()
+                                Button { session.removeFile(file) } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                                    .accessibilityLabel("移除 \(file.name)").disabled(session.draft.awaitingReceipt)
+                            }
+                        }
+                    }
+                }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+            }.accessibilityIdentifier("chat.composer-details-content").navigationTitle("本条消息").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showComposerDetails = false } } }
+        }.sheet(isPresented: $showDetailAgents) { recipientPicker }
+    }
     private var recipientNames: String { (session.workspace?.agents.filter { session.draft.agentIDs.contains($0.id) }.map(\.name) ?? []).joined(separator: "、").isEmpty ? "总控" : (session.workspace?.agents.filter { session.draft.agentIDs.contains($0.id) }.map(\.name) ?? []).joined(separator: "、") }
     private var recipientPicker: some View {
         NavigationStack {
@@ -208,7 +255,7 @@ struct HubChatView: View {
                 Button {
                     if session.draft.agentIDs.contains(agent.id) { session.draft.agentIDs.removeAll { $0 == agent.id } } else { session.draft.agentIDs.append(agent.id) }
                 } label: { HStack { VStack(alignment: .leading) { Text(agent.name); Text(agent.job ?? "").font(.caption).foregroundStyle(.secondary) }; Spacer(); if session.draft.agentIDs.contains(agent.id) { Image(systemName: "checkmark.circle.fill") } } }.disabled(!agent.active || agent.canDispatch == false)
-            }.navigationTitle("这次交给谁").toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showAgents = false } } }
+            }.navigationTitle("这次交给谁").toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showAgents = false; showDetailAgents = false } } }
         }.presentationDetents([.medium, .large])
     }
 }
