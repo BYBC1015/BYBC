@@ -17,6 +17,9 @@ struct HubApp: App {
 #if DEBUG
         if testing && ProcessInfo.processInfo.environment["HUB_UI_TESTING"] == "1" {
             try? model.installFixture(reset: ProcessInfo.processInfo.environment["HUB_RESET_FIXTURE"] == "1", composerDetails: ProcessInfo.processInfo.environment["HUB_COMPOSER_DETAILS_FIXTURE"] == "1")
+            HubInputDiagnostics.enable { [weak model] in
+                model?.identity?.user.id == 1 && model?.identity?.user.username == "native-fixture" && model?.identity?.sessionKey == "fixture-session"
+            }
         }
 #endif
         _session = StateObject(wrappedValue: model)

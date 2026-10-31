@@ -23,7 +23,14 @@ final class HubSession: ObservableObject {
     @Published private(set) var olderMessageCursor: Int?
     @Published private(set) var olderRoomCursor: Int?
     @Published private(set) var savedAt: Date?
-    @Published var draft = HubDraft() { didSet { scheduleDraftSave() } }
+    @Published var draft = HubDraft() {
+        didSet {
+#if DEBUG
+            HubInputDiagnostics.model(old: oldValue.text, new: draft.text, scope: scope, requestKey: draft.requestKey)
+#endif
+            scheduleDraftSave()
+        }
+    }
     @Published private(set) var pending: HubDraft?
     @Published var errorMessage: String?
     @Published var statusMessage: String?
