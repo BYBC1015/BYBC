@@ -1,5 +1,6 @@
 param(
-    [switch]$Clean
+    [switch]$Clean,
+    [switch]$Debug
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,14 +9,15 @@ $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $JavaHome = Join-Path $RepoRoot ".local-tools\jdk-17.0.19+10"
 $AndroidSdkRoot = Join-Path $RepoRoot ".local-tools\android-sdk"
 $GradleBin = Join-Path $RepoRoot ".local-tools\gradle-8.10.2\bin"
-$ApkSource = Join-Path $PSScriptRoot "app\build\outputs\apk\debug\app-debug.apk"
+$Variant = if ($Debug) { "debug" } else { "release" }
+$ApkSource = Join-Path $PSScriptRoot "app\build\outputs\apk\$Variant\app-$Variant.apk"
 $GradleConfig = Join-Path $PSScriptRoot "app\build.gradle"
 $VersionMatch = Select-String -LiteralPath $GradleConfig -Pattern 'versionName\s+"([^"]+)"'
 if (!$VersionMatch -or !$VersionMatch.Matches[0].Groups[1].Value) {
     throw "Unable to read versionName from: $GradleConfig"
 }
 $VersionName = $VersionMatch.Matches[0].Groups[1].Value
-$ApkDist = Join-Path $PSScriptRoot "dist\CodexHub-v$VersionName-debug.apk"
+$ApkDist = Join-Path $PSScriptRoot "dist\CodexHub-v$VersionName-$Variant.apk"
 
 if (!(Test-Path $JavaHome)) {
     throw "JDK not found: $JavaHome"
@@ -32,7 +34,8 @@ $env:ANDROID_HOME = $AndroidSdkRoot
 $env:ANDROID_SDK_ROOT = $AndroidSdkRoot
 $env:PATH = "$JavaHome\bin;$GradleBin;$AndroidSdkRoot\cmdline-tools\latest\bin;$AndroidSdkRoot\platform-tools;$env:PATH"
 
-[string[]]$GradleTasks = if ($Clean) { @("clean", "assembleDebug") } else { @("assembleDebug") }
+$BuildTask = if ($Debug) { "assembleDebug" } else { "assembleRelease" }
+[string[]]$GradleTasks = if ($Clean) { @("clean", $BuildTask) } else { @($BuildTask) }
 # Keep JDK 17 local sockets out of the system TEMP directory on Windows.
 $PreviousJavaToolOptions = $env:JAVA_TOOL_OPTIONS
 $SocketTemp = Join-Path $RepoRoot "tmp"

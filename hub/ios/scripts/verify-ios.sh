@@ -27,11 +27,24 @@ for runtime, entries in sorted(devices.items(), reverse=True):
             sys.exit(0)
 sys.exit("No installed iPhone simulator runtime; install one in Xcode Settings > Platforms.")
 ')"
+  RESULT_BUNDLE="$OUTPUT_ROOT/HubTests-$(date +%Y%m%d%H%M%S).xcresult"
+  set +e
   xcodebuild -project "$IOS_ROOT/Hub.xcodeproj" -scheme Hub -configuration Debug \
     -sdk iphonesimulator -destination "platform=iOS Simulator,id=$DEVICE_ID" \
     -destination-timeout 90 -parallel-testing-enabled NO \
     -derivedDataPath "$OUTPUT_ROOT/DerivedData" \
-    -resultBundlePath "$OUTPUT_ROOT/HubTests-$(date +%Y%m%d%H%M%S).xcresult" \
+    -resultBundlePath "$RESULT_BUNDLE" \
     CODE_SIGNING_ALLOWED=NO test | tee "$OUTPUT_ROOT/test.log"
+  TEST_STATUS=${PIPESTATUS[0]}
+  set -e
+  if [[ -d "$RESULT_BUNDLE" ]]; then
+    mkdir -p "$OUTPUT_ROOT/screenshots"
+    xcrun xcresulttool export attachments --path "$RESULT_BUNDLE" \
+      --output-path "$OUTPUT_ROOT/screenshots" \
+      > "$OUTPUT_ROOT/screenshot-export.log" 2>&1 || true
+  fi
+  if [[ "$TEST_STATUS" != "0" ]]; then
+    exit "$TEST_STATUS"
+  fi
 fi
 printf 'Unsigned simulator verification artifacts: %s\n' "$OUTPUT_ROOT"

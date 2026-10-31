@@ -1,72 +1,47 @@
 # BYBC Hub
 
-Web workspace for persistent agents, shared conversations and device-bound execution.
+Source version 2.12.0. Windows/worker 1.2.6, Android 0.2.0 and iOS 0.2.0.
+Durable agents are independent of conversations, devices and models.
 
-Source version 2.11.0 (2026-10-31), desktop and worker source 1.2.6, Android 0.1.27, iOS source 0.1.1. Agents are durable roles, independent of conversations, models and devices.
+## Native mobile clients
 
-These are source changes and validation records, not a claim that a release has been published or installed. Android distribution and signed iOS distribution must be verified separately. This source snapshot does not prove that a particular computer has installed or started the new desktop binaries. Background source/server updates leave the currently running desktop application uninterrupted; a prepared native update takes effect only after that application is subsequently started with the new binaries.
+Android uses installed native controls and iOS uses SwiftUI. Chat, projects,
+agents, tasks and the mobile toolbox are local screens; switching between them
+never loads Hub HTML. Network calls synchronize JSON data and authenticated file
+bytes. Explicit external links and system Save/Share remain separate from app
+navigation. There is no old-page fallback when the server cannot be reached.
 
-- The owl brand and Chinese sans-serif typography are shared across workspace and native recovery pages; keyboard-aware mobile layout keeps controls accessible.
-- Content-addressed CSS/JS and release-aware workspace recovery keep one UI across network changes. An idle page can update its shell; draft text, attachment bytes and in-flight sends are retained before an update. Older responses cannot silently downgrade a newer shell.
-- Toolbox is available from the conversation sidebar and phone drawer. The Windows desktop opens the installed CodexBridge toolbox; phones explain its desktop location and preserve the existing download entry.
-- The new narrative-direction role handles scripts, acts/episodes, shot plans and narrative continuity. Art direction owns visual standards and evidence-based master/multiview review; visual production creates images and static derivatives; postproduction handles video/timeline operations.
-- Short-drama and stage-background production contracts are included only for relevant tasks and conversation continuations. These bounded read-only plans neither create tasks nor claim that visual review already passed. Derivative-only requests reuse existing sources instead of restarting all production stages.
-- Stage masters and camera views carry source/revision/hash references, actual comparison evidence and pass/fail/unknown results. A changed master invalidates the earlier review. Requested static cleanup follows the relevant review and preserves the accepted scene; authorized internal decisions do not require new user approval at each stage.
-- The Windows tray has a direct Toolbox entry. Toolbox windows use an independent configuration-scoped instance: repeated clicks activate the existing window without restarting execution workers.
-- Desktop offline snapshots are checked against the active account and cache generation both after preparation and before display. Logout/account changes invalidate pending old documents.
-- Android and iOS maintain a native recovery surface and bounded read-only conversation text tied to the current session and exact workspace. Native records do not execute cached HTML; drafts and attachment bytes remain in the account-scoped web store.
-- Native mobile navigation uses fresh page requests across reconnect/resume and avoids restoring an obsolete page from browser history. Bridge calls validate the active trusted main frame; asynchronous callbacks cannot replace newer page state.
-- Mobile keyboard and drawer layouts retain reachable composer controls, safe-area spacing and the current reading position. Modern pages use the current workspace styling rather than a legacy theme overlay.
-- Private attachment responses isolate supplied content: active HTML/SVG and mismatched MIME/filename inputs download as files, while supported raster/video previews and range requests remain usable.
-- Native window geometry writes are coalesced, and background-only tray startup avoids opening the desktop during maintenance.
-- Attachment preparation renews the execution lease and reuses only authorized, hash-verified previews within one execution.
-- Chat attachments stay in the composer and follow the assigned task.
-- High-resolution image references receive bounded vision copies automatically; verified original files remain intact for production and detailed inspection.
-- Conversation context retains the original brief and a room-scoped reference catalog. The controller can explicitly inherit and read earlier PDF/image inputs without requesting another upload.
-- Queued revisions use a bounded, relevant set of inherited reference files. Historical outputs remain available through the conversation reference catalog without automatically adding the entire accumulated archive to each new task's preprocessing inputs.
-- Ordinary controller turns keep one CLI conversation and preserve message order within that room. Independent rooms remain parallel; read-only status questions have a separate slot and cannot dispatch or revise work.
-- Internal reflection formatting failures are recorded internally without leaking tags into the visible reply or repeating the actual work.
-- Verified published results can move out of the active work list while remaining reviewable and unaccepted. Manual restore is respected; obsolete blockers require an explicit successor relationship.
-- Completed work creates a visible receipt and an idempotent, read-only controller summary. Late artifacts update the same receipt, and temporary notification failures have bounded durable retries.
-- Delegation preserves each deliverable's source reference and permitted changes; delivery summaries distinguish reported checks from verified acceptance and retain newer revision status.
-- Long-running work shows the last reported stage, report age, execution contact and device contact. Existing live refresh updates these timestamps without consuming model tokens or inventing progress.
-- A confirmed execution is visible before its first public report. Unconfirmed execution retains its received draft without claiming continued progress; completed and cancelled work cannot accept late text. Parallel replies keep stable order, and status-only refreshes preserve rendered response content.
-- File downloads preserve the conversation and draft; preview links remain separate, and canceled native downloads do not cause navigation-recovery loops.
-- The controller chooses a reported model and reasoning level per task; explicit user overrides take priority.
-- Feedback records page/device context and tracks evidence-based engineering updates.
-- Weekly maintenance is queued idempotently; offline execution waits for its actual device.
-- Bounded hourly health scans collect repeated failures and measured slow replies without model calls. Evidence merges into untouched maintenance, and new diagnostic work is limited to once per day; maintenance cannot trigger itself.
-- Generation-scoped response timings and optional reported token counters survive completion. Unknown or conflicting measurements are not estimated, and current task reassignment cannot alter the historical executing device.
-- Short read-only status prompts preserve the original goal and latest correction. Repeated revision aliases cannot duplicate work, and newer requirements survive delivery summaries.
-- Verified attachment reuse avoids redundant downloads. Within-call identical vision inputs are deduplicated without silently discarding original reference metadata.
-- Slow draft/outbox recovery cannot overwrite text typed after sending; reconnection preserves a reading anchor while explicit sends reveal the new message.
-- Generation-fenced execution, atomic result publication and local completion receipts prevent unsafe replay.
-- User messages persist immediately; live replies preserve reading position and drafts.
-- The Windows desktop hosts the same workspace with persistent sign-in, local project access and separate result previews.
-- Desktop UI assets are bundled with exact content-hash matching. Compatible authenticated snapshots retain their records with current resources; unknown or newer schemas become a readable current-styled fallback without running obsolete scripts. Legacy Windows newline conversion is accepted only when normalized bytes and the original digest both match.
-- Draft attachment bytes survive restarts; explicit sends use a durable account-scoped outbox with receipt reconciliation and cross-window ownership.
-- Other conversations expose pending-send links. Local drafts never submit themselves, and only an opened conversation resumes its local queue.
-- Login persistence follows the server session's original remaining lifetime, at most 14 days; logout still revokes the session.
-- Execution publishes public response snapshots before completion; SSE notifications have polling recovery and session-expiry handling.
-- Separate controller and worker lanes support chat, delegation and follow-up changes during execution.
-- Real handoff questions and answers appear live in the original conversation, with a configurable two-round default limit.
-- Durable per-task runners overlap independent jobs while shared workspaces and declared external resources remain serialized.
-- Task cards support completion, reversible archiving and paginated history while preserving chat and drafts.
-- Executor presence refreshes in place across avatars, profiles and the composer; dedicated worker heartbeats expire after two minutes.
-- Desktop companion source 1.2.6 hosts the durable agent worker with shared start/stop controls, supervised recovery, local MCP configuration inheritance and same-family CLI path recovery after desktop updates.
-- Results are published as viewable images and document previews in the conversation.
+Native stores separate bounded account/session caches from durable user drafts
+and pending send records. Messages and attachments enter one atomic server
+transaction; request keys and receipt-only recovery prevent accidental duplicate
+work. Server reads do not claim or restart tasks. Expired login and late callbacks
+must not overwrite another account or conversation. Existing browser and Windows
+clients continue to use their workspace.
+
+See [API contract](docs/native-mobile-api.md), [Android](android/README.md),
+[iOS](ios/README.md) and [release notes](deploy/RELEASE-2.12.0.md).
+An unsigned simulator build is not an installable signed iPhone distribution.
+Actual binary publication, installation and device tests are verified separately.
+
+## Existing collaboration
+
+- Durable agent roles, project conversations, delegated tasks and public progress.
+- Original requirements, corrections and authorized attachments survive handoff.
+- Controller/worker execution lanes, execution leases and completion receipts.
+- Per-task model choices, measured token usage and bounded relevant context.
+- In-chat uploads, private previews/downloads and reversible task archiving.
+- Feedback with device context and evidence-based scheduled maintenance.
+- Narrative and art-direction contracts for short-drama and stage backgrounds.
+- Windows owl branding, tray toolbox, local execution and private offline data.
 
 ## Run locally
 
-Requires Python 3.10+. Create a virtual environment, install `pip install -e ".[dev]"`, set
-`CODEX_HUB_DATA_DIR`, `CODEX_HUB_SECRET_KEY` and `CODEX_HUB_OWNER_PASSWORD`, then run
+Use Python 3.10+, install `pip install -e ".[dev]"`, set private
+`CODEX_HUB_DATA_DIR`, `CODEX_HUB_SECRET_KEY`, `CODEX_HUB_OWNER_PASSWORD`, then run
 `uvicorn codex_hub.main:app --host 127.0.0.1 --port 8797`.
-Use your own deployment configuration; examples contain placeholders, never production credentials.
+Set your own HTTPS deployment endpoint for each client. Public examples use
+reserved documentation endpoints and never connect to the original deployment.
 
-See `deploy/MAINTENANCE.md` for weekly operations, `deploy/RELEASE-2.11.0.md` for this source revision and `deploy/BRIDGE-1.2.6.md` for native update boundaries.
-The `codex_bridge` package includes the dedicated agent worker and compatibility code for existing clients.
-Windows desktop source, pinned build instructions and isolated installer verification are included; Android 0.1.27 and independent iOS 0.1.1 client source are included. Android network changes and foreground resume wake the shared release check without clearing cookies, drafts or attachments; modern workspaces do not receive the legacy Android theme. iOS source uses fresh GET recovery while preserving website data. Generated binaries, signing credentials, build caches and user data are excluded. See android/README.md and ios/README.md for build and distribution boundaries; unsigned simulator verification is not an installable signed iPhone release.
-
-This backup includes source, required web assets, tests, dependency lock and deployment examples.
-It excludes live databases, user uploads, private logs, environment files, authentication state and
-unrelated workspace projects. It preserves existing files elsewhere in the BYBC repository.
+This backup includes source, required assets, tests and deployment examples.
+It excludes live databases, private credentials/configuration, user uploads,
+local conversation records, logs, build caches and generated installers.

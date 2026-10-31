@@ -14,10 +14,17 @@ android {
         applicationId "xyz.baicang.codexhub"
         minSdk 23
         targetSdk 35
-        versionCode 28
-        versionName "0.1.27"
+        versionCode 29
+        versionName "0.2.0"
 
         buildConfigField "String", "HUB_URL", "\"https://203.0.113.10/hub/\""
+    }
+    // Private distribution keeps the installed certificate while production code
+    // uses DEBUG=false and cannot enable emulator-only fixture endpoints.
+    buildTypes {
+        release {
+            signingConfig signingConfigs.debug
+        }
     }
 }
 

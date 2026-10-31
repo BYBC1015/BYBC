@@ -107,6 +107,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_delivery_routes(app)
     from .model_routes import register_model_routes
     register_model_routes(app)
+    from .mobile_routes import register_mobile_routes
+    register_mobile_routes(app)
     return app
 
 
@@ -1816,6 +1818,8 @@ def mobile_notification_payload(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def wants_html(request: Request) -> bool:
+    if request.url.path.startswith('/api/mobile/'):
+        return False
     accept = request.headers.get("accept", "")
     return "text/html" in accept
 

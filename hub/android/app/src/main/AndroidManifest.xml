@@ -17,13 +17,14 @@
         android:fullBackupContent="false"
         android:hardwareAccelerated="true"
         android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/native_network_security"
         android:theme="@style/AppTheme"
         android:label="@string/app_name"
         android:icon="@drawable/codex_owl_logo"
         android:roundIcon="@drawable/codex_owl_logo"
         android:supportsRtl="true">
         <activity
-            android:name=".MainActivity"
+            android:name=".NativeHubActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
             android:exported="true"
             android:launchMode="singleTask"

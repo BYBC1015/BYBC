@@ -1,50 +1,31 @@
-# BYBC Hub iOS 0.1.1
+# BYBC Hub iOS 0.2.0 · build 3
 
-独立 SwiftUI + WKWebView App 工程，最低 iOS / iPadOS 17，要求 Hub 网页 2.11.0 或更新版本。它复用 Hub 的真实网页工作台和服务器会话，不是添加到主屏幕的 PWA，也不在手机运行 Codex CLI。构建目标名 `Hub`，默认 Bundle ID `xyz.baicang.codexhub.ios`；该 ID 仍须由实际 Apple 开发团队确认注册。
+最低 iOS / iPadOS 17。应用使用安装包内的 SwiftUI 界面、TabView 和 NavigationStack，聊天、项目、智能体、工作详情及工具箱均为本机页面。URLSession 只同步 Hub API 1 的 JSON 数据与私有附件；要求服务器提供 `api/mobile`（Hub 2.12.0）。应用没有 WKWebView、网页历史、JavaScript 注入或失败后打开旧网页的路径。WebKit 仅用于首次迁移旧版登录 Cookie，不创建浏览器页面。
 
-## 已实现
+## 本轮实现
 
-- 本机记录页可离线阅读当前对话末 30 条已发送的用户与智能体文字。仅存有界纯文本，标出保存时间和非实时状态，不运行旧 HTML，不包含 Cookie 明文、草稿和附件文件；按服务器/登录摘要/用户/项目/对话隔离，7 天过期，登录/登出清除。异步捕获、返回和后台切换均有代次检查。
+- 原生中文系统字体、猫头鹰图标、圆角聊天与输入区、系统键盘和安全区、横竖屏、动态字体及系统辅助功能。看智能体详情不改变收件人；点击“交给他”才选择长期执行者。
+- 聊天输入区可选择图片、视频和文件。附件落入应用私有目录后再发送，保持原始字节；照片选择的迟到回调校验账号、项目、对话与代次，不能误加到另一场对话。图片显示经过登录校验的本机缩略预览，原文件通过 QuickLook 打开并经系统分享面板保存。
+- 原生项目与对话切换、任务结果/真实进度、历史任务、较早消息/对话、项目文件库、设备状态、反馈和安装包下载。下载不导航到网页，校验大小，安装包额外核对 SHA-256。未缓存的离线页面明确提示，不能伪装在线。
+- 已同步内容按服务器、用户、登录摘要和项目/对话隔离，并显示离线状态与保存时间。草稿和待确认发送单独按服务器 + 稳定用户 ID 保存；登录过期、退出、重新登录不默默删除未发送的原始附件，只有重新验证同一用户才能恢复。展示缓存不能跨登录会话读取。
+- 每次发送先保存固定请求键及不可变内容，再上传。超时/后台恢复只查收据，明确点击重试才复用原请求键重新发送；不自动重复派单。上一条待确认消息独立显示，用户仍可编辑下一条；新会话的首条收据未明确前，下一条暂不发送，以免误建会话。收到收据不清空用户已开始写的下一条。
+- 前台增量轮询按 revision 更新，后台停止轮询。切换、暂停与退出取消迟到请求并再次核对账号/代次。URLSession 自动 Cookie 和 HTTP 缓存关闭；当前请求代次才能提交 Set-Cookie。所有 API 与附件请求拒绝重定向；JSON 接收上限 16 MB，文件上限 2 GB，在接收过程中限额并核对实际字节数。
+- 文件选择限制 12 个附件、单个 50 MB、总计 100 MB。手机用于安排任务和查看成果，模型与制作仍由在线执行端完成。
 
-- 原生外壳保留一个 WKWebView，持久化登录 Cookie；回到 App 时触发网页的数据更新，冷启动仅恢复与当前登录会话一致的项目/对话地址。
-- 恢复页面时使用绕过本地 HTTP 缓存的 GET；Wi-Fi、蜂窝网络等路径切换即使一直可用也会唤醒网页版本校验。保留 Cookie、IndexedDB 草稿与附件，不将网络重连当成重新发送任务。2026-10-31 新增请求策略 XCTest，需本轮 macOS CI 验证。
-- 原生小猫头鹰顶栏、系统黑体、44 pt 操作区域、系统安全区与键盘布局。正文、手机抽屉、输入框由共享 `mobile-workspace` 统一适配。
-- 聊天输入框的图片/文件选择使用 WebKit 系统选择器；不申请整个文件库读取权限，不建立第二套草稿数据库。
-- 文件下载通过保留当前登录态的 WKDownload；完成后显示原生分享面板，可选“存储到文件”。原对话不跳到外部浏览器。只接受同一 Hub 的文件路由；登录跳转、外站跳转不会被保存为成果。
-- 返回先关闭图片预览、对话框、导航抽屉或工作详情，再以 fresh GET 打开原生历史地址，禁用会恢复旧页面快照的 WebKit 滑动历史。外部用户链接才交给 Safari。
-- 连接故障显示清楚的恢复信息，最多 3 次自动 GET 重试；旧导航回调不能覆盖新导航状态；不自动重复发送 POST 消息。
-- URL、恢复目标、文件路径边界有 XCTest；包含版本化隐私清单的 UserDefaults 使用理由。
+## 验证
 
-手机是控制和查看成果的入口。执行任务仍由服务器调度 BYBC-YOLO / BYBC-PRO 等在线执行端；手机锁屏不会接管电脑任务。
-
-## 构建与验证
-
-在安装 Xcode 和 iPhone Simulator runtime 的 macOS 上运行：
+在带 Xcode 和 iPhone Simulator 的 macOS 上运行：
 
 ```bash
 bash hub/ios/scripts/verify-ios.sh
 ```
 
-本地项目根为 `codex-hub` 时，改用 `bash ios/scripts/verify-ios.sh`。可设置 `HUB_IOS_OUTPUT` 指定构建证据目录。脚本依次验证 plist / Xcode 工程、编译 **unsigned simulator app**、选择已安装的 iPhone 模拟器运行 XCTest。`HUB_IOS_SKIP_TESTS=1` 仅用于编译诊断，不能算完整回归。
+当前本地目录为 `codex-hub` 时使用 `bash ios/scripts/verify-ios.sh`。脚本检查工程/plist，编译 unsigned simulator app，再运行 XCTest 和 XCUITest。`HUB_IOS_SKIP_TESTS=1` 只用于编译诊断，不代表完整回归。CI 模板位于 `ci/ios-simulator.yml`，复制至 BYBC 仓库 `.github/workflows/hub-ios.yml`；测试日志、xcresult 和 unsigned `.app` 留在 `Hub-iOS-0.2.0-UNSIGNED-SIMULATOR-ONLY` 产物中。
 
-公开 BYBC 仓库可把 `ci/ios-simulator.yml` 放到仓库根 `.github/workflows/hub-ios.yml`，通过 `workflow_dispatch` 运行。它使用 macOS runner、只读仓库权限、25 分钟超时，不需要签名密钥，不创建 Apple 账号，不生产 IPA，不推送 TestFlight。产物名称明确包含 `UNSIGNED-SIMULATOR-ONLY`。
+本轮新增真实隔离 API 导出的 7 份 JSON 契约样本，测试 Codable 解码、私有附件字节、跨账号/重新登录草稿隔离、待确认发送与下一条草稿、传输错误/重定向/大小/取消。原生 UI 测试实际启动应用，操作 Tab、详情、返回、对话切换、离线缓存、重启恢复和横屏，保留聊天/项目/智能体/任务/工具箱/键盘截图。UI 测试启动环境 `HUB_TESTING=1` + `HUB_UI_TESTING=1`，地址强制为 `example.invalid` 且 URLProtocol 阻断所有外部网络；本地 fixture 仅编译在 Debug 中。
 
-## 交付状态与后续条件
+保留的 9 项旧 Policy 测试只验证 URL 信任/兼容规则，不能用来证明新版加载 HTML，也不能替代原生交互测试。本机为 Windows，没有 Xcode；**源码静态检查不等于本轮 macOS 编译或 UI 测试已通过**。应以本轮 CI 日志和截图为验收证据，不沿用 0.1.x 的测试结果。
 
-2026-10-31 的 0.1.1 / build 2 源码新增本地记录、最低网页发行版检查、账号恢复隔离及异步生命周期保护，XCTest 从 5 项扩充为 9 项。本轮仍需新的 macOS CI 构建/测试，不沿用以下历史版本结果宣称本版验证完成。
+## 分发边界
 
-2026-10-30 已在 GitHub macOS runner 使用 **Xcode 26.6 / build 17F113** 完成 unsigned simulator 原生编译及 **4 项 XCTest，0 失败**：[验证运行 40981287956](https://github.com/BYBC1015/BYBC/actions/runs/40981287956)，源码提交 `8fa835f0f94a84fee1457567972bf2360d99fda8`。测试覆盖对话恢复、下载与恢复边界、可信地址与路径限制、文件名处理；不把这些策略测试说成完整真机交互验收。
-
-该次证据包 `Hub-iOS-0.1.0-UNSIGNED-SIMULATOR-ONLY` 包含 `.app`、`.xcresult` 与构建日志，6569519 bytes，SHA-256 `62632b371b8e42b56fa608fb62559d527713b7e79324770675320b40d7bf971f`；GitHub artifact 保留至 2026-11-06 00:48 UTC。它用于模拟器与审计，不是 iPhone 安装包。BYBC-YOLO 本机仍为 Windows，没有本地 Xcode / Swift SDK。
-
-当前没有已验证的 Apple 开发团队、签名证书、profile、已签名 IPA 或 TestFlight 分发。模拟器 `.app` 不能安装到真实 iPhone。签名安装需要可用的 Mac/Xcode + 开发团队与设备/分发配置；正式 TestFlight 还需注册 Bundle ID / App Store Connect 应用及账号权限。不要把密码或验证码写入仓库。
-
-签名前必须用真实 iPhone/iPad 验证：登录恢复、截图和 PDF 选择、键盘与旋转、快速连续消息、后台返回刷新、断网/重连、文件下载和保存、VoiceOver。App 顶栏保留现有 Owl 图片；主屏幕图标使用内置图像生成工具制作、经目视确认的猫头鹰方形母版，经确定性尺寸导出为 1024×1024 RGB PNG，配置在 `AppIcon.appiconset`，Debug / Release 均指定该图标。此图标补丁还须随下一次 CI 验证其编译产物。商店隐私表及隐私政策仍需发行配置，不把未具备签名与发行条件的构建称为商店成品。
-
-首版不包含 APNs 推送、系统分享扩展、后台文件传输或离线执行器。这些能力须另行接入服务器与 Apple entitlement，并验证真实设备；不依靠模拟器测试冒充已支持。
-
-## 官方依据
-
-- [WKDownload](https://developer.apple.com/documentation/webkit/wkdownload) 和 [WKDownloadDelegate](https://developer.apple.com/documentation/webkit/wkdownloaddelegate) 提供沿当前 WebKit 会话的下载及重定向处理。
-- [WebKit 文件选择回调](https://developer.apple.com/documentation/webkit/wkuidelegate/webview(_:runopenpanelwith:initiatedbyframe:completionhandler:)) 说明未替换回调时保留 iOS 默认文件上传行为。本项目不自行禁用/覆盖它。
-- [Apple 测试与发行](https://developer.apple.com/documentation/xcode/distributing-your-app-for-beta-testing-and-releases) 区分模拟器构建、签名设备安装、TestFlight 和商店发行。
+工程 Bundle ID 为 `xyz.baicang.codexhub.ios`，实际发行需 Apple 开发团队注册和签名。unsigned 模拟器 `.app` 不能安装到真实 iPhone；当前源码不等于已签名 IPA 或 TestFlight 版本。真机签名前需验证 Cookie 恢复、照片/PDF、系统文件保存、键盘与旋转、VoiceOver、后台返回和弱网。没有 APNs 推送、系统分享扩展、后台上传或手机本地模型执行器；不将未验证能力标成已经可用。

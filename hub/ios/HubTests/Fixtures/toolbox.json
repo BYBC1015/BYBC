@@ -1,0 +1,28 @@
+{
+  "tools": [
+    {
+      "id": "library",
+      "action": "library",
+      "title": "项目文件",
+      "description": "查看、预览与保存项目中的图片和文件"
+    },
+    {
+      "id": "devices",
+      "action": "devices",
+      "title": "执行设备",
+      "description": "查看电脑连接状态和最近心跳"
+    },
+    {
+      "id": "feedback",
+      "action": "feedback",
+      "title": "问题与建议",
+      "description": "记录遇到的问题，自动附上设备和项目线索"
+    },
+    {
+      "id": "downloads",
+      "action": "downloads",
+      "title": "检查更新",
+      "description": "查看可用安装包和当前手机版本"
+    }
+  ]
+}

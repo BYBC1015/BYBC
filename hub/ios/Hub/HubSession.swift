@@ -1,439 +1,428 @@
 import Foundation
 import Combine
 import WebKit
-import UIKit
 import Network
+import UniformTypeIdentifiers
 
-struct HubDownloadedFile: Identifiable {
-    let id = UUID()
-    let url: URL
-}
+struct HubDownloadedFile: Identifiable { let id = UUID(); let url: URL }
+struct HubOK: Decodable { let ok: Bool? }
 
 @MainActor
-final class HubSession: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
-    let webView: WKWebView
+final class HubSession: ObservableObject {
     let policy: HubPolicy
-    @Published var isLoading = false
-    @Published var progress = 0.0
-    @Published var connectionError: String?
-    @Published var downloadMessage: String?
-    @Published var downloadedFile: HubDownloadedFile?
-    @Published var localRecord: HubLocalRecord?
-    @Published var localRecordMessage: String?
-    private var recoveryURL: URL
-    private var progressObservation: NSKeyValueObservation?
-    private let networkMonitor = NWPathMonitor()
-    private var networkAvailable = true
-    private var retry: Task<Void, Never>?
-    private var retryCount = 0
-    private var navigationGeneration = 0
-    private var failedGeneration: Int?
-    private var activeNavigation: WKNavigation?
-    private var presentedDownloadURL: URL?
-    private var downloads: [ObjectIdentifier: (WKDownload, URL?)] = [:]
-    private let lastLocationKey = "hub.last-workspace"
-    private let lastSessionKey = "hub.last-workspace-session-v1"
-    private let recordKey = "hub.native-current-record-v1"
-    private var recordTask: Task<Void, Never>?
-    private var nativeHistory: [URL] = []
-    private var requestedLocation: URL?
-    private var authenticatedPageSession = ""
-    private var recordPresentationGeneration = 0
-    private var foreground = true
+    let transport: HubTransport
+    let disk: HubDisk
+    @Published private(set) var identity: HubIdentity?
+    @Published private(set) var projects: [HubProject] = []
+    @Published private(set) var workspace: HubWorkspace?
+    @Published private(set) var tools: [HubTool] = []
+    @Published private(set) var selectedProject: HubProject?
+    @Published private(set) var selectedConversation: Int?
+    @Published private(set) var olderMessages: [HubMessage] = []
+    @Published private(set) var olderConversations: [HubConversation] = []
+    @Published private(set) var olderMessageCursor: Int?
+    @Published private(set) var olderRoomCursor: Int?
+    @Published private(set) var savedAt: Date?
+    @Published var draft = HubDraft() { didSet { scheduleDraftSave() } }
+    @Published private(set) var pending: HubDraft?
+    @Published var errorMessage: String?
+    @Published var statusMessage: String?
+    @Published private(set) var offline = false
+    @Published private(set) var refreshing = false
+    @Published private(set) var sending = false
+    @Published private(set) var authenticating = false
+    @Published private(set) var downloading = false
+    @Published var previewFile: HubDownloadedFile?
+    private var generation = 0, accountGeneration = 0
+    private var fileGeneration = 0
+    private var pagedMessages = false, pagedRooms = false
+    private var resolvingLatest = false
+    private var foreground = true, started = false
+    private var refreshTask: Task<Void, Never>?, pollTask: Task<Void, Never>?, saveTask: Task<Void, Never>?
+    private var sendTask: Task<Void, Never>?, fileTask: Task<Void, Never>?
+    private let monitor = NWPathMonitor()
+    private var scope: String { HubNativeRules.scope(project: selectedProject?.slug ?? "", conversation: selectedConversation) }
+    var selectionScope: String { scope }
+    var selectionGeneration: Int { generation }
+    var accountScope: String { sessionKey }
+    var isForeground: Bool { foreground }
+    var conversations: [HubConversation] {
+        var seen = Set<Int>(); return ((workspace?.conversations ?? []) + olderConversations).filter { seen.insert($0.id).inserted }
+    }
+#if DEBUG
+    private var fixtureOffline = false
+#endif
+    private var sessionKey: String { identity?.sessionKey ?? "" }
+    private func cacheKey(_ value: String) -> String { "\(identity?.user.id ?? 0)/\(sessionKey)/\(value)" }
+    private func userKey(_ value: String) -> String { "user/\(identity?.user.id ?? 0)/\(value)" }
+    var messages: [HubMessage] {
+        var ids = Set<Int>()
+        return (olderMessages + (workspace?.messages ?? [])).filter { ids.insert($0.id).inserted }
+    }
 
-    init(baseURL: URL, connectAutomatically: Bool = true) {
-        guard let policy = HubPolicy(baseURL: baseURL) else { fatalError("HubBaseURL must be a trusted HTTPS base URL") }
-        self.policy = policy
-        let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default()
-        config.defaultWebpagePreferences.allowsContentJavaScript = true
-        config.applicationNameForUserAgent = "BYBCHubIOS/0.1.1"
-        self.webView = WKWebView(frame: .zero, configuration: config)
-        recoveryURL = baseURL
-        super.init()
-        webView.navigationDelegate = self
-        webView.uiDelegate = self
-        webView.isOpaque = false
-        webView.backgroundColor = UIColor(red: 0.07, green: 0.08, blue: 0.09, alpha: 1)
-        webView.scrollView.backgroundColor = webView.backgroundColor
-        webView.scrollView.contentInsetAdjustmentBehavior = .never
-        // Back uses a fresh GET; WebKit's gesture snapshot can resurrect old HTML.
-        webView.allowsBackForwardNavigationGestures = false
-        webView.isInspectable = false
-        progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] _, change in
-            Task { @MainActor [weak self] in self?.progress = change.newValue ?? 0 }
-        }
-        networkMonitor.pathUpdateHandler = { [weak self] path in
-            let available = path.status == .satisfied
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.networkAvailable = available
-                // Wi-Fi/cellular/VPN route changes can remain "satisfied" throughout.
-                // Ask the shared workspace to verify its release on every usable path.
-                if available { self.resume() }
-            }
-        }
+    init(baseURL: URL, connectAutomatically: Bool = true, configuration: URLSessionConfiguration = .default, storageRoot: URL? = nil) {
+        guard let policy = HubPolicy(baseURL: baseURL) else { fatalError("Invalid Hub address") }
+        self.policy = policy; self.transport = HubTransport(policy: policy, configuration: configuration); self.disk = HubDisk(baseURL: baseURL, root: storageRoot)
         if connectAutomatically {
-            networkMonitor.start(queue: DispatchQueue(label: "hub.network-state"))
-            Task { [weak self] in
-                guard let self else { return }
-                let generation = self.navigationGeneration
-                let identity = await self.currentSession()
-                guard generation == self.navigationGeneration else { return }
-                if !identity.isEmpty, identity == UserDefaults.standard.string(forKey: self.lastSessionKey),
-                   let saved = UserDefaults.standard.string(forKey: self.lastLocationKey), let url = URL(string: saved), self.policy.isWorkspace(url) { self.recoveryURL = url }
-                self.loadRecovery()
+            monitor.pathUpdateHandler = { [weak self] path in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if path.status == .satisfied { if self.started && self.foreground { self.refresh() } }
+                    else { self.offline = true }
+                }
             }
+            monitor.start(queue: DispatchQueue(label: "hub.native.network"))
+            Task { await bootstrap() }
         }
     }
-
-    func resume() {
-        guard foreground, networkAvailable else { return }
-        if connectionError != nil && !isLoading { retryNow() }
-        else if let url = webView.url, policy.isInternal(url) {
-            // This starts the web app's own fresh-data check; it does not assert synchronization.
-            webView.evaluateJavaScript("window.dispatchEvent(new Event('online'))", completionHandler: nil)
-            startRecordCapture()
-        }
+    private var cookieDigest: String {
+        let cookie = HTTPCookieStorage.shared.cookies(for: policy.baseURL)?.first { $0.name == "codex_hub_session" }
+        return cookie.map { HubDisk.digest($0.value) } ?? ""
     }
-
-    func retryNow() {
-        retry?.cancel()
-        guard networkAvailable else { connectionError = "网络暂时不可用，联网后会恢复。"; return }
-        guard !isLoading else { return }
-        retryCount = 0
-        loadRecovery()
-    }
-
-    private func loadRecovery() {
-        retry?.cancel()
-        // Only GET recovery is automatic. A failed form submission is never replayed here.
-        webView.load(policy.pageRequest(recoveryURL))
-    }
-
-    func goBack() {
-        guard let url = webView.url, policy.isInternal(url) else { loadRecovery(); return }
-        let generation = navigationGeneration
-        webView.evaluateJavaScript(Self.backScript) { [weak self] result, _ in
-            guard let self, generation == self.navigationGeneration, url == self.webView.url,
-                  self.foreground, (result as? Bool) != true else { return }
-            if self.nativeHistory.count > 1 {
-                self.nativeHistory.removeLast()
-                self.webView.load(self.policy.pageRequest(self.nativeHistory.last!))
-            }
-        }
-    }
-
-    func openHome() { webView.load(policy.pageRequest(policy.baseURL)) }
-
-    func activate() { foreground = true; resume() }
-
-    func pause() {
-        foreground = false
-        recordPresentationGeneration += 1
-        recordTask?.cancel()
-        localRecord = nil
-    }
-
-    private func currentSession() async -> String {
+    private func migrateLegacyCookie() async {
+        let token = accountGeneration
+        let key = "hub.native.cookie-migrated." + HubDisk.digest(policy.baseURL.absoluteString)
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        // Cookie migration only. No web view, HTML page or script is created.
         let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
-            webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
+            WKWebsiteDataStore.default().httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
         }
-        let host = policy.baseURL.host?.lowercased() ?? ""
-        guard let cookie = cookies.first(where: {
-            $0.name == "codex_hub_session" && $0.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased() == host
-                && policy.baseURL.path.hasPrefix($0.path) && ($0.expiresDate == nil || $0.expiresDate! > Date())
-        }) else { return "" }
-        return HubLocalRecord.sessionDigest(cookie.value)
+        guard token == accountGeneration, !authenticating else { return }
+        if cookieDigest.isEmpty {
+            for cookie in cookies where cookie.name == "codex_hub_session"
+                && cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased() == policy.baseURL.host?.lowercased()
+                && policy.baseURL.path.hasPrefix(cookie.path)
+                && (cookie.expiresDate == nil || cookie.expiresDate! > Date()) { HTTPCookieStorage.shared.setCookie(cookie) }
+        }
+        UserDefaults.standard.set(true, forKey: key)
     }
-
-    private func clearLocalRecord() {
-        recordPresentationGeneration += 1
-        recordTask?.cancel(); localRecord = nil
-        for key in [recordKey, lastLocationKey, lastSessionKey] { UserDefaults.standard.removeObject(forKey: key) }
-        nativeHistory.removeAll()
+    private func bootstrap() async {
+        let token = accountGeneration
+        await migrateLegacyCookie()
+        guard token == accountGeneration, !authenticating else { return }
+        if let saved = disk.load(HubRememberedIdentity.self, key: "identity"), !cookieDigest.isEmpty, saved.cookieDigest == cookieDigest {
+            identity = saved.identity
+            projects = disk.load(HubCached<[HubProject]>.self, key: cacheKey("projects"))?.read(session: sessionKey) ?? []
+            tools = disk.load(HubCached<[HubTool]>.self, key: cacheKey("tools"))?.read(session: sessionKey) ?? []
+            if let first = projects.first { selectProject(first) }
+        }
+        started = true; await authenticateExisting(); startPolling()
     }
-
-    private func startRecordCapture() {
-        guard foreground, !isLoading, connectionError == nil, let url = webView.url, policy.isWorkspace(url) else { return }
-        recordTask?.cancel()
-        let generation = navigationGeneration
-        recordTask = Task { [weak self] in
+    func activate() { foreground = true; if started { refresh(); startPolling() } }
+    func pause() { foreground = false; pollTask?.cancel(); refreshTask?.cancel(); sendTask?.cancel(); generation += 1; refreshing = false; sending = false; persistDraft() }
+    private func startPolling() {
+        pollTask?.cancel()
+        pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                guard let self, self.navigationGeneration == generation, self.webView.url == url,
-                      !self.isLoading, self.connectionError == nil else { return }
-                let identity = await self.currentSession()
-                guard !Task.isCancelled, generation == self.navigationGeneration, self.webView.url == url else { return }
-                guard !identity.isEmpty, identity == self.authenticatedPageSession else { self.clearLocalRecord(); return }
-                do {
-                    let result = try await self.webView.evaluateJavaScript(Self.recordScript)
-                    guard !Task.isCancelled, generation == self.navigationGeneration, self.webView.url == url,
-                          let values = result as? [String: Any], let user = values["user"] as? String,
-                          let project = values["project"] as? String, let conversation = values["conversation"] as? String else { return }
-                    let rows = (values["messages"] as? [[String: String]] ?? []).suffix(30).map {
-                        HubLocalMessage(author: String(($0["author"] ?? "").prefix(100)), text: String(($0["text"] ?? "").prefix(1800)))
-                    }
-                    let record = HubLocalRecord(url: url, session: identity, user: user, project: project, conversation: conversation,
-                        title: String((values["title"] as? String ?? "本机对话记录").prefix(160)), messages: Array(rows), savedAt: Date())
-                    let finalIdentity = await self.currentSession()
-                    guard !Task.isCancelled, generation == self.navigationGeneration, self.webView.url == url,
-                          !self.isLoading, self.connectionError == nil,
-                          record.readable(policy: self.policy, location: url, session: finalIdentity) else { return }
-                    let data = try JSONEncoder().encode(record)
-                    if data.count <= 240000 {
-                        UserDefaults.standard.set(data, forKey: self.recordKey)
-                        UserDefaults.standard.set(url.absoluteString, forKey: self.lastLocationKey)
-                        UserDefaults.standard.set(identity, forKey: self.lastSessionKey)
-                    }
-                    try await Task.sleep(nanoseconds: 15_000_000_000)
-                } catch { return }
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled, let self, self.foreground else { return }
+                if !self.refreshing && !self.sending && self.identity != nil { self.refresh() }
             }
         }
     }
-
-    func showLocalRecord() {
-        guard foreground else { return }
-        recordPresentationGeneration += 1
-        let presentationGeneration = recordPresentationGeneration
-        let generation = navigationGeneration
-        let location = requestedLocation ?? webView.url ?? recoveryURL
-        Task { [weak self] in
-            guard let self else { return }
-            let identity = await self.currentSession()
-            guard generation == self.navigationGeneration, self.foreground,
-                  presentationGeneration == self.recordPresentationGeneration else { return }
-            guard let data = UserDefaults.standard.data(forKey: self.recordKey), data.count <= 240000,
-                  let record = try? JSONDecoder().decode(HubLocalRecord.self, from: data),
-                  record.readable(policy: self.policy, location: location, session: identity) else {
-                self.localRecordMessage = "当前对话尚无可读取的本机记录。"
-                return
-            }
-            self.localRecordMessage = nil
-            self.localRecord = record
-        }
-    }
-
-    static let recordScript = """
-    (() => {
-      const s=document.querySelector('[data-ws-shell]');
-      if(!s?.dataset.wsRelease||!s.dataset.user||!s.dataset.project||!s.dataset.conversation)return null;
-      const messages=Array.from(s.querySelectorAll('[data-ws-live] > .ws-message[data-ws-entry]')).slice(-30).map(n=>({
-        author:(n.querySelector('.ws-message-meta strong')?.textContent||'').trim().slice(0,100),
-        text:(n.querySelector('[data-ws-message-body]')?.innerText||'').trim().slice(0,1800)
-      })).filter(n=>n.text);
-      return {user:s.dataset.user,project:s.dataset.project,conversation:s.dataset.conversation,
-        title:(s.querySelector('.ws-chat-title h1')?.textContent||document.title).trim().slice(0,160),messages};
-    })()
-    """
-
-    static let backScript = """
-    (() => {
-      if (window.CodexHubMediaViewer?.back?.()) return true;
-      const dialog = document.querySelector('dialog[open]');
-      if (dialog) { if(dialog.dispatchEvent(new Event('cancel',{cancelable:true})) && dialog.open) dialog.close(); return true; }
-      const shell = document.querySelector('[data-ws-shell]');
-      if(shell?.classList.contains('is-sidebar-open')) { shell.querySelector('[data-ws-sidebar-close]')?.click(); return true; }
-      if(shell?.classList.contains('is-inspector-open')) { shell.querySelector('[data-ws-inspector-close]')?.click(); return true; }
-      return false;
-    })()
-    """
-
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
-                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
-        if navigationAction.targetFrame?.isMainFrame == true, policy.isAuthentication(url) { clearLocalRecord() }
-        if policy.isInternal(url) {
-            if navigationAction.targetFrame?.isMainFrame == true, navigationAction.request.httpMethod == "GET", policy.canRecover(url) {
-                requestedLocation = url
-                recoveryURL = url
-            }
-            if policy.isDownload(url) && (navigationAction.shouldPerformDownload || navigationAction.navigationType == .linkActivated || navigationAction.targetFrame == nil) { decisionHandler(.download) }
-            else if navigationAction.targetFrame?.isMainFrame == true,
-                    navigationAction.request.httpMethod == "GET", policy.canRecover(url),
-                    navigationAction.request.cachePolicy != .reloadIgnoringLocalCacheData,
-                    !policy.sameDocument(webView.url, url) {
-                decisionHandler(.cancel)
-                webView.load(policy.pageRequest(url))
-            }
-            else { decisionHandler(.allow) }
-            return
-        }
-        decisionHandler(.cancel)
-        if navigationAction.targetFrame?.isMainFrame != false && navigationAction.navigationType == .linkActivated && ["https", "http", "mailto", "tel"].contains(url.scheme?.lowercased() ?? "") {
-            UIApplication.shared.open(url)
-        }
-    }
-
-    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
-                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        guard let url = navigationResponse.response.url, policy.isInternal(url) else { decisionHandler(.cancel); return }
-        if let response = navigationResponse.response as? HTTPURLResponse, response.statusCode >= 400,
-           navigationResponse.isForMainFrame {
-            failedGeneration = navigationGeneration
-            fail("页面暂时无法连接（HTTP \(response.statusCode)）。已保存的草稿仍会保留。")
-            decisionHandler(.cancel)
-            return
-        }
-        let disposition = (navigationResponse.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
-        if policy.isDownload(url) && (!navigationResponse.canShowMIMEType || disposition.lowercased().hasPrefix("attachment")) {
-            decisionHandler(.download)
-        } else { decisionHandler(.allow) }
-    }
-
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        activeNavigation = navigation
-        navigationGeneration += 1
-        recordPresentationGeneration += 1
-        authenticatedPageSession = ""
-        recordTask?.cancel()
-        localRecord = nil
-        if let url = webView.url, policy.isAuthentication(url) { clearLocalRecord() }
-        retry?.cancel()
-        failedGeneration = nil
-        isLoading = true
-    }
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard navigation === activeNavigation, failedGeneration != navigationGeneration else { return }
-        guard let url = webView.url, policy.isInternal(url) else { return }
-        let generation = navigationGeneration
-        webView.evaluateJavaScript("(()=>{const s=document.querySelector('[data-ws-shell]');return {workspace:!!s,release:s?.dataset.wsRelease||document.documentElement.dataset.hubRelease||''};})()") { [weak self] modern, _ in
-            guard let self, generation == self.navigationGeneration, url == self.webView.url,
-                  self.failedGeneration != generation else { return }
-            let state = modern as? [String: Any] ?? [:]
-            let release = state["release"] as? String ?? ""
-            if self.policy.isWorkspace(url) && ((state["workspace"] as? Bool) != true || !HubPolicy.currentRelease(release))
-                || !release.isEmpty && !HubPolicy.currentRelease(release) {
-                self.fail("正在连接新版工作区，稍后重试。可以查看本机只读记录。")
-                return
-            }
-            self.isLoading = false; self.connectionError = nil; self.retryCount = 0
-            if self.policy.canRecover(url) { self.recoveryURL = url }
-            if self.policy.isAuthentication(url) { self.clearLocalRecord() }
-            else if self.policy.canRecover(url), self.nativeHistory.last != url {
-                self.nativeHistory.append(url)
-                if self.nativeHistory.count > 40 { self.nativeHistory.removeFirst() }
-            }
-            Task { [weak self] in
-                guard let self else { return }
-                let identity = await self.currentSession()
-                guard generation == self.navigationGeneration, url == self.webView.url else { return }
-                self.authenticatedPageSession = identity
-                self.resume()
-            }
-        }
-    }
-
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        guard navigation === activeNavigation else { return }
-        navigationFailed(error)
-    }
-
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        guard navigation === activeNavigation else { return }
-        navigationFailed(error)
-    }
-
-    private func navigationFailed(_ error: Error) {
-        let issue = error as NSError
-        if issue.domain == NSURLErrorDomain && issue.code == NSURLErrorCancelled { return }
-        failedGeneration = navigationGeneration
-        fail(networkAvailable ? "连接中断，正在尝试恢复。消息是否发送成功由 Hub 核对，不会自动重复提交。" : "网络暂时不可用，联网后会恢复。")
-    }
-
-    private func fail(_ message: String) {
-        isLoading = false; connectionError = message
-        retry?.cancel()
-        guard networkAvailable && retryCount < 3 else { return }
-        retryCount += 1
-        let generation = navigationGeneration
-        let seconds = UInt64(min(8, 1 << retryCount))
-        retry = Task { [weak self] in
-            do { try await Task.sleep(nanoseconds: seconds * 1_000_000_000) }
-            catch { return }
-            guard let self, !Task.isCancelled, self.navigationGeneration == generation,
-                  !self.isLoading, self.networkAvailable, self.connectionError != nil else { return }
-            self.loadRecovery()
-        }
-    }
-
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        isLoading = false
-        fail("页面进程已中断，正在恢复。已保存的草稿会在恢复后显示。")
-    }
-
-    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
-                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        guard navigationAction.targetFrame == nil, let url = navigationAction.request.url else { return nil }
-        if policy.isInternal(url) {
-            webView.load(navigationAction.request.httpMethod == "GET" ? policy.pageRequest(url) : navigationAction.request)
-        }
-        else if navigationAction.navigationType == .linkActivated && ["https", "http"].contains(url.scheme ?? "") { UIApplication.shared.open(url) }
-        return nil
-    }
-
-    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { attach(download) }
-    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { attach(download) }
-
-    private func attach(_ download: WKDownload) {
-        guard downloads.count < 3 else { download.cancel { _ in }; downloadMessage = "请等待当前文件下载完成。"; return }
-        downloads[ObjectIdentifier(download)] = (download, nil)
-        download.delegate = self
-        isLoading = false
-        downloadMessage = "正在下载文件，当前对话会保持打开。"
-    }
-
-    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
-                  suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
-        guard let url = response.url, policy.isDownload(url), response.expectedContentLength <= 1_073_741_824 else {
-            completionHandler(nil); downloadMessage = "文件地址或大小不符合下载条件。"; return
-        }
+    func login(username: String, password: String) async {
+        guard !authenticating else { return }
+        accountGeneration += 1; generation += 1; transport.cancelAll(); refreshTask?.cancel(); refreshing = false
+        authenticating = true; errorMessage = nil
+        let token = accountGeneration
+        defer { authenticating = false }
         do {
-            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("HubDownloads", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let file = directory.appendingPathComponent(HubPolicy.safeFilename(suggestedFilename))
-            downloads[ObjectIdentifier(download)] = (download, file)
-            completionHandler(file)
-        } catch { completionHandler(nil); downloadMessage = "无法准备文件保存位置。" }
+            let result: HubIdentity = try await transport.post("api/mobile/login", body: ["username":username, "password":password])
+            guard token == accountGeneration else { return }
+            try adoptIdentity(result); await loadProjects(); started = true; startPolling()
+        } catch { if token == accountGeneration { errorMessage = error.localizedDescription } }
     }
-
-    func download(_ download: WKDownload, willPerformHTTPRedirection response: HTTPURLResponse,
-                  newRequest request: URLRequest, decisionHandler: @escaping (WKDownload.RedirectPolicy) -> Void) {
-        decisionHandler(request.url.map(policy.isDownload) == true ? .allow : .cancel)
+    private func authenticateExisting() async {
+        guard !authenticating else { return }
+        let token = accountGeneration
+        do {
+            let result: HubIdentity = try await transport.get("api/mobile/session")
+            guard token == accountGeneration else { return }; try adoptIdentity(result); await loadProjects()
+        } catch HubNativeError.unauthorized { if token == accountGeneration { resetAccount() } }
+        catch { if token == accountGeneration { offline = true; if identity == nil { errorMessage = error.localizedDescription } } }
     }
-
-    func downloadDidFinish(_ download: WKDownload) {
-        guard let (_, path) = downloads.removeValue(forKey: ObjectIdentifier(download)), let path else { return }
-        downloadMessage = "下载完成，选择“存储到文件”保存。"
-        if presentedDownloadURL == nil { presentDownload(HubDownloadedFile(url: path)) }
-        else { completedDownloads.append(HubDownloadedFile(url: path)) }
+    private func adoptIdentity(_ value: HubIdentity) throws {
+        guard value.apiVersion == 1, !value.sessionKey.isEmpty else { throw HubNativeError.incompatibleServer }
+        if let old = identity, old.user.id != value.user.id || old.sessionKey != value.sessionKey { resetAccount(clearCookies: false) }
+        identity = value; offline = false
+        try disk.save(HubRememberedIdentity(identity: value, cookieDigest: cookieDigest), key: "identity")
     }
-
-    private var completedDownloads: [HubDownloadedFile] = []
-    private func presentDownload(_ file: HubDownloadedFile) {
-        presentedDownloadURL = file.url
-        downloadedFile = file
+    func logout() async {
+        let request = try? transport.logoutRequest(csrf: identity?.csrfToken)
+        resetAccount()
+        if let request { await transport.logout(using: request) }
     }
-
-    func closeDownloadSheet() {
-        // SwiftUI clears the sheet binding before onDismiss. Keep its owned URL
-        // separately, or the cache and queued presentation would be lost.
-        if let current = presentedDownloadURL { try? FileManager.default.removeItem(at: current.deletingLastPathComponent()) }
-        presentedDownloadURL = nil
-        downloadedFile = nil
-        if !completedDownloads.isEmpty {
-            let next = completedDownloads.removeFirst()
-            presentedDownloadURL = next.url
-            DispatchQueue.main.async { [weak self] in self?.downloadedFile = next }
+    private func resetAccount(clearCookies: Bool = true) {
+        // Drafts/outbox are bound to stable user ID, not a rotating login token.
+        // Expiration hides them; only verified login to that user restores them.
+        persistDraft()
+        accountGeneration += 1; generation += 1; fileGeneration += 1
+        refreshTask?.cancel(); pollTask?.cancel(); sendTask?.cancel(); saveTask?.cancel(); fileTask?.cancel(); transport.cancelAll()
+        identity = nil; selectedProject = nil; selectedConversation = nil; workspace = nil
+        projects = []; tools = []; draft = HubDraft(); pending = nil; previewFile = nil; olderMessages = []; olderConversations = []
+        refreshing = false; sending = false; downloading = false; disk.remove("identity")
+        if clearCookies { for cookie in HTTPCookieStorage.shared.cookies(for: policy.baseURL) ?? [] { HTTPCookieStorage.shared.deleteCookie(cookie) } }
+    }
+    func loadProjects() async {
+#if DEBUG
+        if fixtureOffline { return }
+#endif
+        let account = accountGeneration, key = sessionKey
+        do {
+            let response: HubProjectList = try await transport.get("api/mobile/projects")
+            guard account == accountGeneration, key == sessionKey else { return }; projects = response.projects; offline = false
+            try? disk.save(HubCached(session: key, savedAt: Date(), value: projects), key: cacheKey("projects"))
+            if selectedProject == nil, let first = projects.first { selectProject(first) }
+            let toolbox: HubToolbox = try await transport.get("api/mobile/toolbox")
+            guard account == accountGeneration, key == sessionKey else { return }; tools = toolbox.tools
+            try? disk.save(HubCached(session: key, savedAt: Date(), value: tools), key: cacheKey("tools"))
+        } catch HubNativeError.unauthorized { if account == accountGeneration { resetAccount() } }
+        catch { if account == accountGeneration { offline = true } }
+    }
+    func selectProject(_ project: HubProject) {
+        persistDraft(); selectedProject = project
+        let selection = disk.load(Int.self, key: userKey("selection/" + project.slug))
+        selectedConversation = selection.flatMap { $0 > 0 ? $0 : nil }; resolvingLatest = selection == nil
+        loadSelection()
+    }
+    func openConversation(_ id: Int?) {
+        persistDraft(); selectedConversation = id; resolvingLatest = false
+        if let project = selectedProject {
+            try? disk.save(id ?? 0, key: userKey("selection/" + project.slug))
         }
-        else { downloadMessage = nil }
+        loadSelection()
     }
-
-    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
-        if let (_, path) = downloads.removeValue(forKey: ObjectIdentifier(download)), let path {
-            try? FileManager.default.removeItem(at: path.deletingLastPathComponent())
+    private func loadSelection() {
+        generation += 1; refreshTask?.cancel(); fileTask?.cancel(); fileGeneration += 1; downloading = false; sendTask?.cancel(); sending = false
+        statusMessage = nil; errorMessage = nil; olderMessages = []; olderConversations = []; pagedMessages = false; pagedRooms = false
+        let cached = disk.load(HubCached<HubWorkspace>.self, key: cacheKey("workspace/" + scope))
+        workspace = cached?.read(session: sessionKey); savedAt = cached?.savedAt
+        if workspace == nil, let project = selectedProject {
+            workspace = disk.load(HubCached<HubWorkspace>.self, key: cacheKey("project/" + project.slug))?.read(session: sessionKey)?.shell(conversation: selectedConversation)
         }
-        downloadMessage = "文件未下载完成，请在原对话重试；没有提交新的任务。"
+        olderMessageCursor = workspace?.olderEntriesBefore; olderRoomCursor = workspace?.olderRoomsBefore
+        let composer = disk.load(HubComposerState.self, key: userKey("composer/" + scope))
+        draft = composer?.draft ?? disk.load(HubDraft.self, key: userKey("draft/" + scope)) ?? HubDraft()
+        pending = composer?.pending ?? disk.load(HubDraft.self, key: userKey("pending/" + scope))
+        if draft.awaitingReceipt && pending == nil { pending = draft; draft = HubDraft(agentIDs: draft.agentIDs) }
+        if draft.hasContent || pending != nil { resolvingLatest = false }
+        refreshing = false; refresh()
     }
+    func refresh() {
+#if DEBUG
+        if fixtureOffline { return }
+#endif
+        guard identity != nil else { if started { Task { await authenticateExisting() } }; return }
+        guard let project = selectedProject, !refreshing else { return }
+        let token = generation, key = sessionKey, capturedScope = scope, conversation = selectedConversation, latest = resolvingLatest
+        refreshing = true
+        refreshTask = Task { [weak self] in
+            guard let self else { return }; defer { if token == self.generation { self.refreshing = false } }
+            do {
+                let query = latest ? [] : [URLQueryItem(name: "conversation_id", value: String(conversation ?? 0))]
+                let response: HubWorkspace = try await self.transport.get("api/mobile/projects/\(project.slug)/workspace", query: query)
+                guard !Task.isCancelled, self.isCurrent(token, key, capturedScope), response.sessionKey == key else { return }
+                if latest {
+                    self.resolvingLatest = false
+                    if !self.draft.hasContent, self.pending == nil, let room = response.conversation?.id {
+                        let selected = HubNativeRules.scope(project: project.slug, conversation: room)
+                        try? self.disk.save(HubCached(session: key, savedAt: Date(), value: response), key: self.cacheKey("workspace/" + selected))
+                        self.openConversation(room); return
+                    }
+                    if response.conversation != nil {
+                        self.workspace = response.shell(conversation: nil); self.offline = false; return
+                    }
+                }
+                if self.workspace?.revision != response.revision || self.workspace == nil { self.workspace = response }
+                self.offline = false; self.savedAt = Date()
+                if !self.pagedMessages { self.olderMessageCursor = response.olderEntriesBefore }
+                if !self.pagedRooms { self.olderRoomCursor = response.olderRoomsBefore }
+                if self.draft.agentIDs.isEmpty, let agent = response.defaultAgentId { self.draft.agentIDs = [agent] }
+                try? self.disk.save(HubCached(session: key, savedAt: Date(), value: response), key: self.cacheKey("workspace/" + capturedScope))
+                try? self.disk.save(HubCached(session: key, savedAt: Date(), value: response), key: self.cacheKey("project/" + project.slug))
+                if self.pending != nil && !self.sending { await self.checkReceipt() }
+            } catch HubNativeError.unauthorized { if self.isCurrent(token, key, capturedScope) { self.resetAccount() } }
+            catch { if !Task.isCancelled && self.isCurrent(token, key, capturedScope) { self.offline = true } }
+        }
+    }
+    private func isCurrent(_ token: Int, _ key: String, _ capturedScope: String) -> Bool {
+        HubNativeRules.requestStillCurrent(generation: generation, expected: token, session: sessionKey, expectedSession: key, scope: scope, expectedScope: capturedScope)
+    }
+    func loadOlderMessages() async {
+        guard let project = selectedProject, let room = selectedConversation,
+              let before = olderMessageCursor else { return }
+        let token = generation, key = sessionKey, selected = scope
+        do {
+            let response: HubWorkspace = try await transport.get("api/mobile/projects/\(project.slug)/workspace", query: [URLQueryItem(name: "conversation_id", value: String(room)), URLQueryItem(name: "before_entry_id", value: String(before))])
+            guard isCurrent(token, key, selected), response.sessionKey == key else { return }
+            olderMessages = response.messages + olderMessages
+            pagedMessages = true; olderMessageCursor = response.olderEntriesBefore
+        } catch { if isCurrent(token, key, selected) { errorMessage = error.localizedDescription } }
+    }
+    func loadOlderConversations() async {
+        guard let project = selectedProject, let before = olderRoomCursor else { return }
+        let token = generation, key = sessionKey, selected = scope
+        do {
+            let value: HubWorkspace = try await transport.get("api/mobile/projects/\(project.slug)/workspace", query: [URLQueryItem(name: "conversation_id", value: String(selectedConversation ?? 0)), URLQueryItem(name: "rooms_before", value: String(before))])
+            guard isCurrent(token, key, selected), value.sessionKey == key else { return }
+            olderConversations += value.conversations; pagedRooms = true; olderRoomCursor = value.olderRoomsBefore
+        } catch { if isCurrent(token, key, selected) { errorMessage = error.localizedDescription } }
+    }
+    private func scheduleDraftSave() {
+        saveTask?.cancel(); guard identity != nil, selectedProject != nil else { return }
+        saveTask = Task { [weak self] in try? await Task.sleep(for: .milliseconds(250)); guard !Task.isCancelled else { return }; self?.persistDraft() }
+    }
+    @discardableResult
+    private func persistDraft() -> Bool {
+        saveTask?.cancel(); guard identity != nil, selectedProject != nil else { return false }
+        do {
+            try disk.save(HubComposerState(draft: draft, pending: pending), key: userKey("composer/" + scope))
+            disk.remove(userKey("draft/" + scope)); disk.remove(userKey("pending/" + scope))
+            return true
+        }
+        catch { errorMessage = "草稿暂时无法保存到本机，请保留当前页面。"; return false }
+    }
+    func addFile(data: Data, name: String, mime: String) {
+        do { draft.files.append(try disk.importFile(data: data, name: name, mime: mime, existing: draft.files)); persistDraft() }
+        catch { errorMessage = error.localizedDescription }
+    }
+    func importURLs(_ urls: [URL]) {
+        for url in urls {
+            let accessed = url.startAccessingSecurityScopedResource(); defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentTypeKey])
+                guard HubNativeRules.acceptsFiles(existing: draft.files, newBytes: values.fileSize ?? 0) else { throw HubNativeError.oversizedFile }
+                addFile(data: try Data(contentsOf: url), name: url.lastPathComponent, mime: values.contentType?.preferredMIMEType ?? "application/octet-stream")
+            } catch { errorMessage = error.localizedDescription }
+        }
+    }
+    func removeFile(_ file: HubDraftFile) {
+        draft.files.removeAll { $0.id == file.id }; try? FileManager.default.removeItem(at: disk.fileURL(file.id)); persistDraft()
+    }
+    func send() {
+        guard !sending, pending == nil, draft.hasContent, selectedProject != nil, identity != nil else { return }
+        let original = draft
+        var payload = draft; payload.awaitingReceipt = true; pending = payload
+        draft = HubDraft(agentIDs: payload.agentIDs)
+        guard persistDraft() else { draft = original; pending = nil; return }
+        resolvingLatest = false; transmitPending()
+    }
+    func retryPending() { guard !sending, pending != nil, persistDraft() else { return }; transmitPending() }
+    private func transmitPending() {
+        guard let project = selectedProject, let identity, let payload = pending else { return }
+        let token = generation, key = sessionKey, capturedScope = scope, conversation = selectedConversation
+        sending = true; errorMessage = nil
+        statusMessage = "正在发送，收到后会直接显示在这里。"
+        sendTask = Task { [weak self] in
+            guard let self else { return }; defer { if self.isCurrent(token, key, capturedScope) { self.sending = false } }
+            do {
+                let receipt = try await self.transport.upload(project: project.slug, conversation: conversation, draft: payload, csrf: self.workspace?.csrfToken ?? identity.csrfToken, disk: self.disk)
+                guard !Task.isCancelled, self.isCurrent(token, key, capturedScope) else { return }
+                self.finishSend(receipt, payload: payload, originalScope: capturedScope)
+            } catch HubNativeError.unauthorized { if self.isCurrent(token, key, capturedScope) { self.resetAccount() } }
+            catch {
+                guard self.isCurrent(token, key, capturedScope) else { return }
+                self.statusMessage = "正在核对发送结果。文字和附件已保留；联网后自动查收据，不会重复派单。"
+                self.offline = true
+            }
+        }
+    }
+    func checkReceipt() async {
+        guard let payload = pending, let project = selectedProject else { return }
+        let token = generation, key = sessionKey, selected = scope
+        do {
+            let receipt: HubReceipt = try await transport.get("api/mobile/projects/\(project.slug)/receipts/\(payload.requestKey)")
+            guard isCurrent(token, key, selected), pending?.requestKey == payload.requestKey else { return }
+            if receipt.found == true { finishSend(receipt, payload: payload, originalScope: selected) }
+            else { statusMessage = "服务器尚未收到。可以重试发送，同一条消息不会重复创建工作。" }
+        } catch { /* Keep the exact request key and immutable pending draft. */ }
+    }
+    private func finishSend(_ receipt: HubReceipt, payload: HubDraft, originalScope: String) {
+        guard let room = receipt.conversationId, room > 0, receipt.taskIds?.isEmpty == false,
+              selectedConversation == nil || selectedConversation == room else { errorMessage = "服务器回复不完整，请检查发送结果。"; return }
+        guard pending?.requestKey == payload.requestKey else { return }
+        let target = HubNativeRules.scope(project: selectedProject?.slug ?? "", conversation: room)
+        do { try disk.save(HubComposerState(draft: draft, pending: nil), key: userKey("composer/" + target)) }
+        catch { errorMessage = "消息已送达，但下一条草稿尚未安全保存，请保留当前页面。"; return }
+        disk.remove(userKey("pending/" + originalScope)); for file in payload.files { try? FileManager.default.removeItem(at: disk.fileURL(file.id)) }
+        pending = nil; sending = false; statusMessage = "已收到，智能体会在这场对话中继续回复。"
+        if selectedConversation != receipt.conversationId { disk.remove(userKey("composer/" + originalScope)) }
+        if selectedConversation != receipt.conversationId { selectedConversation = receipt.conversationId; generation += 1; refreshTask?.cancel(); refreshing = false; workspace = nil }
+        if let project = selectedProject, let room = selectedConversation { try? disk.save(room, key: userKey("selection/" + project.slug)) }
+        persistDraft(); refresh()
+    }
+    func cancelWaiting() {
+        sendTask?.cancel(); sending = false; statusMessage = "已停止等待。服务器可能已收到，下一步先检查发送结果。"; Task { await checkReceipt() }
+    }
+    func taskDetail(_ task: HubTask, before: Int? = nil) async throws -> HubTaskDetail {
+        guard let project = selectedProject else { throw HubNativeError.invalidResponse }
+        return try await cachedRead("api/mobile/projects/\(project.slug)/tasks/\(task.id)" + (before.map { "?before=\($0)" } ?? ""))
+    }
+    func cachedRead<T: Codable>(_ path: String) async throws -> T {
+        let key = cacheKey(path), account = sessionKey, token = accountGeneration, selection = scope
+        guard !account.isEmpty else { throw HubNativeError.unauthorized }
+        if offline, let cached = disk.load(HubCached<T>.self, key: key)?.read(session: account) { return cached }
+#if DEBUG
+        if fixtureOffline { throw URLError(.notConnectedToInternet) }
+#endif
+        let value: T = try await transport.get(path)
+        guard sessionKey == account, accountGeneration == token, scope == selection else { throw CancellationError() }
+        try? disk.save(HubCached(session: account, savedAt: Date(), value: value), key: key); return value
+    }
+    func openAttachment(_ attachment: HubAttachment) {
+        guard !downloading else { return }; let account = accountGeneration; fileGeneration += 1; let token = fileGeneration; downloading = true
+        fileTask = Task { [weak self] in
+            guard let self else { return }; defer { if self.fileGeneration == token { self.downloading = false } }
+            do {
+                let url = try await self.transport.download(attachment, disk: self.disk)
+                guard !Task.isCancelled, self.accountGeneration == account, self.fileGeneration == token else { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()); return }
+                self.previewFile = HubDownloadedFile(url: url)
+            } catch { if !Task.isCancelled && self.accountGeneration == account { self.errorMessage = error.localizedDescription } }
+        }
+    }
+    func closePreview() { if let file = previewFile { try? FileManager.default.removeItem(at: file.url.deletingLastPathComponent()) }; previewFile = nil }
+    func thumbnail(_ file: HubAttachment) async throws -> URL {
+        guard let preview = file.previewUrl, (file.mimeType ?? "").hasPrefix("image/"), identity != nil else { throw HubNativeError.invalidResponse }
+        let account = accountGeneration, token = generation, key = sessionKey, selected = scope
+        let cache = cacheKey("thumbnail/\(file.id)/" + HubDisk.digest(preview))
+        if let saved = disk.load(HubCached<String>.self, key: cache)?.read(session: key), FileManager.default.fileExists(atPath: saved) { return URL(fileURLWithPath: saved) }
+        let copy = HubAttachment(id: file.id, name: "预览-\(file.id).webp", mimeType: "image/webp", byteSize: nil, downloadUrl: preview, previewUrl: nil)
+        let url = try await transport.download(copy, disk: disk)
+        guard account == accountGeneration, isCurrent(token, key, selected), !Task.isCancelled else { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()); throw CancellationError() }
+        try? disk.save(HubCached(session: key, savedAt: Date(), value: url.path), key: cache)
+        return url
+    }
+    func feedback(title: String, body: String, kind: String, key: String) async throws {
+        guard let project = selectedProject, let identity else { throw HubNativeError.unauthorized }
+        let _: HubFeedbackResponse = try await transport.post("api/mobile/projects/\(project.slug)/feedback", body: ["request_key":key,"kind":kind,"title":title,"body":body,"platform":"ios-native-0.2.0","conversation_id":selectedConversation ?? 0], csrf: workspace?.csrfToken ?? identity.csrfToken)
+    }
+#if DEBUG
+    // Simulator-only native interaction fixture. Transport is also replaced by
+    // HubNoNetworkProtocol in the testing app, so no path can reach production.
+    func installFixture(reset: Bool = false, userID: Int = 1, login: String = "fixture-session") throws {
+        if reset { disk.clear() }
+        fixtureOffline = true
+        let value = HubIdentity(apiVersion: 1, release: "2.12.0", user: HubUser(id: userID, username: "native-fixture"), csrfToken: "fixture-csrf", sessionKey: login)
+        try adoptIdentity(value)
+        var object = try JSONSerialization.jsonObject(with: HubFixtures.workspace) as! [String: Any]
+        object["session_key"] = login; object["csrf_token"] = "fixture-csrf"
+        let fixture = try HubTransport.decoder.decode(HubWorkspace.self, from: JSONSerialization.data(withJSONObject: object))
+        projects = try HubTransport.decoder.decode(HubProjectList.self, from: HubFixtures.projects).projects
+        tools = try HubTransport.decoder.decode(HubToolbox.self, from: HubFixtures.toolbox).tools
+        let scope = HubNativeRules.scope(project: fixture.project.slug, conversation: fixture.conversation?.id)
+        try disk.save(HubCached(session: login, savedAt: Date(), value: fixture), key: cacheKey("workspace/" + scope))
+        try disk.save(HubCached(session: login, savedAt: Date(), value: fixture), key: cacheKey("project/" + fixture.project.slug))
+        if disk.load(Int.self, key: userKey("selection/" + fixture.project.slug)) == nil, let room = fixture.conversation?.id { try disk.save(room, key: userKey("selection/" + fixture.project.slug)) }
+        let detail = try HubTransport.decoder.decode(HubTaskDetail.self, from: HubFixtures.task)
+        try disk.save(HubCached(session: login, savedAt: Date(), value: detail), key: cacheKey("api/mobile/projects/\(fixture.project.slug)/tasks/\(detail.task.id)"))
+        let devices = try HubTransport.decoder.decode(HubDevices.self, from: HubFixtures.devices)
+        try disk.save(HubCached(session: login, savedAt: Date(), value: devices), key: cacheKey("api/mobile/projects/\(fixture.project.slug)/devices"))
+        let library = try HubTransport.decoder.decode(HubLibrary.self, from: HubFixtures.library)
+        try disk.save(HubCached(session: login, savedAt: Date(), value: library), key: cacheKey("api/mobile/projects/\(fixture.project.slug)/library"))
+        let releases = try HubTransport.decoder.decode(HubReleases.self, from: HubFixtures.releases)
+        try disk.save(HubCached(session: login, savedAt: Date(), value: releases), key: cacheKey("api/releases"))
+        offline = true; selectProject(fixture.project)
+    }
+    func expireFixtureSession() { resetAccount() }
+#endif
 }

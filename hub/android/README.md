@@ -1,6 +1,42 @@
 # Codex Hub Android
 
-Android WebView shell for the private Codex Hub.
+Installed Android client for the private Codex Hub.
+
+Current source is **0.2.0 / code 29**, requiring JSON API 1 (Hub server 2.12.0).
+The launcher, notification, share and Open With entry points use
+NativeHubActivity. Chat, projects, agents, tasks and toolbox are Android Views
+with in-process navigation. Screens never load Hub HTML, and no route uses the
+old WebView Activity as fallback. The former Activity is not registered.
+
+Native login uses the JSON session API. An existing WebView cookie can be
+imported once without opening a WebView; subsequent login/logout uses a private
+native cookie jar. Account/session and route generations fence late callbacks.
+
+Recent data is stored in bounded individual atomic JSON files on a background
+worker. Cache scopes include endpoint, user and login session. Drafts and
+immutable outgoing envelopes remain separate from evictable data. The outgoing
+envelope is durably committed before POST; recovery only reads receipts.
+Explicit retry reuses its original key, text and attachments. Loaded history is
+merged with refreshed messages by ID, and never replaced by only the latest page.
+
+Native file picking and system sharing copy permitted files into private durable
+storage. Horizontal attachment chips keep the keyboard layout compact. Shares
+never send automatically. ImageView displays previews; authenticated files save
+through MediaStore/system Save without HTML or an external browser.
+Confirmed sends remove only their own unreferenced private attachment copies.
+
+Toolbox devices, project files, client downloads and feedback are native pages.
+Cached data is identified by the connection banner; stale execution contact is
+shown as waiting for verification rather than green/live.
+
+Debug QA alone permits an explicit loopback fixture endpoint. Release resources
+allow HTTPS only. Source compilation has succeeded; actual emulator/device
+verification is recorded separately under output/hub-native-mobile-20261031/android.
+Compilation/static checks do not imply completed on-device acceptance.
+
+## Historical WebView releases (superseded)
+
+The following notes describe 0.1.x only.
 
 Current release: `v0.1.27` (`versionCode 28`), requiring Hub UI 2.11.0 or newer.
 

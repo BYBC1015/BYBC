@@ -13,14 +13,14 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.util.List;
 
-/** Private read-only bridge from bounded local copies to the WebView file input. */
+/** Private read-only handles for native attachments and existing imported files. */
 public final class SharedAttachmentProvider extends ContentProvider {
     static String authority(Context context) {
         return context.getPackageName() + ".sharedattachments";
     }
 
     static File directory(Context context) {
-        return new File(context.getCacheDir(), "shared-attachments");
+        return new File(context.getFilesDir(), "native-attachments");
     }
 
     static File file(Context context, Uri uri) throws FileNotFoundException {
@@ -31,6 +31,7 @@ public final class SharedAttachmentProvider extends ContentProvider {
             throw new FileNotFoundException("Invalid attachment handle");
         }
         File file = new File(directory(context), parts.get(0) + ".data");
+        if (!file.isFile()) file = new File(new File(context.getCacheDir(), "shared-attachments"), parts.get(0) + ".data");
         if (!file.isFile()) throw new FileNotFoundException("Attachment has expired");
         return file;
     }

@@ -17,19 +17,20 @@ permissions:
 jobs:
   simulator:
     runs-on: macos-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Build unsigned simulator app and run policy tests
+      - name: Build unsigned simulator app and run native contract, state and UI tests
         run: bash hub/ios/scripts/verify-ios.sh
       - name: Keep build evidence and simulator app
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Hub-iOS-0.1.1-UNSIGNED-SIMULATOR-ONLY
+          name: Hub-iOS-0.2.0-UNSIGNED-SIMULATOR-ONLY
           retention-days: 7
           path: |
             ${{ runner.temp }}/hub-ios-verification/*.txt
             ${{ runner.temp }}/hub-ios-verification/*.log
             ${{ runner.temp }}/hub-ios-verification/*.xcresult
+            ${{ runner.temp }}/hub-ios-verification/screenshots/**
             ${{ runner.temp }}/hub-ios-verification/DerivedData/Build/Products/Debug-iphonesimulator/Hub.app

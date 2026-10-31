@@ -1,0 +1,13 @@
+{
+  "devices": [
+    {
+      "device_id": 1,
+      "device_label": "测试执行连接 · 无工作进程",
+      "is_online": false,
+      "is_agent_online": false,
+      "presence_label": "未连接",
+      "last_seen_at": null,
+      "last_agent_seen_at": null
+    }
+  ]
+}

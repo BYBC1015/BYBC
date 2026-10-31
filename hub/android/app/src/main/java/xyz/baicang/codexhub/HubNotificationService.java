@@ -121,7 +121,7 @@ public final class HubNotificationService extends Service {
 
     private void pollForReplies() throws Exception {
         String hubUrl = HubEndpoint.current(this);
-        String cookie = CookieManager.getInstance().getCookie(hubUrl);
+        String cookie = nativeCookie(hubUrl);
         if (cookie == null || cookie.trim().isEmpty()) {
             updateServiceNotification("请打开应用并登录 Hub");
             return;
@@ -179,6 +179,8 @@ public final class HubNotificationService extends Service {
         }
 
         JSONObject payload = new JSONObject(body);
+        // Ignore an old request that completed after native account/logout/endpoint changes.
+        if (!hubUrl.equals(HubEndpoint.current(this)) || !cookie.equals(nativeCookie(hubUrl))) return;
         long latestEntryId = payload.optLong("latest_entry_id", lastEntryId);
         JSONArray notifications = payload.optJSONArray("notifications");
 
@@ -204,6 +206,14 @@ public final class HubNotificationService extends Service {
         updateServiceNotification("后台通知运行中");
     }
 
+    private String nativeCookie(String endpoint) {
+        try {
+            JSONObject identity = new JSONObject(getSharedPreferences("hub_native_v1", MODE_PRIVATE)
+                    .getString("identity:" + NativeHubState.digest(endpoint), "{}"));
+            return identity.optString("cookies", "");
+        } catch (Exception invalid) { return ""; }
+    }
+
     private void showReplyNotification(JSONObject item) {
         long entryId = item.optLong("entry_id", System.currentTimeMillis());
         String projectSlug = item.optString("project_slug", "");
@@ -212,7 +222,7 @@ public final class HubNotificationService extends Service {
         String body = item.optString("body", "收到一条新回复");
 
         Uri target = Uri.parse(HubEndpoint.projectUrl(this, projectSlug));
-        Intent openIntent = new Intent(this, MainActivity.class)
+        Intent openIntent = new Intent(this, NativeHubActivity.class)
                 .setAction(Intent.ACTION_VIEW)
                 .setData(target)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
@@ -246,7 +256,7 @@ public final class HubNotificationService extends Service {
     }
 
     private Notification buildServiceNotification(String status) {
-        Intent openIntent = new Intent(this, MainActivity.class)
+        Intent openIntent = new Intent(this, NativeHubActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent pendingIntent = PendingIntent.getActivity(
                 this,
