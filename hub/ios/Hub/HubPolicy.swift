@@ -75,10 +75,11 @@ struct HubPolicy {
     }
 
     static func diskFilename(_ value: String) -> String {
-        let safe = safeFilename(value)
-        let candidate = (safe as NSString).pathExtension
+        // Preserve the suffix before the display-name character cap is applied.
+        let rawSuffix = (value as NSString).pathExtension
+        let candidate = rawSuffix.isEmpty ? "" : safeFilename(rawSuffix)
         let suffix = candidate.isEmpty || candidate.decomposedStringWithCanonicalMapping.utf8.count > 24 ? "" : "." + candidate
-        let stem = suffix.isEmpty ? safe : (safe as NSString).deletingPathExtension
+        let stem = safeFilename(suffix.isEmpty ? value : (value as NSString).deletingPathExtension)
         var prefix = ""
         // APFS also normalizes Unicode. Count decomposed bytes, not characters,
         // and leave headroom under the 255-byte filesystem component limit.
