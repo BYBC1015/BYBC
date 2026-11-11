@@ -114,12 +114,14 @@ class CodexExecRunner:
                     execution_preferences, image_paths, execution_context, cancel_event,
                     project_session=session, progress_callback=progress_callback)
                 if session.started:
+                    cumulative_usage = result.token_usage
+                    result.token_usage = session.turn_usage(cumulative_usage)
                     output = result.stdout.decode('utf-8', errors='replace') if isinstance(result.stdout, bytes) else result.stdout
                     session.observe_jsonl(output)
                     session.complete(ok=result.ok, returncode=result.returncode,
                         last_message=self._redact(result.last_message)[:262144],
                         error=self._redact(result.error)[:65536], output_path=result.output_path,
-                        token_usage=result.token_usage)
+                        token_usage=result.token_usage, thread_token_usage=cumulative_usage)
                 return result
         except ProjectSessionError as exc:
             label = '总控对话' if execution_context.get('execution_route') == 'chat' else '本地工程会话'
@@ -130,7 +132,7 @@ class CodexExecRunner:
                 detail = '\n'.join(part for part in (result.error, label + '暂未继续：' + str(exc)) if part)
                 return CodexExecResult(ok=False, command=result.command, returncode=result.returncode,
                     stdout=result.stdout, stderr=result.stderr, last_message='', output_path=result.output_path,
-                    error=detail, token_usage=result.token_usage)
+                    error=detail, token_usage=None)
             return self._failed(command=[], output_path=self._output_path(project_slug, prompt_path),
                                 error=label + '暂未继续：' + str(exc))
 
@@ -199,7 +201,24 @@ class CodexExecRunner:
             # Explicit per-runtime opt-in for the dedicated agent worker's Hub
             # delegation helper. Keep the filesystem sandbox and old bindings.
             command.extend(["-c", "sandbox_workspace_write.network_access=true"])
+        delivery_path = None
+        frozen_delivery = (execution_context or {}).get('artifact_delivery')
+        if frozen_delivery is not None:
+            try:
+                from .delivery_target import resolve_delivery_target
+                if not isinstance(frozen_delivery, dict):
+                    raise ValueError('Invalid frozen delivery target')
+                delivery = resolve_delivery_target({}, execution_context['project_slug'],
+                    execution_context['task_id'], frozen=frozen_delivery)
+                delivery_path = delivery['path']
+            except (KeyError, TypeError, ValueError, OSError, RuntimeError):
+                return self._failed(command=[], output_path=output_path,
+                    error='本任务交付目录无法核验，工作进程未启动。请恢复原交付位置后继续。')
         command.append("exec")
+        if delivery_path is not None and sandbox == 'workspace-write':
+            # Parent exec flags must precede resume; only this frozen task
+            # directory is writable, never the configured Downloads parent.
+            command.extend(['--add-dir', delivery_path])
         if project_session:
             # Parent exec options retain the exact workspace and sandbox on resume.
             command.extend(['--cd', str(project_path), '--sandbox', sandbox])

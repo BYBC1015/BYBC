@@ -247,6 +247,24 @@ def run_agent_request(arguments: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("当前任务未分配持久智能体")
     action = request.get("action")
     if action == "inspect":
+        detail = request.get('detail', 'compact')
+        if detail not in ('compact', 'full'):
+            raise ValueError('inspect detail 必须为 compact 或 full')
+        target_task_id = request.get('target_task_id')
+        if target_task_id is not None:
+            if type(target_task_id) is not int or target_task_id < 1:
+                raise ValueError('请使用有效的目标任务编号')
+            # The existing endpoint verifies project membership and preserves
+            # exact requirements, entries and result details for this target.
+            return {'detail':'task', **client._json('GET',
+                    f'/api/projects/{arguments.project}/tasks/{target_task_id}')}
+        if detail == 'compact':
+            from .agent_inspection import compact_inspection
+            team = context.get('team')
+            if not isinstance(team, list) or not team:
+                team = client._json('GET', f'/api/projects/{arguments.project}/agents').get('agents', [])
+            return compact_inspection(context, team,
+                client._json('GET', f'/api/projects/{arguments.project}/tasks'))
         return {"context": context,
                 "agents": client._json("GET", f"/api/projects/{arguments.project}/agents"),
                 "tasks": client._json("GET", f"/api/projects/{arguments.project}/tasks")}
@@ -392,7 +410,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, HubClientError) as exc:
         parser.exit(1, f"Hub agent request failed: {exc}\n")
     # ASCII JSON survives Windows PowerShell's legacy native pipe encoding.
-    print(json.dumps(result, ensure_ascii=True))
+    print(json.dumps(result, ensure_ascii=True, separators=(',', ':')))
     return 0
 
 

@@ -487,7 +487,11 @@ class BridgeRunner:
             return
         prompt = self.client.get_task_prompt(project_slug, task_id)
         if is_agent_task:
-            prompt += self._agent_tool_instructions(project_slug, task_id)
+            try:
+                prompt += self._agent_tool_instructions(project_slug, task_id)
+            except (OSError, ValueError):
+                self._block_delivery_preparation(project_slug, task_id, result)
+                return
         project_memory = self._prepare_project_memory(
             project_slug, device_label=device_label, result=result
         )
@@ -708,6 +712,9 @@ class BridgeRunner:
         if str(task_id) in self.state.seen_task_ids:
             return
         receipt = self.state.get_task_delivery(slug, task_id)
+        if receipt is not None and 'artifact_delivery' not in receipt:
+            # A new delivery preference must not expand an already-started task.
+            receipt['artifact_delivery'] = None
         if receipt and receipt.get('stage') == 'agent_result':
             self._publish_agent_result(slug, task_id, result)
             return
@@ -727,6 +734,12 @@ class BridgeRunner:
                 # Pre-upgrade in-progress work has no proof it is safe to repeat.
                 result.pending_tasks.append(task_id)
                 return
+            try:
+                delivery = self._artifact_delivery_target(slug, task_id)
+                tool_instructions = self._agent_tool_instructions(slug, task_id)
+            except (OSError, ValueError):
+                self._block_delivery_preparation(slug, task_id, result)
+                return
             if not self._prepare_agent_task(slug, task_id, result):
                 return
             try:
@@ -738,7 +751,7 @@ class BridgeRunner:
                 self._save_state()
                 self._publish_agent_decision_failure(slug, task_id)
                 return
-            prompt = self.client.get_task_prompt(slug, task_id) + self._agent_tool_instructions(slug, task_id)
+            prompt = self.client.get_task_prompt(slug, task_id) + tool_instructions
             memory = self._prepare_project_memory(slug, device_label=device_label, result=result)
             if memory and '# Project Memory:' not in prompt and '## Durable Project Memory' not in prompt:
                 prompt = '## Durable Project Memory\n' + memory.strip() + '\n\n' + prompt
@@ -759,6 +772,7 @@ class BridgeRunner:
             receipt = self.state.set_task_delivery(slug, task_id, 'agent_acquiring')
             receipt.update(run_key=uuid.uuid4().hex, prompt_path=str(prompt_path),
                            target_project=target, image_paths=[str(p) for p in attachments.images])
+            receipt['artifact_delivery'] = delivery
             self._save_state()  # Stable identity precedes the first network POST.
         try:
             if receipt.get('stage') == 'agent_prepared' and receipt['execution']['lease_until'] <= time.time():
@@ -788,6 +802,8 @@ class BridgeRunner:
             result.messages.append(f'任务 #{task_id}：' + receipt['detail'])
             return
         context = dict(receipt['execution'], task_id=task_id, project_slug=slug, receipt_path=str(completion_path))
+        if receipt.get('artifact_delivery'):
+            context['artifact_delivery'] = receipt['artifact_delivery']
         prompt_path = Path(receipt['prompt_path'])
         # The start permission already exists: keep it renewed while fetching
         # fresh requirements and preparing large inputs, not only during CLI work.
@@ -880,6 +896,24 @@ class BridgeRunner:
         pending["status_reported"] = True
         self._save_state()
 
+    def _block_delivery_preparation(self, project_slug: str, task_id: int, result: ProcessResult) -> None:
+        detail = '交付目录暂时无法使用：请核对磁盘是否已连接、目录权限或目录链接。文件尚未制作，未改用其他保存位置。'
+        pending = self.state.set_task_delivery(project_slug, task_id, 'agent_decision_blocked', detail=detail)
+        pending.update(status_reported=False, failure_reason=detail,
+                       next_time='恢复原交付目录后重新打开任务；执行前再次核验目录。')
+        self._save_state()
+        self._publish_agent_decision_failure(project_slug, task_id)
+        result.pending_tasks.append(task_id)
+        result.messages.append(f'任务 #{task_id}：{detail}')
+
+    def _artifact_delivery_target(self, project_slug: str, task_id: int):
+        from .delivery_target import resolve_delivery_target
+        receipt = self.state.get_task_delivery(project_slug, task_id) or {}
+        if 'artifact_delivery' in receipt and receipt['artifact_delivery'] is None:
+            return None  # Older in-flight work keeps its original project scope.
+        return resolve_delivery_target(self.config.backend_options, project_slug, task_id,
+                                       frozen=receipt.get('artifact_delivery'))
+
     def _agent_tool_instructions(self, project_slug: str, task_id: int) -> str:
         def quote(value: str) -> str:
             return "'" + value.replace("'", "''") + "'"
@@ -893,13 +927,17 @@ class BridgeRunner:
             command += " --config " + quote(helper_config)
         if binding:
             command += " --binding-id " + quote(binding)
+        delivery = self._artifact_delivery_target(project_slug, task_id)
+        location = delivery['path'] if delivery else f'项目 output/hub-task-{task_id}/'
         return (
             "\n\n## Hub 智能体工作接口\n"
             "用 UTF-8 文件提交结构化请求，通过现有连接读取身份和委派任务；不要读取、输出或复制连接 token。\n"
             f"PowerShell 调用：{command} --request-file '<请求 JSON 文件绝对路径>'\n"
             f"总控调度通道请直接使用：{command} --request-json '<JSON对象>'，不需写请求文件。\n"
             "总控运行于独立调度目录；实际项目文件修改必须委派执行者。不得绕过目录限制修改原项目。\n"
-            '查看当前身份、经验、团队和任务：{"action":"inspect"}。\n'
+            '查看当前身份、团队和任务索引：{"action":"inspect"}。默认精简返回；修改或接续前用 '
+            '{"action":"inspect","target_task_id":真实任务编号} 读取完整要求，不能以列表摘要代替验收标准；'
+            '必要时用 {"action":"inspect","detail":"full"} 获取完整上下文。\n'
             '查看同一对话已提供的原始资料：{"action":"reference_files"}。'
             '需接续阅读或交给执行者时：{"action":"inherit_attachments","attachment_ids":[实际附件编号]}。'
             '该接口校验同一项目和对话，返回已下载的本地文件路径；必须实际读取才能声称读过，'
@@ -937,9 +975,10 @@ class BridgeRunner:
             "只有接口返回任务编号才算已分配。总控可在本任务授权范围内委派其他智能体；"
             "仍需汇报哪些已交付、哪些还在执行，不得把成功创建任务写成全部完成。"
             "工作结果与结构化复盘由 Bridge 回传，勿重复自行发回同一结果。\n"
-            '交付文件放在项目 output/hub-task-'+str(task_id)+'/，最终答复给出明确 Markdown 文件链接，'
-            '并追加 <hub-artifacts>[{"path":"项目内交付文件路径"}]</hub-artifacts>（最多12个、每个50MB、合计100MB）。'
-            'Bridge会上传到Hub并展示预览与下载；不需要SW公开上传，不要只报一个目录或称本地路径已可在网页打开。\n'
+            f'可交付图片、视频、报告等放在 {location}。这是可删除交付区；源码、配置、凭据、数据库、内部日志及唯一工程资产留在项目长期目录。'
+            '最终答复给出明确 Markdown 文件链接，并追加 <hub-artifacts>[{"path":"交付文件绝对路径"}]</hub-artifacts>'
+            '（最多12个、每个50MB、合计100MB）。测试XML和原始日志不作为附件，测试结果写入Markdown报告。'
+            'Bridge会上传合规文件并展示预览与下载；有文件未交付时说明具体原因，不要只报目录或称本地路径已可在网页打开。\n'
         )
 
     def _save_agent_result(self, project_slug: str, task_id: int, execution: CodexExecResult) -> None:
@@ -968,15 +1007,46 @@ class BridgeRunner:
             body = summary
             try:
                 if not receipt.get('artifact_publish_failed') and callable(getattr(self.client,'upload_task_artifact',None)):
-                    from .artifacts import publish_artifacts
-                    body=publish_artifacts(self.client,project_slug,task_id,receipt['execution'],
-                        self._resolve_project_path(receipt.get('target_project') or project_slug),body)
+                    publication = receipt.get('artifact_publication')
+                    if publication is None:
+                        from .artifacts import publish_artifacts_partial
+                        target = (self._artifact_delivery_target(project_slug, task_id)
+                                  if receipt.get('artifact_delivery') else None)
+                        report = publish_artifacts_partial(self.client,project_slug,task_id,receipt['execution'],
+                            self._resolve_project_path(receipt.get('target_project') or project_slug),body,
+                            allowed_roots=(Path(target['path']),) if target else ())
+                        issue_summary = report.issue_summary()
+                        publication = {'body': report.body, 'issues': [item.as_dict() for item in report.issues],
+                                       'published_count': report.published_count}
+                        if issue_summary:
+                            publication['body'] += ('\n\n' + issue_summary +
+                                ('\n\n已上传的文件可在此任务预览、下载。' if report.published_count else '\n\n') +
+                                '原执行结果已保留；只需补交上述文件，无需重新执行整项工作。')
+                            receipt['result_status'] = status = 'blocked'
+                            receipt['reflection'] = {**receipt['reflection'],
+                                'failed': issue_summary[:1500],
+                                'next_time': '交付前逐文件校验；仅补交失败文件，保留已上传成果'}
+                        receipt['artifact_publication'] = publication
+                        # Freeze the exact completion body before sending it. A lost
+                        # completion acknowledgement must not rescan changed files.
+                        self._save_state()
+                    body = publication['body']
                 usage = normalize_token_usage(receipt.get('token_usage'))
                 published = self.client.complete_task_execution(project_slug, task_id, receipt['execution'],
                     status=status, summary=body[:1000], body=body, reflection=receipt['reflection'],
                     **({'token_usage': usage} if usage is not None else {}))
             except Exception as exc:
-                if isinstance(exc, ValueError) or getattr(exc,'status_code',None) in {413,415,422}:
+                from .artifacts import ArtifactValidationError
+                from .delivery_target import DeliveryTargetError
+                if getattr(exc,'status_code',None) in {413,415,422} and receipt.get('artifact_publication') is not None:
+                    self._reject_agent_receipt(project_slug, task_id,
+                        '成果上传记录已保留，但 Hub 未接受完成说明；等待核对交付回执，不重新制作或上传。', result)
+                    return
+                if isinstance(exc, (ArtifactValidationError, DeliveryTargetError)) or getattr(exc,'status_code',None) in {413,415,422}:
+                    if receipt.get('artifact_publish_failed'):
+                        self._reject_agent_receipt(project_slug, task_id,
+                            'Hub 未接受交付说明，已保留本地收据等待核对，未重新执行。', result)
+                        return
                     # Invalid delivery cannot heal through endless network retries.
                     # Preserve the local execution output and publish an honest blocker once.
                     receipt['artifact_publish_failed']=True

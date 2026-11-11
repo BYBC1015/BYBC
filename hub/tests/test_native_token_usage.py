@@ -40,7 +40,7 @@ def test_replayed_usage_is_not_counted_twice_and_ambiguous_events_stay_unknown()
     same = event(turn_id='known-one')
     assert usage_from_jsonl(same + '\n' + same) == USAGE
     second = event({'input_tokens': 100, 'cached_input_tokens': 0, 'output_tokens': 10}, turn_id='known-two')
-    assert usage_from_jsonl(same + '\n' + second) == {'input_tokens': 1140, 'cached_input_tokens': 800, 'output_tokens': 52}
+    assert usage_from_jsonl(same + '\n' + second) is None
     assert usage_from_jsonl(event() + '\n' + event()) is None
     assert usage_from_jsonl(same + '\n' + event({**USAGE, 'output_tokens': 60}, turn_id='known-one')) is None
 
@@ -112,3 +112,74 @@ def test_timeout_after_actual_project_activity_preserves_cause_and_does_not_repl
     assert 'token_usage' not in receipt
     assert not execute(config, process, chat(tmp_path, 'do-not-repeat')).ok
     assert len(process.calls) == 1
+
+
+class CumulativeProcess(SessionProcess):
+    def __init__(self):
+        super().__init__()
+        self.usage = USAGE
+
+    def run(self, *args, **kwargs):
+        result = super().run(*args, **kwargs)
+        result.stdout = result.stdout.replace(json.dumps({'type': 'turn.completed'}), event(self.usage))
+        return result
+
+
+def test_real_observed_resume_counters_are_differenced_and_receipt_replay_is_stable(tmp_path):
+    config = configuration(tmp_path)
+    process = CumulativeProcess()
+    process.usage = {'input_tokens': 116147, 'cached_input_tokens': 84736, 'output_tokens': 967}
+    first = execute(config, process, chat(tmp_path))
+    assert first.token_usage == process.usage
+    process.usage = {'input_tokens': 272595, 'cached_input_tokens': 233984, 'output_tokens': 2033}
+    second = execute(config, process, chat(tmp_path, 'second'))
+    expected = {'input_tokens': 156448, 'cached_input_tokens': 149248, 'output_tokens': 1066}
+    assert second.ok and second.token_usage == expected
+    assert execute(config, process, chat(tmp_path, 'second')).token_usage == expected
+    assert len(process.calls) == 2
+    binding = json.loads(next((tmp_path/'project-sessions'/'bindings').glob('*.json')).read_text())
+    assert binding['thread_token_usage'] == process.usage
+    # Simulate crash after receipt write but before clearing pending/baseline.
+    binding['pending_run'] = {'run_key': 'second', 'generation': '1'}
+    binding['thread_token_usage'] = first.token_usage
+    next((tmp_path/'project-sessions'/'bindings').glob('*.json')).write_text(json.dumps(binding))
+    process.usage = {key: value + 10 for key, value in process.usage.items()}
+    third = execute(config, process, chat(tmp_path, 'third'))
+    assert third.token_usage == dict.fromkeys(USAGE, 10)
+
+
+def test_old_session_without_cumulative_baseline_is_unknown_then_recovers(tmp_path):
+    config = configuration(tmp_path)
+    process = CumulativeProcess()
+    assert execute(config, process, chat(tmp_path)).ok
+    binding_path = next((tmp_path/'project-sessions'/'bindings').glob('*.json'))
+    binding = json.loads(binding_path.read_text())
+    binding.pop('thread_token_usage')
+    binding_path.write_text(json.dumps(binding))
+    process.usage = {key: value * 2 for key, value in USAGE.items()}
+    assert execute(config, process, chat(tmp_path, 'after-upgrade')).token_usage is None
+    process.usage = {key: value * 3 for key, value in USAGE.items()}
+    assert execute(config, process, chat(tmp_path, 'next')).token_usage == USAGE
+
+
+def test_missing_usage_on_a_failed_turn_invalidates_the_next_baseline(tmp_path):
+    config = configuration(tmp_path)
+    process = CumulativeProcess()
+    execute(config, process, chat(tmp_path))
+    process.fail = True
+    failed = execute(config, process, chat(tmp_path, 'failed'))
+    assert not failed.ok and failed.token_usage is None
+    process.fail = False
+    process.usage = {key: value * 3 for key, value in USAGE.items()}
+    assert execute(config, process, chat(tmp_path, 'recovered')).token_usage is None
+
+
+@pytest.mark.parametrize('counters', [
+    {**USAGE, 'input_tokens': 1},
+    {**USAGE, 'cached_input_tokens': 8000},
+    {**USAGE, 'output_tokens': -1},
+    {'input_tokens': 1100, 'cached_input_tokens': 1000, 'output_tokens': 50},
+])
+def test_impossible_or_regressing_deltas_stay_unknown(counters):
+    from codex_bridge.token_usage import turn_usage_delta
+    assert turn_usage_delta(counters, USAGE) is None

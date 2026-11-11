@@ -13,6 +13,14 @@ def normalize_token_usage(value):
     return {key: value[key] for key in FIELDS}
 
 
+def turn_usage_delta(cumulative, baseline):
+    """CLI exec completion reports thread totals, including earlier resumes."""
+    current, previous = normalize_token_usage(cumulative), normalize_token_usage(baseline)
+    if current is None or previous is None:
+        return None
+    return normalize_token_usage({key: current[key] - previous[key] for key in FIELDS})
+
+
 def usage_from_jsonl(output):
     if isinstance(output, bytes):output = output.decode('utf-8', errors='replace')
     if not isinstance(output, str):return None
@@ -34,4 +42,7 @@ def usage_from_jsonl(output):
         if not isinstance(turn_id, str) or not turn_id or len(turn_id) > 200:return None
         if turn_id in turns and turns[turn_id] != usage:return None
         turns[turn_id] = usage
-    return normalize_token_usage({key: sum(usage[key] for usage in turns.values()) for key in FIELDS})
+    # Different completion events cannot be added: current CLI counters are
+    # cumulative for the thread. Multiple different turns in one invocation
+    # need explicit per-turn evidence; otherwise keep the measurement unknown.
+    return next(iter(turns.values())) if len(turns) == 1 else None

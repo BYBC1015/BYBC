@@ -208,6 +208,9 @@ class ProjectSessionLease:
         self._observed_session = self._turn_completed = self._turn_failed = False
         self._observed_any_event = False
         self._claimed_session: str | None = None
+        from .token_usage import FIELDS, normalize_token_usage
+        self._usage_baseline = (dict.fromkeys(FIELDS, 0) if self.session_id is None else
+                                normalize_token_usage(record.get('thread_token_usage')))
 
     @property
     def session_id(self) -> str | None:
@@ -233,6 +236,10 @@ class ProjectSessionLease:
     def _save(self) -> None:
         self._record["updated_at"] = _now()
         _write(self._path, self._record)
+
+    def turn_usage(self, cumulative):
+        from .token_usage import turn_usage_delta
+        return turn_usage_delta(cumulative, self._usage_baseline)
 
     def _check_open(self) -> None:
         if self._closed:
@@ -279,6 +286,9 @@ class ProjectSessionLease:
                 raise ProjectSessionRecoveryRequired("上次项目执行的结果尚未确认，已停止重复工作；请先核对该轮结果。")
             self._record["pending_run"] = None
             self._record["last_receipt"] = str(self._receipt_path(pending["run_key"], pending.get("generation")))
+            from .token_usage import normalize_token_usage
+            self._record['thread_token_usage'] = normalize_token_usage(receipt.get('thread_token_usage'))
+            self._usage_baseline = self._record['thread_token_usage']
             self._save()
 
     def start(self) -> None:
@@ -346,7 +356,8 @@ class ProjectSessionLease:
 
     def complete(self, *, ok: bool, returncode: int | None, last_message: str = "",
                  error: str | None = None, output_path: str | Path | None = None,
-                 token_usage: dict[str, int] | None = None) -> dict[str, Any]:
+                 token_usage: dict[str, int] | None = None,
+                 thread_token_usage: dict[str, int] | None = None) -> dict[str, Any]:
         self._check_open()
         if not self._started or self._completed:
             raise ProjectSessionError("项目对话尚未启动或已经结束。")
@@ -372,11 +383,16 @@ class ProjectSessionLease:
         from .token_usage import normalize_token_usage
         usage = normalize_token_usage(token_usage)
         if usage is not None:receipt['token_usage'] = usage
+        cumulative = normalize_token_usage(thread_token_usage)
+        receipt['thread_token_usage'] = cumulative
         # Receipt precedes clearing pending: a crash between writes is recovered
         # without submitting the same task twice.
         _write(self.receipt_path, receipt)
         self._record["pending_run"] = None
         self._record["last_receipt"] = str(self.receipt_path)
+        # A missing counter invalidates the baseline; do not fold an unmeasured
+        # failed turn into the next turn's usage after reconnecting.
+        self._record['thread_token_usage'] = cumulative
         self._save()
         self._completed = True
         self.cached_receipt = receipt

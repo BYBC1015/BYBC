@@ -1,6 +1,6 @@
 # BYBC Hub
 
-Source version 2.12.0. Windows/worker 1.2.6, Android 0.2.0 and iOS 0.2.0.
+Source version 2.12.0. Windows/worker 1.2.7, Android 0.2.0 and iOS 0.2.0.
 Durable agents are independent of conversations, devices and models.
 
 ## Native mobile clients
@@ -19,7 +19,7 @@ must not overwrite another account or conversation. Existing browser and Windows
 clients continue to use their workspace.
 
 See [API contract](docs/native-mobile-api.md), [Android](android/README.md),
-[iOS](ios/README.md) and [release notes](deploy/RELEASE-2.12.0.md).
+[iOS](ios/README.md) and [release notes](deploy/BRIDGE-1.2.7.md).
 An unsigned simulator build is not an installable signed iPhone distribution.
 Actual binary publication, installation and device tests are verified separately.
 
