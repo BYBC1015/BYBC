@@ -29,6 +29,7 @@ internal static class WindowsRuntimePrerequisites
     internal sealed class SystemFact
     {
         internal uint WindowsMajor;
+        internal uint WindowsBuild;
         internal ushort NativeArchitecture;
         internal bool ProcessIs64Bit;
         internal List<FileFact> Files = new List<FileFact>();
@@ -90,7 +91,7 @@ internal static class WindowsRuntimePrerequisites
         if (RtlGetVersion(ref version) != 0) throw new IOException("无法读取 Windows 版本，请完成系统更新后重试。");
         SystemInfo info;
         GetNativeSystemInfo(out info);
-        SystemFact facts = new SystemFact { WindowsMajor = version.Major, NativeArchitecture = info.Architecture, ProcessIs64Bit = Environment.Is64BitProcess };
+        SystemFact facts = new SystemFact { WindowsMajor = version.Major, WindowsBuild = version.Build, NativeArchitecture = info.Architecture, ProcessIs64Bit = Environment.Is64BitProcess };
         if (facts.WindowsMajor < 10 || facts.NativeArchitecture != 9 || !facts.ProcessIs64Bit) return facts;
         string directory = Environment.GetFolderPath(Environment.SpecialFolder.System);
         foreach (Requirement requirement in requirements)

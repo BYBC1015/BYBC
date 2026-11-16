@@ -1,5 +1,7 @@
 # BYBC Hub 1.3.0
 
+这是旧 custom 安装器的历史说明，不随当前 MSI 安装包发行。当前用户说明见 [README-MSI.md](README-MSI.md)，默认发布流程见源码仓库的 `deploy/BRIDGE-1.3.0.md`。
+
 本版与 Hub 2.13.0 配套，设置在当前工作区内打开；支持绑定执行电脑的 Ollama、LM Studio 和 OpenAI 兼容模型服务，保留默认 Codex CLI 执行方式。更新任务恢复、完成回执和附件校验；结果不明的外部请求不会自动重放。
 
 本版新增独立桌面工作区：同一窗口使用 Hub 聊天、智能体、附件和成果预览。启动后直接进入工作区；原控制台从系统托盘“连接与设置”打开。桌面窗口使用独立、持久化的网页登录状态，首次登录一次；关闭窗口后，后台工作继续运行，需要完全停止时选择托盘“安全退出”。
@@ -43,7 +45,7 @@ Windows 10/11 x64 统一安装包。Bridge 是主入口，安装后默认随 Win
 
 调色程序也需要 Resolve Studio 21.1 的完整运行环境，换电脑会重新检测安装位置，不依赖原设备盘符。用户配方和历史在 `%APPDATA%/HubColorWorkshop`，LUT 应用时安装在本机 Resolve LUT 目录；升级不覆盖已有 LUT。Windows x64 已实测，macOS／Linux 未适配。
 
-Windows 1.3.0 的默认发布格式是目录运行环境加原生安装启动器。维护者先用 `tools/hub-suite/build_directory_release.py --stage all` 构建三个程序与安装核心，再用 `build_desktop.py --prepare-only` 准备公开组件，最后用 `build_desktop.py --package-prepared --binaries-dir <directory-dist> --installer-core <directory-dist/InstallerCore>` 组合安装包。完整命令和依赖边界见源码仓库的 `deploy/BRIDGE-1.3.0.md`。旧 `onefile` 命令不作为本版发布入口。
+当前 Windows 默认发布入口是 `prepare_msi_payload.py → build_msi_release.py → build_msi_bootstrapper.py`。`build_directory_release.py` 只负责产品目录构建，`build_desktop.py --prepare-only` 只准备公开组件；旧 custom 打包必须明确声明历史选项，不能作为本版默认发布流程。完整命令、修复源缓存和验收边界见源码仓库的 `deploy/BRIDGE-1.3.0.md`。
 
 脚本固定验证视频 1.1.1 与可灵 1.2.1 发布包的 SHA-256；音乐使用 `music-files.json`、调色使用 `color-files.json` 验证公开源码和资源，只复制清单内文件。不会读取已安装软件的用户配置、历史或未列入清单的文件。构建须使用新的独立暂存目录；`prepared-public-files.json` 和 `native-inputs.json` 记录构建输入，`release.json` 与 `SHA256SUMS.txt` 记录交付校验。原生构建前自动生成静态资源路径、查询版本与 SHA-256 清单；不匹配的资源仍走服务器，防止旧桌面覆盖新版网页脚本。
 

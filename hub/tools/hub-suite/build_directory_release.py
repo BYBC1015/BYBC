@@ -135,15 +135,21 @@ def package_native(stage, core, components, release_dir):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stage', choices=('workers', 'desktop', 'core', 'all'), required=True)
+    parser.add_argument('--stage', choices=('workers', 'desktop', 'core', 'all'), required=True,
+        help='all builds the three MSI product programs; historical core requires --legacy-custom-installer')
+    parser.add_argument('--legacy-custom-installer', action='store_true',
+        help='Explicitly include the historical custom InstallerCore; not used by the MSI release')
     parser.add_argument('--stage-root', type=Path, required=True)
     args = parser.parse_args()
+    if args.stage == 'core' and not args.legacy_custom_installer:
+        parser.error('InstallerCore 属于历史自定义安装器；标准 MSI 使用 build_msi_release.py。历史构建需 --legacy-custom-installer。')
     args.stage_root.mkdir(parents=True, exist_ok=True)
     (args.stage_root / 'directory-build').mkdir(exist_ok=True)
     if args.stage in ('workers', 'all'):
         for name in ('CodexBridge', 'HubAgentRuntime'): build_binary(name, args.stage_root)
     if args.stage in ('desktop', 'all'): build_binary('HubDesktop', args.stage_root)
-    if args.stage in ('core', 'all'): build_binary('InstallerCore', args.stage_root)
+    if args.stage == 'core' or (args.stage == 'all' and args.legacy_custom_installer):
+        build_binary('InstallerCore', args.stage_root)
 
 
 if __name__ == '__main__': main()

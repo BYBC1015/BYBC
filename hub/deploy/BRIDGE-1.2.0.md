@@ -1,5 +1,7 @@
 # Desktop and Bridge 1.2.0
 
+Historical release notes only. Current Windows maintenance and packaging use the standard MSI workflow in [BRIDGE-1.3.0.md](BRIDGE-1.3.0.md).
+
 - Static UI responses are served from the installer only when the exact request version and SHA-256 match the bundled manifest. Other versions use the server.
 - Authenticated workspace snapshots retain the real Hub origin. Storage is limited to 20 pages / 10 MB and excludes CSRF values, login pages and session headers.
 - Logout, account changes, late responses and obsolete navigation callbacks cannot reactivate an old account snapshot.

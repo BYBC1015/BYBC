@@ -160,8 +160,12 @@ def main():
     parser.add_argument('--kling-archive', type=Path)
     parser.add_argument('--prepare-only', action='store_true')
     parser.add_argument('--package-prepared', action='store_true')
+    parser.add_argument('--legacy-custom-installer', action='store_true',
+        help='Explicitly opt into the historical custom installer; current releases use prepare_msi_payload.py and build_msi_release.py')
     parser.add_argument('--installer-core', type=Path, help='Use native setup and directory binaries from build_directory_release.py')
     args = parser.parse_args()
+    if not args.prepare_only and not args.legacy_custom_installer:
+        parser.error('标准 MSI 发布：先 --prepare-only，再用 prepare_msi_payload.py、build_msi_release.py 和 build_msi_bootstrapper.py；历史自定义安装器需显式 --legacy-custom-installer。')
     stage_root = args.stage_root.resolve()
     staging_parent = args.staging_parent.resolve()
     if not stage_root.is_relative_to(staging_parent) or stage_root == staging_parent:

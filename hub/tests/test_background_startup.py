@@ -11,7 +11,7 @@ from test_agent_attachments import png
 from test_codex_bridge import allow_test_cli_instance
 
 
-def app_fixture(tmp_path, monkeypatch, *, tray_ready=True, configured=True, background=True):
+def app_fixture(tmp_path, monkeypatch, *, tray_ready=True, configured=True, background=True, auto_start=True):
     events = []
     class Root:
         def __init__(self):
@@ -58,7 +58,7 @@ def app_fixture(tmp_path, monkeypatch, *, tray_ready=True, configured=True, back
     (tmp_path / 'HubDesktop.exe').write_bytes(b'isolated desktop marker')
     config_path = tmp_path / 'config.json'
     config_path.write_text('{}')
-    return gui.BridgeApp(config_path, auto_start=True, background=background), events
+    return gui.BridgeApp(config_path, auto_start=auto_start, background=background), events
 
 
 def test_background_is_hidden_before_tray_and_never_opens_workspace(tmp_path, monkeypatch):
@@ -87,6 +87,14 @@ def test_normal_start_still_opens_the_workspace(tmp_path, monkeypatch):
     assert app.run() == 0
     assert 'withdraw' not in events
     assert 'worker-start' in events and 'desktop-open' in events
+
+
+@pytest.mark.parametrize('configured', [True, False])
+def test_normal_msi_entry_opens_workspace_and_only_configured_durable_service(tmp_path, monkeypatch, configured):
+    app, events = app_fixture(tmp_path, monkeypatch, background=False, auto_start=False, configured=configured)
+    assert app.run() == 0
+    assert 'desktop-open' in events and 'worker-start' not in events
+    assert ('agent-start' in events) == configured
 
 
 def test_cli_routes_background_without_changing_normal_start(monkeypatch):

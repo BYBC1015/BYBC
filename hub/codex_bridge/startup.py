@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -77,8 +78,52 @@ class StartupManager:
                 path.unlink()
 
     def migrate_legacy(self, exe_path: Path, args: list[str] | None = None) -> None:
-        if self.legacy_command_path.exists() and self.legacy_command_path != self.command_path:
-            self.enable(exe_path, args=args)
+        legacy = self.legacy_command_path
+        if legacy == self.command_path or self.command_path.exists() or not legacy.is_file() or legacy.is_symlink():
+            return
+        # An adjacent MSI version must not claim another installation's startup
+        # entry. Only migrate the simple command we generated for this same EXE
+        # and these same arguments; leave customized/ambiguous scripts alone.
+        try:
+            if legacy.stat().st_size > 65536:
+                return
+            body = legacy.read_bytes()
+            content = body.decode('utf-16' if body.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8-sig')
+            lines = [line.strip() for line in content.splitlines() if line.strip()]
+            if lines and lines[0].lower() == '@echo off':
+                lines.pop(0)
+            if len(lines) != 1:
+                return
+            match = re.fullmatch(r'@?start\s+""\s+("[^"\r\n]+"(?:\s+.*)?)', lines[0], re.IGNORECASE)
+            if not match:
+                return
+            command = _windows_arguments(match.group(1))
+            if (not command or not Path(command[0]).is_absolute()
+                    or os.path.normcase(str(Path(command[0]).resolve())) != os.path.normcase(str(exe_path.resolve()))
+                    or command[1:] != list(args or [])):
+                return
+        except (OSError, UnicodeError, ValueError):
+            return
+        self.enable(exe_path, args=args)
+
+
+def _windows_arguments(command: str) -> list[str]:
+    import ctypes
+    from ctypes import wintypes
+    shell = ctypes.WinDLL('shell32', use_last_error=True)
+    shell.CommandLineToArgvW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+    shell.CommandLineToArgvW.restype = ctypes.POINTER(wintypes.LPWSTR)
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.LocalFree.argtypes = [wintypes.HLOCAL]
+    kernel.LocalFree.restype = wintypes.HLOCAL
+    count = ctypes.c_int()
+    values = shell.CommandLineToArgvW(command, ctypes.byref(count))
+    if not values:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        return [values[index] for index in range(count.value)]
+    finally:
+        kernel.LocalFree(values)
 
 
 def windows_startup_dir() -> Path:
