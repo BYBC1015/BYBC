@@ -32,11 +32,21 @@ SCHEMAS = {
     'FeatureComponents': '`Feature_` CHAR(38) NOT NULL, `Component_` CHAR(72) NOT NULL PRIMARY KEY `Feature_`, `Component_`',
     'Media': '`DiskId` SHORT NOT NULL, `LastSequence` SHORT NOT NULL, `DiskPrompt` CHAR(64) LOCALIZABLE, `Cabinet` CHAR(255), `VolumeLabel` CHAR(32), `Source` CHAR(72) PRIMARY KEY `DiskId`',
     'InstallExecuteSequence': '`Action` CHAR(72) NOT NULL, `Condition` CHAR(255), `Sequence` SHORT PRIMARY KEY `Action`',
+    'InstallUISequence': '`Action` CHAR(72) NOT NULL, `Condition` CHAR(255), `Sequence` SHORT PRIMARY KEY `Action`',
+    'Condition': '`Feature_` CHAR(38) NOT NULL, `Level` SHORT NOT NULL, `Condition` CHAR(255) PRIMARY KEY `Feature_`, `Level`',
     'LaunchCondition': '`Condition` CHAR(255) NOT NULL, `Description` CHAR(255) NOT NULL LOCALIZABLE PRIMARY KEY `Condition`',
     'Upgrade': '`UpgradeCode` CHAR(38) NOT NULL, `VersionMin` CHAR(20), `VersionMax` CHAR(20), `Language` CHAR(255), `Attributes` LONG NOT NULL, `Remove` CHAR(255), `ActionProperty` CHAR(72) NOT NULL PRIMARY KEY `UpgradeCode`, `VersionMin`, `VersionMax`, `Language`, `Attributes`',
     'RemoveFile': '`FileKey` CHAR(72) NOT NULL, `Component_` CHAR(72) NOT NULL, `FileName` CHAR(255) LOCALIZABLE, `DirProperty` CHAR(72) NOT NULL, `InstallMode` SHORT NOT NULL PRIMARY KEY `FileKey`',
     'Registry': '`Registry` CHAR(72) NOT NULL, `Root` SHORT NOT NULL, `Key` CHAR(255) NOT NULL LOCALIZABLE, `Name` CHAR(255) LOCALIZABLE, `Value` CHAR(0) LOCALIZABLE, `Component_` CHAR(72) NOT NULL PRIMARY KEY `Registry`',
     'RegLocator': '`Signature_` CHAR(72) NOT NULL, `Root` SHORT NOT NULL, `Key` CHAR(255) NOT NULL, `Name` CHAR(255), `Type` SHORT PRIMARY KEY `Signature_`',
+    # AppSearch requires Signature to exist, even when every search is a raw
+    # registry value. Such searches must NOT have a Signature row: that would
+    # turn them into file searches. Keep the other locator tables explicitly
+    # empty too, so the complete standard search chain has a typed schema.
+    'Signature': '`Signature` CHAR(72) NOT NULL, `FileName` CHAR(255) NOT NULL, `MinVersion` CHAR(20), `MaxVersion` CHAR(20), `MinSize` LONG, `MaxSize` LONG, `MinDate` LONG, `MaxDate` LONG, `Languages` CHAR(255) PRIMARY KEY `Signature`',
+    'CompLocator': '`Signature_` CHAR(72) NOT NULL, `ComponentId` CHAR(38) NOT NULL, `Type` SHORT PRIMARY KEY `Signature_`',
+    'IniLocator': '`Signature_` CHAR(72) NOT NULL, `FileName` CHAR(255) NOT NULL, `Section` CHAR(96) NOT NULL, `Key` CHAR(128) NOT NULL, `Field` SHORT, `Type` SHORT PRIMARY KEY `Signature_`',
+    'DrLocator': '`Signature_` CHAR(72) NOT NULL, `Parent` CHAR(72), `Path` CHAR(255), `Depth` SHORT PRIMARY KEY `Signature_`, `Parent`, `Path`',
     'AppSearch': '`Property` CHAR(72) NOT NULL, `Signature_` CHAR(72) NOT NULL PRIMARY KEY `Property`, `Signature_`',
     'Shortcut': '`Shortcut` CHAR(72) NOT NULL, `Directory_` CHAR(72) NOT NULL, `Name` CHAR(128) NOT NULL LOCALIZABLE, `Component_` CHAR(72) NOT NULL, `Target` CHAR(255) NOT NULL, `Arguments` CHAR(255), `Description` CHAR(255) LOCALIZABLE, `Hotkey` SHORT, `Icon_` CHAR(72), `IconIndex` SHORT, `ShowCmd` SHORT, `WkDir` CHAR(72) PRIMARY KEY `Shortcut`',
 }
@@ -203,6 +213,10 @@ def table_plan(plan):
         ('RegisterUser', 6000), ('RegisterProduct', 6100), ('PublishFeatures', 6300), ('PublishProduct', 6400),
         ('InstallExecute', 6500), ('RemoveExistingProducts', 6550), ('InstallFinalize', 6600)]
     for action, sequence in actions: add('InstallExecuteSequence', action, None, sequence)
+    for action, sequence in [('FindRelatedProducts', 25), ('AppSearch', 50), ('LaunchConditions', 100),
+                             ('CostInitialize', 800), ('FileCost', 900), ('CostFinalize', 1000),
+                             ('ExecuteAction', 1300)]:
+        add('InstallUISequence', action, None, sequence)
     aliases = set()
     for directory, parent, name in rows['Directory']:
         if parent is None or name == '.': continue

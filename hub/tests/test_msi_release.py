@@ -94,6 +94,23 @@ def test_component_guids_are_stable_for_repair_and_distinct_between_versioned_ro
     assert not ({row['component_guid'] for row in first['files']} & {row['component_guid'] for row in newer['files']})
 
 
+def test_standard_search_and_action_dependencies_have_complete_schemas(tmp_path):
+    tables = builder.table_plan(builder.public_plan(payload_at(tmp_path)))
+    # Raw registry searches need the table but no Signature row. Adding dummy
+    # file signatures changes Windows Installer's search semantics.
+    assert tables['Signature'] == []
+    assert tables['CompLocator'] == tables['IniLocator'] == tables['DrLocator'] == []
+    assert tables['Condition'] == []
+    assert all(row[4] == 18 for row in tables['RegLocator'])
+    assert {row[1] for row in tables['AppSearch']} == {row[0] for row in tables['RegLocator']}
+    for sequence in ('InstallExecuteSequence', 'InstallUISequence'):
+        actions = {row[0]: row[2] for row in tables[sequence]}
+        assert actions['FindRelatedProducts'] < actions['AppSearch'] < actions['LaunchConditions']
+        assert actions['LaunchConditions'] < actions['CostInitialize'] < actions['FileCost'] < actions['CostFinalize']
+    assert {'Component', 'Directory', 'Feature', 'FeatureComponents', 'File', 'Media', 'Registry',
+            'RemoveFile', 'Shortcut', 'Upgrade', 'LaunchCondition'}.issubset(tables)
+
+
 def test_colliding_short_names_fail_before_cabinet_construction(tmp_path, monkeypatch):
     plan = builder.public_plan(payload_at(tmp_path))
     monkeypatch.setattr(builder, 'short_long', lambda name, unique: 'SAME|' + name)
@@ -136,6 +153,9 @@ def test_native_database_and_embedded_cabinet_round_trip_without_installing(tmp_
         api = builder.NativeMsi()
         files = api.select(database, 'SELECT * FROM `File`')
         streams = api.select(database, 'SELECT `Name` FROM `_Streams`')
+        # Query the same columns the native AppSearch engine uses. A successful
+        # generic readback alone did not catch the previously missing table.
+        assert api.select(database, 'SELECT `FileName`, `MinVersion`, `MaxVersion`, `MinSize`, `MaxSize`, `MinDate`, `MaxDate`, `Languages` FROM `Signature`') == []
     assert any(row[2].endswith('|源代码构建.zip') for row in files)
     assert ['payload.cab'] in streams
     assert not (tmp_path / 'installed').exists()
