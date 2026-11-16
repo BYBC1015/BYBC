@@ -468,6 +468,8 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
     initialize_execution_schema(connection)
     from .model_policy import initialize_model_policy_schema
     initialize_model_policy_schema(connection)
+    from .model_services import initialize_model_services
+    initialize_model_services(connection)
     from .maintenance import initialize_maintenance_schema
     initialize_maintenance_schema(connection)
     from .work_delivery import initialize_delivery_schema

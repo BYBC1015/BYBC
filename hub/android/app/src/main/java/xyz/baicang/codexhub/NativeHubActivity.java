@@ -11,12 +11,16 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.content.res.ColorStateList;
+import android.animation.ValueAnimator;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.text.Editable;
 import android.text.InputType;
@@ -35,6 +39,9 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.Switch;
+import android.widget.Spinner;
+import android.widget.ArrayAdapter;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -60,11 +67,16 @@ public final class NativeHubActivity extends Activity {
     private final ExecutorService network=Executors.newFixedThreadPool(4), files=Executors.newSingleThreadExecutor();
     private final NativeHubState state=new NativeHubState();
     private final Set<String> reads=new HashSet<>(), sending=new HashSet<>(), checking=new HashSet<>();
+    private final Set<String> mutations=new HashSet<>();
     private NativeHubStore store;
     private SharedAttachmentImporter importer;
     private LinearLayout root, header, navigation, content, feed, fileTray,chatContext;
     private FrameLayout page;
     private ScrollView messagesScroll;
+    private ScrollView pageScroll;
+    private final java.util.Map<String,Integer> scrollPositions=new java.util.HashMap<>();
+    private String renderedRoute="";
+    private boolean reducedMotion=false;
     private TextView connectionLabel, recipientLabel, titleLabel;
     private EditText composer;
     private JSONArray selectedFiles=new JSONArray();
@@ -74,6 +86,7 @@ public final class NativeHubActivity extends Activity {
     private String cookie="",csrf="",username="",connectionText="正在核对连接…",renderedRevision="",fixtureBase="",composerScope="";
     private NativeHubState.Ticket pickerTicket;
     private HubFileDownload.Result pendingSave;
+    private AlertDialog modelDialog;
     private final ArrayList<Uri> incomingShares=new ArrayList<>();
     private final Runnable poll=new Runnable(){public void run(){
         if(!foreground||destroyed)return;
@@ -84,6 +97,7 @@ public final class NativeHubActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         store=new NativeHubStore(this);importer=new SharedAttachmentImporter(this);
+        reducedMotion=store.read("appearance").optBoolean("reduced_motion",false);
         String testBase=getIntent().getStringExtra("native_fixture_base");
         if(BuildConfig.DEBUG&&NativeHubApi.fixtureBase(testBase))fixtureBase=testBase;
         state.endpoint=fixtureBase.isEmpty()?HubEndpoint.current(this):fixtureBase;
@@ -104,8 +118,8 @@ public final class NativeHubActivity extends Activity {
     }
 
     @Override protected void onResume(){super.onResume();foreground=true;HubNotificationService.setAppInForeground(true);main.removeCallbacks(poll);main.postDelayed(poll,1200);}
-    @Override protected void onPause(){foreground=false;HubNotificationService.setAppInForeground(false);main.removeCallbacks(poll);saveComposer();super.onPause();}
-    @Override protected void onDestroy(){destroyed=true;main.removeCallbacksAndMessages(null);network.shutdownNow();files.shutdownNow();store.close();super.onDestroy();}
+    @Override protected void onPause(){foreground=false;HubNotificationService.setAppInForeground(false);main.removeCallbacks(poll);saveComposer();rememberPage();if(!state.userId.isEmpty())store.rememberLocation(state);super.onPause();}
+    @Override protected void onDestroy(){destroyed=true;if(modelDialog!=null)modelDialog.dismiss();main.removeCallbacksAndMessages(null);network.shutdownNow();files.shutdownNow();store.close();super.onDestroy();}
     @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);collectIncoming(intent);}
 
     private void createFrame() {
@@ -129,7 +143,7 @@ public final class NativeHubActivity extends Activity {
             return insets.consumeSystemWindowInsets();
         });
     }
-    private void restoreLocation(){JSONObject saved=store.read("location:"+state.userScope());state.project=saved.optString("project");state.conversation=saved.optLong("conversation");}
+    private void restoreLocation(){JSONObject saved=store.read("location:"+state.userScope());state.project=saved.optString("project");state.conversation=saved.optLong("conversation");state.restoreNavigation(saved.optString("navigation"));}
     private JSONObject cached(String key){JSONObject value=store.cache(state.cacheScope(),key);return value==null?new JSONObject():value;}
     private String workspaceKey(){return "workspace:"+state.project+":"+state.conversation;}
     private JSONObject workspace(){return cached(workspaceKey());}
@@ -145,7 +159,7 @@ public final class NativeHubActivity extends Activity {
         if(reply.body.optInt("api_version")!=1||user.optLong("id")<=0||key.isEmpty())throw new Exception("客户端接口版本暂不兼容");
         cookie=NativeHubCookies.update(cookie,reply.cookies);
         state.identify(state.endpoint,user.optString("id"),key);username=user.optString("username");csrf=reply.body.getString("csrf_token");
-        rememberIdentity();if(state.project.isEmpty())restoreLocation();online=true;connectionText="已连接 · 本地界面";
+        rememberIdentity();if(state.project.isEmpty()&&state.screen==NativeHubState.Screen.CHAT)restoreLocation();online=true;connectionText="已连接 · 本地界面";
         renderShell();warmCache();refreshProjects(true);refreshCurrent(true);
         String pendingKey="pending-link:"+NativeHubState.digest(state.endpoint),link=store.read(pendingKey).optString("url");if(!link.isEmpty()){store.remove(pendingKey);routeIntent(link);}
         if(fixtureBase.isEmpty())try{Intent service=new Intent(this,HubNotificationService.class);if(Build.VERSION.SDK_INT>=26)startForegroundService(service);else startService(service);}catch(RuntimeException ignored){}
@@ -157,7 +171,7 @@ public final class NativeHubActivity extends Activity {
             main.post(()->{if(destroyed||!state.accepts(ticket))return;try{adoptSession(reply);}catch(Exception invalid){status(invalid.getMessage(),false);}});
         }catch(Exception error){main.post(()->{if(destroyed||!state.accepts(ticket))return;if(error instanceof NativeHubApi.ApiError&&((NativeHubApi.ApiError)error).status==401)expireLogin();else status(error.getMessage(),false);});}});
     }
-    private void expireLogin(){if(state.userId.isEmpty()){status("登录后连接你的团队",false);return;}saveComposer();store.put("identity:"+NativeHubState.digest(state.endpoint),obj("migration_disabled",true));state.signOut();csrf="";cookie="";online=false;loginBusy=false;connectionText="登录已过期，草稿和附件仍保留";stopService(new Intent(this,HubNotificationService.class));renderLogin();}
+    private void expireLogin(){if(modelDialog!=null)modelDialog.dismiss();if(state.userId.isEmpty()){status("登录后连接你的团队",false);return;}saveComposer();store.put("identity:"+NativeHubState.digest(state.endpoint),obj("migration_disabled",true));state.signOut();csrf="";cookie="";online=false;loginBusy=false;connectionText="登录已过期，草稿和附件仍保留";stopService(new Intent(this,HubNotificationService.class));renderLogin();}
     private void login(EditText name,EditText password,Button submit) {
         if(loginBusy)return;String user=name.getText().toString().trim(),pass=password.getText().toString();
         if(user.isEmpty()||pass.isEmpty()){toast("填写账号和密码即可连接");return;}
@@ -168,7 +182,7 @@ public final class NativeHubActivity extends Activity {
         }catch(Exception error){main.post(()->{if(destroyed||!state.accepts(ticket))return;loginBusy=false;submit.setEnabled(true);status(error.getMessage(),false);});}});
     }
     private void logout() {
-        saveComposer();NativeHubState.Ticket ticket=state.ticket();String oldCookie=cookie,oldCsrf=csrf;
+        if(modelDialog!=null)modelDialog.dismiss();saveComposer();NativeHubState.Ticket ticket=state.ticket();String oldCookie=cookie,oldCsrf=csrf;
         state.signOut();cookie="";csrf="";username="";online=false;store.remove("identity:"+NativeHubState.digest(state.endpoint));
         stopService(new Intent(this,HubNotificationService.class));((android.app.NotificationManager)getSystemService(NOTIFICATION_SERVICE)).cancelAll();
         // Prevent a later launch from reimporting the old WebView session after native logout.
@@ -194,15 +208,17 @@ public final class NativeHubActivity extends Activity {
         header=column();header.setPadding(dp(18),dp(9),dp(12),dp(9));
         LinearLayout heading=row();ImageView owl=new ImageView(this);owl.setImageResource(xyz.baicang.codexhub.R.drawable.codex_owl_logo);heading.addView(owl,new LinearLayout.LayoutParams(dp(34),dp(34)));
         LinearLayout names=column();titleLabel=text("BYBC Hub",20,TEXT,true);names.addView(titleLabel);connectionLabel=text(connectionText,11,MUTED,false);names.addView(connectionLabel);LinearLayout.LayoutParams nameLayout=new LinearLayout.LayoutParams(0,-2,1);nameLayout.leftMargin=dp(10);heading.addView(names,nameLayout);
-        heading.addView(iconButton("↻","刷新当前内容",()->refreshCurrent(true)));heading.addView(iconButton("⋯","账号与连接",this::accountMenu));header.addView(heading);root.addView(header);
+        heading.addView(iconButton("↻","刷新当前内容",()->refreshCurrent(true)));heading.addView(iconButton("⚙","设置",()->navigate(NativeHubState.Screen.SETTINGS)));header.addView(heading);root.addView(header);
         page=new FrameLayout(this);root.addView(page,new LinearLayout.LayoutParams(-1,0,1));
         navigation=row();navigation.setPadding(dp(7),dp(5),dp(7),dp(7));navigation.setBackgroundColor(PANEL);
         String[] labels={"对话","项目","智能体","任务","工具箱"};NativeHubState.Screen[] screens={NativeHubState.Screen.CHAT,NativeHubState.Screen.PROJECTS,NativeHubState.Screen.AGENTS,NativeHubState.Screen.TASKS,NativeHubState.Screen.TOOLBOX};
         for(int i=0;i<labels.length;i++){final NativeHubState.Screen screen=screens[i];Button item=button(labels[i],()->navigate(screen));item.setTextSize(12);item.setPadding(0,0,0,0);item.setTextColor(state.screen==screen?GOLD:MUTED);item.setBackground(tone(state.screen==screen?CARD:PANEL,16));navigation.addView(item,new LinearLayout.LayoutParams(0,dp(52),1));}
         root.addView(navigation);navigation.setVisibility(keyboardOpen?View.GONE:View.VISIBLE);renderPage();
     }
-    private void navigate(NativeHubState.Screen screen){saveComposer();state.open(screen);renderShell();refreshCurrent(true);}
-    private void openRoom(String slug,long room){saveComposer();state.room(slug,room);store.rememberLocation(state);renderShell();refreshCurrent(true);}
+    private void navigate(NativeHubState.Screen screen){saveComposer();rememberPage();if(!state.open(screen))return;store.rememberLocation(state);renderShell();animatePage();refreshCurrent(true);}
+    private void openRoom(String slug,long room){saveComposer();rememberPage();String before=state.routeKey();state.room(slug,room);store.rememberLocation(state);if(before.equals(state.routeKey()))return;renderShell();animatePage();refreshCurrent(true);}
+    private void rememberPage(){if(pageScroll!=null&&!renderedRoute.isEmpty())scrollPositions.put(renderedRoute,pageScroll.getScrollY());}
+    private void animatePage(){if(page==null)return;page.animate().cancel();page.setAlpha(1f);page.setTranslationY(0f);if(reducedMotion||(Build.VERSION.SDK_INT>=26&&!ValueAnimator.areAnimatorsEnabled()))return;page.setAlpha(.65f);page.setTranslationY(dp(7));page.animate().alpha(1f).translationY(0f).setDuration(160).start();}
     /** No selection means latest; explicit conversation 0 remains a real new draft. */
     private void selectProject(String slug){
         JSONObject location=store.read("room:"+state.userScope()+":"+slug);
@@ -221,14 +237,16 @@ public final class NativeHubActivity extends Activity {
     }
     private boolean pendingNewRoom(String slug){JSONArray jobs=store.jobs(state.userScope());for(int i=0;i<jobs.length();i++){JSONObject job=jobs.optJSONObject(i);if(job!=null&&job.optString("project").equals(slug)&&job.optLong("conversation_id")==0)return true;}return false;}
     private void renderPage() {
-        page.removeAllViews();content=column();content.setPadding(dp(16),dp(10),dp(16),dp(20));
+        rememberPage();pageScroll=null;renderedRoute=state.routeKey();page.removeAllViews();content=column();content.setPadding(dp(16),dp(10),dp(16),dp(20));
         if(state.screen==NativeHubState.Screen.CHAT){renderChat();return;}
-        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.addView(content);page.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
+        ScrollView scroll=new ScrollView(this);pageScroll=scroll;scroll.setFillViewport(true);scroll.addView(content);page.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
         switch(state.screen){
             case PROJECTS:renderProjects();break;case AGENTS:renderAgents();break;case TASKS:renderTasks();break;
             case TOOLBOX:renderToolbox();break;case AGENT:renderAgent();break;case TASK:renderTask();break;case HISTORY:renderHistory();break;
-            case DEVICES:renderDevices();break;case LIBRARY:renderLibrary();break;case DOWNLOADS:renderDownloads();break;default:break;
+            case DEVICES:renderDevices();break;case LIBRARY:renderLibrary();break;case DOWNLOADS:renderDownloads();break;
+            case SETTINGS:renderSettings();break;case MODELS:renderModels();break;default:break;
         }
+        int savedY=scrollPositions.containsKey(renderedRoute)?scrollPositions.get(renderedRoute):0;scroll.post(()->{if(scroll==pageScroll)scroll.scrollTo(0,savedY);});
     }
 
     private void renderChat() {
@@ -266,14 +284,20 @@ public final class NativeHubActivity extends Activity {
             space(feed,18);if(state.project.isEmpty())feed.addView(button("打开项目",()->navigate(NativeHubState.Screen.PROJECTS)));
         }
         for(int i=0;i<messages.length();i++){JSONObject message=messages.optJSONObject(i);if(message!=null)messageCard(feed,message);}
-        JSONArray progress=array(data,"progress");for(int i=0;i<progress.length();i++){JSONObject item=progress.optJSONObject(i);if(item==null)continue;
-            boolean activeContact=item.optBoolean("execution_contact_valid")&&item.optString("execution_state").equals("running");
-            LinearLayout active=card(feed);active.addView(text(item.optString("agent_name","团队")+" · "+(activeContact?"正在处理":"等待核对执行状态"),12,activeContact?GREEN:GOLD,true));
-            String progressText=item.optString("assistant_text");if(progressText.isEmpty())progressText=item.optString("status_text");active.addView(text(progressText,14,TEXT,false));
-            active.addView(text(item.optString("report_age_label",item.optString("run_age_label")),11,MUTED,false));
-        }
+        renderProgress(feed,array(data,"progress"),true);
         JSONArray jobs=store.jobs(state.userScope());for(int i=0;i<jobs.length();i++){JSONObject job=jobs.optJSONObject(i);if(job!=null&&job.optString("project").equals(state.project)&&job.optLong("conversation_id")==state.conversation)jobCard(feed,job);}
         renderedRevision=revision;messagesScroll.post(()->{if(messagesScroll==null)return;if(nearBottom)messagesScroll.fullScroll(View.FOCUS_DOWN);else messagesScroll.scrollTo(0,oldScroll);});
+    }
+    private void renderProgress(LinearLayout parent,JSONArray progress,boolean openDetails){
+        for(int i=0;i<progress.length();i++){JSONObject item=progress.optJSONObject(i);if(item==null)continue;
+            boolean contact=item.optBoolean("execution_contact_valid")&&item.optString("execution_state").equals("running"),quiet=item.optBoolean("progress_quiet");
+            LinearLayout active=card(parent);active.addView(text(item.optString("agent_name","团队")+" · "+NativeProgressDisplay.heading(online,contact,quiet),12,NativeProgressDisplay.freshContact(online,contact,quiet)?GREEN:GOLD,true));
+            String notice=NativeProgressDisplay.notice(online,contact,quiet);if(!notice.isEmpty())active.addView(text(notice,13,GOLD,false));
+            String progressText=item.optString("assistant_text");if(progressText.isEmpty())progressText=item.optString("status_text");if(!progressText.isEmpty())active.addView(text(progressText,14,TEXT,false));
+            boolean reported=item.optBoolean("has_public_report",item.optLong("sequence")>0);
+            active.addView(text(reported?"距最近报告约 "+item.optString("report_age_label"):"距本轮开始约 "+item.optString("run_age_label"),11,MUTED,false));
+            if(openDetails&&item.optLong("task_id")>0)active.addView(button("查看任务与停止操作",()->openTask(item.optLong("task_id"))));
+        }
     }
     private void messageCard(LinearLayout parent,JSONObject message) {
         boolean mine=message.optString("role").equals("user");LinearLayout block=column();block.setPadding(dp(14),dp(12),dp(14),dp(13));
@@ -334,7 +358,7 @@ public final class NativeHubActivity extends Activity {
         for(int i=0;i<agents.length();i++){JSONObject agent=agents.optJSONObject(i);if(agent==null)continue;
             LinearLayout block=card(content),line=row();TextView avatar=text("• •",24,BG,true);avatar.setGravity(Gravity.CENTER);avatar.setBackground(tone(colors[i%colors.length],26));line.addView(avatar,new LinearLayout.LayoutParams(dp(52),dp(52)));
             LinearLayout info=column();info.setPadding(dp(12),0,0,0);info.addView(text(agent.optString("name"),18,TEXT,true));info.addView(text(agent.optString("connection_label","状态待核对"),12,MUTED,false));line.addView(info,new LinearLayout.LayoutParams(0,-2,1));block.addView(line);
-            block.addView(text(agent.optString("job",""),14,MUTED,false));block.addView(button("了解职责",()->{saveComposer();state.detailId=agent.optLong("id");state.open(NativeHubState.Screen.AGENT);renderShell();}));
+            block.addView(text(agent.optString("job",""),14,MUTED,false));block.addView(button("了解职责",()->{saveComposer();rememberPage();if(state.detail(NativeHubState.Screen.AGENT,agent.optLong("id"))){store.rememberLocation(state);renderShell();animatePage();}}));
         }
     }
     private void renderAgent() {
@@ -360,17 +384,41 @@ public final class NativeHubActivity extends Activity {
         block.addView(text(task.optString("title"),18,TEXT,true));String summary=task.optString("result_summary");if(!summary.isEmpty())block.addView(text(summary,14,MUTED,false));
         block.addView(button("查看详情  ↗",()->openTask(task.optLong("id"))));
     }
-    private void openTask(long id){saveComposer();state.detailId=id;state.open(NativeHubState.Screen.TASK);renderShell();refreshCurrent(true);}
+    private void openTask(long id){if(id<=0)return;saveComposer();rememberPage();if(!state.detail(NativeHubState.Screen.TASK,id))return;store.rememberLocation(state);renderShell();animatePage();refreshCurrent(true);}
     private void renderTask() {
         JSONObject data=cached("task:"+state.project+":"+state.detailId),task=data.optJSONObject("task");
         if(task==null){section("任务详情","本地页面");empty("正在读取这项任务","网络暂不可用时，你仍可返回其他本机页面。");return;}
         section(task.optString("title"),task.optString("status_label",task.optString("status")));
-        LinearLayout block=card(content);block.addView(text(task.optString("assigned_agent_name","总控")+"  ·  "+task.optString("execution_label",""),12,GOLD,true));
+        String execution=task.isNull("execution_label")?"":task.optString("execution_label");
+        LinearLayout block=card(content);block.addView(text(task.optString("assigned_agent_name","总控")+(execution.isEmpty()?"":"  ·  "+execution),12,GOLD,true));
         block.addView(text(task.optString("description"),15,TEXT,false));if(!task.optString("result_summary").isEmpty())block.addView(text(task.optString("result_summary"),15,GREEN,false));
+        String cancelKey="cancel:"+state.userScope()+":"+state.project+":"+state.detailId;JSONObject pendingCancel=store.read(cancelKey);
+        if(!task.optBoolean("cancel_requested")&&java.util.Arrays.asList("done","review","cancelled").contains(task.optString("status"))){store.remove(cancelKey);pendingCancel=obj();}
+        if(task.optBoolean("cancel_requested"))block.addView(text(task.optString("cancel_message","停止请求已送达，等待执行电脑确认"),13,GOLD,false));
+        else if(!pendingCancel.optString("state").isEmpty())block.addView(text(pendingCancel.optString("message","停止状态待核对，请刷新任务详情"),13,GOLD,false));
+        if(task.optBoolean("can_cancel")&&!task.optBoolean("cancel_requested")){
+            Button stop=button("请求停止任务",()->new AlertDialog.Builder(this).setTitle("请求停止这项任务？").setMessage("请求发送后会等待执行电脑确认；连接中断时可以继续查看任务状态。").setPositiveButton("请求停止",(d,w)->cancelTask(task.optLong("id"))).setNegativeButton("继续任务",null).show());
+            stop.setEnabled(!mutations.contains(projectPath()+"/tasks/"+task.optLong("id")+"/cancel"));block.addView(stop);
+        }
+        renderProgress(content,array(data,"progress"),false);
         JSONArray messages=array(data,"messages");for(int i=0;i<messages.length();i++){JSONObject item=messages.optJSONObject(i);if(item!=null)messageCard(content,item);}
+    }
+    private void cancelTask(long id){
+        if(id<=0)return;NativeHubState.Ticket ticket=state.ticket();String path=projectPath()+"/tasks/"+id+"/cancel";
+        if(!mutations.add(path))return;String auth=cookie,token=csrf,key="cancel:"+ticket.userScope()+":"+ticket.project+":"+id;
+        store.put(key,obj("state","pending","message","正在发送停止请求，执行状态尚未确认"));renderPage();
+        network.execute(()->{try{NativeHubApi.Reply reply=NativeHubApi.json(ticket.endpoint,path,"POST",obj(),auth,token);main.post(()->{
+            mutations.remove(path);if(destroyed||!state.accepts(ticket))return;
+            if(reply.body.optBoolean("stopped"))store.remove(key);else store.put(key,obj("state","requested","message",reply.body.optString("message","停止请求已送达，等待执行电脑确认")));
+            JSONObject returned=reply.body.optJSONObject("task");if(returned!=null){String cacheKey="task:"+ticket.project+":"+id;JSONObject latest=copy(cached(cacheKey));try{latest.put("task",returned);}catch(JSONException ignored){}store.cache(ticket.cacheScope(),cacheKey,latest);}
+            if(state.displays(ticket)){renderPage();refreshCurrent(true);}
+        });}catch(Exception error){main.post(()->{mutations.remove(path);if(destroyed||!state.accepts(ticket))return;if(error instanceof NativeHubApi.ApiError&&((NativeHubApi.ApiError)error).status>=400&&((NativeHubApi.ApiError)error).status<500)store.remove(key);else store.put(key,obj("state","uncertain","message","停止状态待核对；请刷新详情，尚未确认执行已停止"));
+            if(error instanceof NativeHubApi.ApiError&&((NativeHubApi.ApiError)error).status==401)expireLogin();else if(state.displays(ticket)){renderPage();toast(error instanceof NativeHubApi.ApiError?error.getMessage():"连接中断，停止状态待核对");}
+        });}});
     }
     private void renderToolbox() {
         section("工具箱","项目资料、在线设备与反馈，都有独立的本地入口。");
+        content.addView(button("设置与模型服务",()->navigate(NativeHubState.Screen.SETTINGS)));
         JSONArray tools=array(cached("toolbox"),"tools");
         if(tools.length()==0)tools=new JSONArray().put(obj("title","资料库","description","图片、文档和团队交付","action","library"))
                 .put(obj("title","设备","description","查看 BYBC 执行设备的实时状态","action","devices"))
@@ -392,7 +440,7 @@ public final class NativeHubActivity extends Activity {
         if(devices.length()==0)empty("暂无本机设备记录","联网后将核对设备状态。");
         for(int i=0;i<devices.length();i++){JSONObject item=devices.optJSONObject(i);if(item==null)continue;LinearLayout card=card(content);
             card.addView(text(item.optString("device_label",item.optString("device_id")),19,TEXT,true));
-            card.addView(text(item.optString("presence_label","状态待核对"),14,item.optBoolean("is_online")?GREEN:MUTED,false));
+            card.addView(text(online?item.optString("presence_label","状态待核对"):"本机记录 · 连接状态待核对",14,online&&item.optBoolean("is_online")?GREEN:MUTED,false));
             card.addView(text("最近连接 "+time(item.optString("last_seen_at")),12,MUTED,false));
         }
     }
@@ -433,6 +481,7 @@ public final class NativeHubActivity extends Activity {
             main.post(()->{reads.remove(marker);if(destroyed||!state.accepts(ticket))return;
                 String identity=reply.body.optString("session_key");if(!identity.isEmpty()&&!identity.equals(state.sessionKey)){expireLogin();return;}
                 cookie=NativeHubCookies.update(cookie,reply.cookies);if(!reply.body.optString("csrf_token").isEmpty()){csrf=reply.body.optString("csrf_token");rememberIdentity();}
+                if(key.startsWith("models:")){JSONArray providers=array(reply.body,"services");for(int i=0;i<providers.length();i++){JSONObject provider=providers.optJSONObject(i);if(provider!=null){provider.remove("api_key");provider.remove("apiKey");provider.remove("password");provider.remove("token");}}}
                 if(key.startsWith("workspace:")){
                     JSONObject prior=store.cache(ticket.cacheScope(),key);
                     if(prior!=null&&prior.optBoolean("history_expanded"))try{
@@ -447,7 +496,7 @@ public final class NativeHubActivity extends Activity {
     private void refreshProjects(boolean choose) {
         fetch("projects","api/mobile/projects",data->{
             JSONArray projects=array(data,"projects");
-            if(choose&&state.project.isEmpty()&&projects.length()>0){selectProject(projects.optJSONObject(0).optString("slug"));}
+            if(choose&&state.project.isEmpty()&&state.screen==NativeHubState.Screen.CHAT&&projects.length()>0){selectProject(projects.optJSONObject(0).optString("slug"));}
             else if(state.screen==NativeHubState.Screen.PROJECTS)renderPage();
         });
     }
@@ -461,6 +510,8 @@ public final class NativeHubActivity extends Activity {
             case LIBRARY:if(!state.project.isEmpty()&&manual)fetch("library:"+state.project,projectPath()+"/library",data->renderPage());return;
             case TASK:if(!state.project.isEmpty())fetch("task:"+state.project+":"+state.detailId,projectPath()+"/tasks/"+state.detailId,data->renderPage());return;
             case HISTORY:if(!state.project.isEmpty())fetch("history:"+state.project,projectPath()+"/tasks?history=1",data->renderPage());return;
+            case SETTINGS:return;
+            case MODELS:refreshModels(manual);return;
             default:break;
         }
         if(state.project.isEmpty()){if(manual)refreshProjects(true);return;}
@@ -553,7 +604,7 @@ public final class NativeHubActivity extends Activity {
         if(state.project.equals(job.optString("project"))&&state.conversation==job.optLong("conversation_id")){
             if(state.conversation==0&&(state.displays(ticket)||state.screen!=NativeHubState.Screen.CHAT)){
                 boolean stillReading=state.displays(ticket)&&state.screen==NativeHubState.Screen.CHAT;
-                saveComposer();String oldScope=state.roomScope();JSONObject follow=store.draft(oldScope);state.conversation=room;state.navigation++;store.rememberLocation(state);
+                saveComposer();String oldScope=state.roomScope();JSONObject follow=store.draft(oldScope);state.resolveConversation(state.project,state.conversation,room);store.rememberLocation(state);
                 store.draft(state.roomScope(),follow.optString("text"),array(follow,"files"),follow.optLong("agent",selectedAgent));
                 store.draft(oldScope,"",new JSONArray(),follow.optLong("agent",selectedAgent));
                 if(stillReading){composer=null;renderShell();}
@@ -611,6 +662,11 @@ public final class NativeHubActivity extends Activity {
     private void routeIntent(String url){
         if(!NativeHubApi.internal(state.endpoint,url))return;
         String relative=URI.create(url).getPath().substring(URI.create(state.endpoint).getPath().length());String[] parts=relative.split("/");
+        if(relative.matches("settings/?")||relative.matches("settings/models/?")){
+            if(state.userId.isEmpty())store.put("pending-link:"+NativeHubState.digest(state.endpoint),obj("url",url));
+            else navigate(relative.contains("models")?NativeHubState.Screen.MODELS:NativeHubState.Screen.SETTINGS);
+            return;
+        }
         if(parts.length>=2&&parts[0].equals("projects")){
             if(state.userId.isEmpty()){store.put("pending-link:"+NativeHubState.digest(state.endpoint),obj("url",url));return;}
             String slug=Uri.decode(parts[1]);long prior=store.read("room:"+state.userScope()+":"+slug).optLong("conversation");
@@ -678,31 +734,143 @@ public final class NativeHubActivity extends Activity {
             if(!store.putDurable(scope,payload)){toast("本机暂时无法保存，请稍后重试");return;}title.setEnabled(false);details.setEnabled(false);String auth=cookie,token=csrf;dialog.getButton(-1).setEnabled(false);
             network.execute(()->{try{NativeHubApi.json(ticket.endpoint,"api/mobile/projects/"+Uri.encode(ticket.project)+"/feedback","POST",payload,auth,token);main.post(()->{if(destroyed||!state.accepts(ticket))return;store.remove(scope);dialog.dismiss();toast("已记录，工程师会结合设备和日志处理");});}
                 catch(Exception error){main.post(()->{if(destroyed||!state.accepts(ticket))return;dialog.getButton(-1).setEnabled(true);toast("暂未提交成功，反馈内容已保存");});}});
-        }));dialog.show();
+        }));showDialog(dialog);
     }
-    private void accountMenu(){
-        new AlertDialog.Builder(this).setTitle(username.isEmpty()?"当前账号":username).setItems(new String[]{"连接地址","收到的分享附件","退出登录"},(d,index)->{if(index==0)serverSettings();else if(index==1){if(array(store.read("share-inbox"),"files").length()==0)toast("暂无待添加的附件");else offerIncoming();}else logout();}).show();
+    private void renderSettings(){
+        section("设置","账号、连接和体验偏好，直接保存在本机界面。");
+        LinearLayout account=card(content);account.addView(text(username.isEmpty()?"当前账号":username,20,TEXT,true));
+        account.addView(text("Android "+BuildConfig.VERSION_NAME,12,MUTED,false));
+        LinearLayout connection=card(content);connection.addView(text("Hub 连接",18,TEXT,true));connection.addView(text(state.endpoint,13,MUTED,false));
+        connection.addView(text(connectionText,13,online?GREEN:MUTED,false));
+        connection.addView(button("重新核对连接",this::refreshSession));connection.addView(button("修改连接地址",this::serverSettings));
+        LinearLayout experience=card(content);experience.addView(text("界面体验",18,TEXT,true));Switch motion=new Switch(this);motion.setText("减少动态效果");motion.setTextColor(TEXT);motion.setTextSize(16);motion.setMinHeight(dp(48));motion.setChecked(reducedMotion);
+        motion.setOnCheckedChangeListener((view,enabled)->{reducedMotion=enabled;store.put("appearance",obj("reduced_motion",enabled));if(enabled&&page!=null){page.animate().cancel();page.setAlpha(1f);page.setTranslationY(0f);}});experience.addView(motion);
+        experience.addView(text("页面切换与按下反馈在手机本地完成；同时遵循系统动画设置。",13,MUTED,false));
+        content.addView(button("模型与 API 服务",()->navigate(NativeHubState.Screen.MODELS)));
+        content.addView(button("收到的分享附件",()->{if(array(store.read("share-inbox"),"files").length()==0)toast("暂无待添加的附件");else offerIncoming();}));
+        content.addView(button("退出登录",()->new AlertDialog.Builder(this).setTitle("退出当前账号？").setMessage("本机未发送的草稿和附件会保留，重新登录同一账号后可继续。").setPositiveButton("退出登录",(d,w)->logout()).setNegativeButton("留在这里",null).show()));
+    }
+    private String modelsPath(){return "api/projects/"+Uri.encode(state.project)+"/model-services";}
+    private void refreshModels(boolean manual){if(!state.project.isEmpty())fetch("models:"+state.project,modelsPath(),data->renderPage());}
+    private void renderModels(){
+        section("模型与 API 服务","连接执行电脑上的本地模型，或兼容 OpenAI 的 API。");
+        if(state.project.isEmpty()){empty("先选择项目","模型配置属于当前项目，保存后由所选电脑使用。");content.addView(button("选择项目",()->navigate(NativeHubState.Screen.PROJECTS)));return;}
+        JSONObject data=cached("models:"+state.project);boolean canManage=data.optBoolean("can_manage");
+        LinearLayout info=card(content);info.addView(text("当前项目 · "+state.project,16,TEXT,true));info.addView(text("本地地址由执行电脑访问。127.0.0.1 指该电脑；手机负责配置与查看。",13,MUTED,false));
+        info.addView(text(online?"配置保存后，点测试连接核对服务与模型。":"当前显示本机记录，连接状态待核对。",13,MUTED,false));
+        if(canManage)info.addView(button("给智能体分配模型",this::choosePolicyAgent));
+        JSONArray services=array(data,"services");if(services.length()==0)empty("尚无模型服务记录",data.has("can_manage")?"可接入 Ollama、LM Studio 或兼容 API。":"联网后核对项目权限与已保存的服务。");
+        for(int i=0;i<services.length();i++){
+            JSONObject service=services.optJSONObject(i);if(service==null)continue;LinearLayout block=card(content);
+            block.addView(text(service.optString("name","模型服务"),19,TEXT,true));block.addView(text(service.optString("kind")+" · "+service.optString("model","未选择模型"),13,GOLD,false));
+            block.addView(text(service.optString("base_url"),12,MUTED,false));block.addView(text("执行电脑 · "+service.optString("device_id"),12,MUTED,false));
+            block.addView(text(online?service.optString("status_message",service.optString("status","尚未测试")):"离线记录 · 服务状态待核对",13,MUTED,false));
+            block.addView(text(service.optBoolean("has_api_key")?"API 密钥已设置":"未设置 API 密钥",12,MUTED,false));
+            JSONArray models=array(service,"models");if(models.length()>0){ArrayList<String> names=new ArrayList<>();for(int j=0;j<Math.min(models.length(),12);j++){Object value=models.opt(j);names.add(value instanceof JSONObject?((JSONObject)value).optString("id"):String.valueOf(value));}block.addView(text("可用模型 · "+android.text.TextUtils.join("、",names),12,MUTED,false));}
+            if(canManage){
+                Button test=button("测试连接",()->modelMutation("POST","/"+service.optLong("id")+"/test",obj(),null));test.setEnabled(!mutations.contains(modelsPath()+"/"+service.optLong("id")+"/test"));block.addView(test);
+                block.addView(button("编辑服务",()->editModel(service,data)));
+                block.addView(button("移除服务",()->new AlertDialog.Builder(this).setTitle("移除模型服务？").setMessage(service.optString("name")+" 将不再出现在这个项目的配置中。").setPositiveButton("移除",(d,w)->modelMutation("DELETE","/"+service.optLong("id"),null,null)).setNegativeButton("取消",null).show()));
+            }
+        }
+        if(canManage)content.addView(button("添加模型服务",()->editModel(new JSONObject(),data)));
+        else if(data.has("can_manage"))content.addView(text("仅项目所有者可以修改模型服务。",13,MUTED,false));
+        content.addView(button("刷新服务状态",()->refreshModels(true)));
+    }
+    private Spinner choice(String[] labels,int selected){Spinner view=new Spinner(this);ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,labels);view.setAdapter(adapter);view.setSelection(Math.max(0,selected));view.setMinimumHeight(dp(48));return view;}
+    private ScrollView dialogScroll(LinearLayout form){
+        ScrollView scroll=new ScrollView(this){@Override protected void onMeasure(int width,int height){
+            android.graphics.Rect available=new android.graphics.Rect();root.getWindowVisibleDisplayFrame(available);
+            int limit=Math.max(dp(120),available.height()-dp(192));
+            super.onMeasure(width,View.MeasureSpec.makeMeasureSpec(Math.min(View.MeasureSpec.getSize(height),limit),View.MeasureSpec.AT_MOST));
+        }};scroll.addView(form);return scroll;
+    }
+    private void showDialog(AlertDialog dialog){
+        dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        if(Build.VERSION.SDK_INT>=30)dialog.getWindow().setDecorFitsSystemWindows(true);
+        dialog.show();
+    }
+    private void choosePolicyAgent(){
+        fetch("settings:"+state.project,"api/projects/"+Uri.encode(state.project)+"/settings",data->{
+            JSONArray agents=array(data,"agents");if(agents.length()==0){toast("当前项目还没有可设置的智能体");return;}String[] labels=new String[agents.length()];
+            for(int i=0;i<labels.length;i++)labels[i]=agents.optJSONObject(i).optString("name","智能体");
+            new AlertDialog.Builder(this).setTitle("选择智能体").setItems(labels,(d,index)->{
+                JSONObject agent=agents.optJSONObject(index);String path="api/projects/"+Uri.encode(state.project)+"/settings/agents/"+agent.optLong("id")+"/model-policy";
+                fetch("policy:"+state.project+":"+agent.optLong("id"),path,policy->editModelPolicy(agent,policy,path));
+            }).setNegativeButton("取消",null).show();
+        });
+    }
+    private void editModelPolicy(JSONObject agent,JSONObject data,String path){
+        NativeHubState.Ticket ticket=state.ticket();JSONArray models=array(data,"models");JSONObject policy=data.optJSONObject("policy");if(policy==null)policy=obj();
+        String[] labels=new String[models.length()+1];labels[0]="由总控分配（默认）";int selected=0;
+        for(int i=0;i<models.length();i++){JSONObject model=models.optJSONObject(i);labels[i+1]=model.optString("displayName",model.optString("model"));if(policy.optString("mode").equals("manual")&&model.optString("model").equals(policy.optString("model")))selected=i+1;}
+        LinearLayout form=column();form.setPadding(dp(20),dp(8),dp(20),dp(16));form.addView(text("设置只影响之后的新任务，已开始的任务继续使用原模型。",13,MUTED,false));
+        if(models.length()==0)form.addView(text("执行电脑尚未上报可用模型。请更新并连接电脑端，再核对服务。",13,GOLD,false));
+        Spinner modelChoice=choice(labels,selected),effortChoice=choice(new String[]{"默认"},0);form.addView(modelChoice);form.addView(text("思考档位",13,GOLD,true));form.addView(effortChoice);
+        ArrayList<String> efforts=new ArrayList<>();String currentEffort=policy.optString("reasoning_effort");
+        modelChoice.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> parent){}public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id){
+            efforts.clear();ArrayList<String> names=new ArrayList<>();JSONArray rows=position>0?array(models.optJSONObject(position-1),"supportedReasoningEfforts"):new JSONArray();int selection=0;
+            for(int i=0;i<rows.length();i++){JSONObject row=rows.optJSONObject(i);String effort=row.optString("reasoningEffort");efforts.add(effort);names.add(effort.equals("none")?"无额外思考档位":effort);if(effort.equals(currentEffort))selection=i;}
+            if(names.isEmpty()){efforts.add("");names.add("默认");}effortChoice.setAdapter(new ArrayAdapter<>(NativeHubActivity.this,android.R.layout.simple_spinner_dropdown_item,names));effortChoice.setSelection(selection);
+        }});
+        ScrollView scroll=dialogScroll(form);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(agent.optString("name","智能体")+" · 执行模型").setView(scroll).setPositiveButton("保存分配",null).setNegativeButton("取消",null).create();
+        dialog.setOnShowListener(d->dialog.getButton(-1).setOnClickListener(v->{
+            if(!state.displays(ticket)){dialog.dismiss();return;}int index=modelChoice.getSelectedItemPosition();JSONObject payload=obj("mode",index==0?"controller":"manual","model",index==0?"":models.optJSONObject(index-1).optString("model"),"reasoning_effort",index==0?"":efforts.get(effortChoice.getSelectedItemPosition()),"reason","用户在 Android 设置中指定");
+            if(!mutations.add(path))return;dialog.getButton(-1).setEnabled(false);String auth=cookie,token=csrf;
+            network.execute(()->{try{NativeHubApi.json(ticket.endpoint,path,"POST",payload,auth,token);main.post(()->{mutations.remove(path);if(destroyed||!state.accepts(ticket))return;dialog.dismiss();toast("模型分配已保存，将用于这位智能体的新任务");});}
+                catch(Exception error){main.post(()->{mutations.remove(path);if(destroyed||!state.accepts(ticket))return;dialog.getButton(-1).setEnabled(true);toast(error instanceof NativeHubApi.ApiError?error.getMessage():"连接中断，分配结果待核对；重新打开此设置可查看");});}});
+        }));showDialog(dialog);
+    }
+    private void editModel(JSONObject existing,JSONObject data){
+        JSONArray devices=array(data,"devices");if(devices.length()==0){toast("先连接一台执行电脑，再添加模型服务");return;}
+        NativeHubState.Ticket ticket=state.ticket();LinearLayout form=column();form.setPadding(dp(20),dp(8),dp(20),dp(16));ScrollView scroll=dialogScroll(form);
+        EditText name=input("服务名称",false),base=input("服务地址",false),model=input("模型名称，例如 qwen3:8b",false),secret=input("API 密钥（留空保留已有密钥）",false);
+        secret.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);secret.setSaveEnabled(false);if(Build.VERSION.SDK_INT>=26)secret.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        name.setText(existing.optString("name"));base.setText(existing.optString("base_url","http://127.0.0.1:11434/v1"));model.setText(existing.optString("model"));
+        String[] kinds={"ollama","lmstudio","openai_compatible"},kindNames={"Ollama（本地）","LM Studio（本地）","兼容 OpenAI 的 API"};int selectedKind=0;for(int i=0;i<kinds.length;i++)if(kinds[i].equals(existing.optString("kind")))selectedKind=i;
+        Spinner kind=choice(kindNames,selectedKind);String[] deviceNames=new String[devices.length()];int deviceSelection=0;
+        for(int i=0;i<devices.length();i++){JSONObject device=devices.optJSONObject(i);deviceNames[i]=device.optString("device_label",device.optString("device_id"))+(device.optBoolean("is_agent_online")?" · 在线":" · 离线");if(device.optString("device_id").equals(existing.optString("device_id")))deviceSelection=i;}
+        Spinner device=choice(deviceNames,deviceSelection);Switch enabled=new Switch(this);enabled.setText("启用此服务");enabled.setTextColor(TEXT);enabled.setChecked(existing.optBoolean("enabled",true));
+        Switch clear=new Switch(this);clear.setText("清除已保存的 API 密钥");clear.setTextColor(TEXT);
+        Switch images=new Switch(this),toolSupport=new Switch(this);images.setText("服务支持图片输入");images.setTextColor(TEXT);images.setChecked(existing.optBoolean("supports_images"));toolSupport.setText("服务支持工具调用");toolSupport.setTextColor(TEXT);toolSupport.setChecked(existing.optBoolean("supports_tools"));
+        for(Switch control:new Switch[]{enabled,clear,images,toolSupport})control.setMinHeight(dp(48));
+        form.addView(text("服务类型",13,GOLD,true));form.addView(kind);form.addView(name);space(form,8);form.addView(base);form.addView(text("本地地址由下方执行电脑访问；远程 API 请填写 HTTPS 地址。",12,MUTED,false));form.addView(model);space(form,8);form.addView(secret);if(existing.optBoolean("has_api_key"))form.addView(clear);form.addView(text("执行电脑",13,GOLD,true));form.addView(device);form.addView(enabled);form.addView(images);form.addView(toolSupport);form.addView(text("仅在所选模型确实支持时开启对应能力。",12,MUTED,false));
+        kind.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> parent){}public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id){String current=base.getText().toString();if(current.equals("http://127.0.0.1:11434/v1")||current.equals("http://127.0.0.1:1234/v1")){base.setText(position==0?"http://127.0.0.1:11434/v1":position==1?"http://127.0.0.1:1234/v1":"https://api.example.com/v1");}}});
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(existing.optLong("id")>0?"编辑模型服务":"添加模型服务").setView(scroll).setPositiveButton("保存",null).setNegativeButton("取消",null).create();
+        modelDialog=dialog;dialog.setOnDismissListener(d->{secret.setText("");if(modelDialog==dialog)modelDialog=null;});dialog.setOnShowListener(d->dialog.getButton(-1).setOnClickListener(v->{
+            if(!state.accepts(ticket)||!state.project.equals(ticket.project)){dialog.dismiss();return;}
+            String label=name.getText().toString().trim(),url=base.getText().toString().trim(),modelName=model.getText().toString().trim();if(label.isEmpty()||url.isEmpty()||modelName.isEmpty()){toast("填写服务名称、地址和模型名称");return;}
+            JSONObject payload=obj("name",label,"kind",kinds[kind.getSelectedItemPosition()],"base_url",url,"model",modelName,"device_id",devices.optJSONObject(device.getSelectedItemPosition()).optString("device_id"),"enabled",enabled.isChecked(),"supports_images",images.isChecked(),"supports_tools",toolSupport.isChecked());
+            try{if(!secret.getText().toString().isEmpty())payload.put("api_key",secret.getText().toString());if(clear.isChecked())payload.put("clear_api_key",true);}catch(JSONException ignored){}
+            dialog.getButton(-1).setEnabled(false);modelMutation(existing.optLong("id")>0?"PUT":"POST",existing.optLong("id")>0?"/"+existing.optLong("id"):"",payload,dialog);
+        }));showDialog(dialog);
+    }
+    private void modelMutation(String method,String suffix,JSONObject payload,AlertDialog dialog){
+        NativeHubState.Ticket ticket=state.ticket();String path=modelsPath()+suffix;if(!mutations.add(path))return;String auth=cookie,token=csrf;
+        network.execute(()->{try{NativeHubApi.Reply reply=NativeHubApi.json(ticket.endpoint,path,method,payload,auth,token);main.post(()->{
+            mutations.remove(path);if(destroyed||!state.accepts(ticket))return;if(dialog!=null)dialog.dismiss();toast(reply.body.optString("message",suffix.endsWith("/test")?"测试已交给执行电脑，请刷新查看结果":"模型配置已保存"));if(state.displays(ticket))refreshModels(true);
+        });}catch(Exception error){main.post(()->{mutations.remove(path);if(destroyed||!state.accepts(ticket))return;if(dialog!=null)dialog.getButton(-1).setEnabled(true);if(error instanceof NativeHubApi.ApiError&&((NativeHubApi.ApiError)error).status==401)expireLogin();else toast(error instanceof NativeHubApi.ApiError?error.getMessage():"连接中断，保存结果待核对；请刷新服务列表后再操作");});}});
     }
     private void serverSettings(){
         EditText endpoint=input("https://…/hub/",false);endpoint.setText(state.endpoint);
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Hub 连接地址").setView(endpoint).setPositiveButton("保存",null).setNegativeButton("取消",null).create();
+        LinearLayout form=column();form.setPadding(dp(20),dp(8),dp(20),dp(16));form.addView(text("填写完整的 Hub HTTPS 地址。",13,MUTED,false));form.addView(endpoint);ScrollView scroll=dialogScroll(form);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Hub 连接地址").setView(scroll).setPositiveButton("保存",null).setNegativeButton("取消",null).create();
         dialog.setOnShowListener(d->dialog.getButton(-1).setOnClickListener(v->{String value=HubEndpoint.normalize(endpoint.getText().toString());if(value==null){endpoint.setError("填写完整的 HTTPS 地址");return;}
             saveComposer();HubEndpoint.save(this,value);fixtureBase="";state.identify(value,"","");cookie="";csrf="";username="";dialog.dismiss();renderLogin();refreshSession();
-        }));dialog.show();
+        }));showDialog(dialog);
     }
     @Override public void onBackPressed(){
         if(keyboardOpen){((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(root.getWindowToken(),0);return;}
-        switch(state.screen){case AGENT:navigate(NativeHubState.Screen.AGENTS);return;case TASK:case HISTORY:navigate(NativeHubState.Screen.TASKS);return;
-            case DEVICES:case LIBRARY:case DOWNLOADS:navigate(NativeHubState.Screen.TOOLBOX);return;default:break;}
-        if(!state.userId.isEmpty()&&state.screen!=NativeHubState.Screen.CHAT){navigate(NativeHubState.Screen.CHAT);return;}saveComposer();super.onBackPressed();
+        saveComposer();rememberPage();if(!state.userId.isEmpty()&&state.back()){store.rememberLocation(state);renderShell();animatePage();refreshCurrent(true);return;}super.onBackPressed();
     }
-    private void status(String message,boolean connected){online=connected;connectionText=message==null?"连接暂未完成":message;if(connectionLabel!=null)connectionLabel.setText(connectionText);}
+    private void status(String message,boolean connected){boolean changed=online!=connected;online=connected;connectionText=message==null?"连接暂未完成":message;if(connectionLabel!=null)connectionLabel.setText(connectionText);if(changed&&state.screen==NativeHubState.Screen.CHAT)renderChatMessages(false);else if(changed&&page!=null&&state.screen==NativeHubState.Screen.TASK)renderPage();}
     private void toast(String message){if(!destroyed)Toast.makeText(this,message==null?"暂时未完成，请重试":message,Toast.LENGTH_LONG).show();}
     private LinearLayout column(){LinearLayout view=new LinearLayout(this);view.setOrientation(LinearLayout.VERTICAL);return view;}
     private LinearLayout row(){LinearLayout view=new LinearLayout(this);view.setOrientation(LinearLayout.HORIZONTAL);view.setGravity(Gravity.CENTER_VERTICAL);return view;}
     private TextView text(String value,int size,int color,boolean bold){TextView view=new TextView(this);view.setText(value);view.setTextSize(size);view.setTextColor(color);view.setTypeface(Typeface.create("sans-serif",bold?Typeface.BOLD:Typeface.NORMAL));view.setPadding(0,dp(5),0,dp(5));view.setLineSpacing(dp(2),1.05f);return view;}
     private EditText input(String hint,boolean multiline){EditText view=new EditText(this);view.setTextColor(TEXT);view.setHintTextColor(MUTED);view.setTextSize(16);view.setTypeface(Typeface.create("sans-serif",Typeface.NORMAL));view.setHint(hint);view.setPadding(dp(14),dp(12),dp(14),dp(12));view.setBackground(outline(CARD,16));view.setInputType(InputType.TYPE_CLASS_TEXT|(multiline?InputType.TYPE_TEXT_FLAG_MULTI_LINE:0));view.setSingleLine(!multiline);return view;}
-    private Button button(String title,Runnable action){Button view=new Button(this);view.setText(title);view.setAllCaps(false);view.setTextSize(14);view.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));view.setTextColor(GOLD);view.setBackground(tone(PANEL,14));view.setMinHeight(dp(44));view.setMinimumWidth(0);view.setMinWidth(0);view.setPadding(dp(12),dp(6),dp(12),dp(6));view.setOnClickListener(v->action.run());return view;}
+    private Button button(String title,Runnable action){Button view=new Button(this);view.setText(title);view.setAllCaps(false);view.setTextSize(14);view.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));view.setTextColor(GOLD);view.setBackground(new RippleDrawable(ColorStateList.valueOf(0x35d3c2a7),tone(PANEL,14),tone(Color.WHITE,14)));view.setMinHeight(dp(48));view.setMinimumWidth(0);view.setMinWidth(0);view.setPadding(dp(12),dp(6),dp(12),dp(6));final long[] clicked={-1000};view.setOnClickListener(v->{long now=SystemClock.elapsedRealtime();if(now-clicked[0]<350)return;clicked[0]=now;action.run();});return view;}
     private Button iconButton(String label,String description,Runnable action){Button view=button(label,action);view.setContentDescription(description);view.setTextSize(22);view.setLayoutParams(new LinearLayout.LayoutParams(dp(44),dp(44)));return view;}
     private LinearLayout card(LinearLayout parent){LinearLayout card=column();card.setBackground(outline(PANEL,20));card.setPadding(dp(15),dp(12),dp(15),dp(14));LinearLayout.LayoutParams layout=new LinearLayout.LayoutParams(-1,-2);layout.bottomMargin=dp(12);parent.addView(card,layout);return card;}
     private void section(String title,String description){content.addView(text(title,25,TEXT,true));content.addView(text(description,13,MUTED,false));space(content,16);}

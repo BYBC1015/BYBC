@@ -270,12 +270,13 @@ def test_apk_keeps_download_update_inside_the_existing_more_menu():
     assert "DOWNLOADS_URL" not in android
     assert "addDownloadUpdateButton" not in android
     assert "android-upgrade-fallback" not in template
-    assert 'versionCode 29' in gradle
-    assert 'versionName "0.2.0"' in gradle
+    assert 'versionCode 30' in gradle
+    assert 'versionName "0.3.0"' in gradle
     assert "Select-String -LiteralPath $GradleConfig" in build_script
     assert '[switch]$Clean' in build_script
     assert '@("clean", $BuildTask)' in build_script
-    assert '"dist\\CodexHub-v$VersionName-$Variant.apk"' in build_script
+    assert "E:\\Downloads\\PrivateServer" in build_script
+    assert '$ApkDist = Join-Path $OutputDirectory "CodexHub-v$VersionName-$Variant.apk"' in build_script
     assert '"assembleRelease"' in build_script
     assert "CodexHub-v0.1.9-debug.apk" not in build_script
 

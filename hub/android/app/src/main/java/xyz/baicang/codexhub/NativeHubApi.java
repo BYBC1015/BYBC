@@ -112,13 +112,15 @@ final class NativeHubApi {
     }
     private static HttpURLConnection open(String base,String path,String method,String cookies,String csrf) throws IOException {
         String url=base+path;
-        if(!(path.startsWith("api/mobile/")||path.equals("api/releases")&&method.equals("GET"))
+        if(!(path.startsWith("api/mobile/")||path.equals("api/releases")&&method.equals("GET")
+                ||path.matches("api/projects/[^/]+/model-services(?:/[1-9][0-9]*(?:/test)?)?"))
+                && !path.matches("api/projects/[^/]+/settings(?:/agents/[1-9][0-9]*/model-policy)?")
                 ||!internal(base,url)) throw new IOException("请求地址不属于当前 Hub");
         HttpURLConnection connection=(HttpURLConnection)URI.create(url).toURL().openConnection();
         connection.setConnectTimeout(12000);connection.setReadTimeout("POST".equals(method)?90000:20000);
         connection.setInstanceFollowRedirects(false);connection.setRequestMethod(method);
         connection.setRequestProperty("Accept","application/json");connection.setRequestProperty("Cache-Control","no-store");
-        connection.setRequestProperty("User-Agent","BYBCHubAndroidNative/0.2.0");
+        connection.setRequestProperty("User-Agent","BYBCHubAndroidNative/"+BuildConfig.VERSION_NAME);
         if(cookies!=null&&!cookies.isEmpty())connection.setRequestProperty("Cookie",cookies);
         if(csrf!=null&&!csrf.isEmpty())connection.setRequestProperty("X-CSRF-Token",csrf);
         return connection;

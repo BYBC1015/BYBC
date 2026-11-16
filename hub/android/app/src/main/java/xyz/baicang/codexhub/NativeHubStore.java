@@ -76,7 +76,7 @@ final class NativeHubStore {
     }
     synchronized void removeJob(String userScope, String requestKey) { remove("outbox:"+userScope+":"+requestKey); }
     synchronized void rememberLocation(NativeHubState state) {
-        try { put("location:"+state.userScope(),new JSONObject().put("project",state.project).put("conversation",state.conversation));put("room:"+state.userScope()+":"+state.project,new JSONObject().put("conversation",state.conversation)); }
+        try { put("location:"+state.userScope(),new JSONObject().put("project",state.project).put("conversation",state.conversation).put("navigation",state.saveNavigation()));if(!state.project.isEmpty())put("room:"+state.userScope()+":"+state.project,new JSONObject().put("conversation",state.conversation)); }
         catch(JSONException ignored) { }
     }
 }

@@ -18,6 +18,7 @@ SSE_MAX_SECONDS = 55
 SSE_POLL_SECONDS = 1
 SSE_HEARTBEAT_SECONDS = 15
 ACTIVITY_CLOCK_SECONDS = 15
+PROGRESS_QUIET_SECONDS = 180
 
 
 def initialize_progress_schema(db):
@@ -130,6 +131,9 @@ def annotate_progress_timing(row, at):
     row['has_public_report']=bool(row['has_public_report'])
     row['report_age_label']=_duration(sampled-row['updated_at']) if row['updated_at'] is not None else '尚未收到'
     row['execution_contact_valid']=row['execution_state']=='running' and row['lease_until']>at
+    last_progress = row['updated_at'] if row['updated_at'] is not None else row.get('started_at')
+    row['progress_quiet'] = bool(row['execution_contact_valid'] and last_progress is not None
+                                 and sampled - last_progress >= PROGRESS_QUIET_SECONDS)
     seen=parse_iso_datetime(str(row.get('last_agent_seen_at') or ''))
     window=AGENT_WORKER_ONLINE_WINDOW_SECONDS if row['agent_tasks_only'] else DEVICE_ONLINE_WINDOW_SECONDS
     row['device_contact_recent']=bool(seen and 0<=at-seen.timestamp()<=window)

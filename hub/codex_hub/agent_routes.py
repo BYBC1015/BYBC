@@ -83,7 +83,7 @@ def register_agent_routes(app: FastAPI) -> None:
         from .model_policy import agent_policy, available_models
         return render(request, 'agent_detail.html', user=user, project=project, agent=agent,
             model_policy=agent_policy(repo.connection, agent_id),
-            model_options=available_models(get_settings(request).data_dir, agent.get('device_id')),
+            model_options=available_models(get_settings(request).data_dir, agent.get('device_id'), repo.connection, project['id']),
             experiences=store.experiences(project['id'], agent_id, history=True),
             tasks=[t for t in repo.list_tasks(project['id']) if t.get('assigned_agent_id')==agent_id],
             conversations=[c for c in store.conversations(project['id']) if repo.connection.execute(

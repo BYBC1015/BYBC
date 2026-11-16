@@ -27,6 +27,16 @@
       <dd>{% if assigned_agent %}<a href="{{ app_path('/projects/' ~ project.slug ~ '/agents/' ~ assigned_agent.id) }}">{{ assigned_agent.name }} · {{ assigned_agent.job }}</a>{% else %}{{ task.claimed_device_label or task.assigned_device_label or "未领取" }}{% endif %}</dd>
       {% if assigned_agent %}<dt>执行连接</dt><dd>{{ task.claimed_device_label or task.assigned_device_label }}</dd>
       <dt>工作对话</dt><dd>{% if task.conversation_id %}<a href="{{ app_path('/projects/' ~ project.slug ~ '/conversations/' ~ task.conversation_id) }}">查看对话 #{{ task.conversation_id }}</a><p>{{ task.route_reason }}</p>{% else %}执行前由智能体选择{% endif %}</dd>{% endif %}
+      {% if execution_activity %}
+      <dt>执行进展</dt>
+      <dd>
+        {% if not execution_activity.execution_contact_valid %}<strong>执行状态待核对</strong><p>任务联系已过期，等待原执行器核对结果。</p>
+        {% elif execution_activity.progress_quiet %}<strong>进展待更新</strong><p>已有约 {{ execution_activity.report_age_label if execution_activity.has_public_report else execution_activity.run_age_label }}未收到{{ '新进展' if execution_activity.has_public_report else '首条进展' }}。</p>
+        {% elif not execution_activity.has_public_report %}<p>执行器已接手，等待首条进展。</p>{% endif %}
+        {% if execution_activity.status_text %}<p>最近报告：{{ execution_activity.status_text }}</p>{% endif %}
+        {% if execution_activity.has_public_report %}<small>距上次进度约 {{ execution_activity.report_age_label }}</small>{% endif %}
+      </dd>
+      {% endif %}
       <dt>指定群组</dt>
       <dd>{{ task.requested_group_name or "未指定" }}</dd>
       <dt>创建时间</dt>

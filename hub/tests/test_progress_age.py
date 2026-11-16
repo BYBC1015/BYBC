@@ -71,3 +71,49 @@ def test_workspace_labels_expired_connection_as_unconfirmed(client,repo,lease_ta
     assert '执行状态待核对' in response.text and '任务联系已过期' in response.text
     # The report text has its own span so age refreshes preserve the body DOM.
     assert '最近报告：正在执行工具' in re.sub(r'<[^>]+>', '', response.text)
+
+
+def test_quiet_execution_keeps_last_stage_and_clears_on_real_update(client, repo, lease_task, monkeypatch):
+    d = lease_task
+    now = [progress.time.time() - 600]
+    store = ExecutionStore(repo, clock=lambda: now[0])
+    run = store.acquire(d['task']['id'], d['device']['id'], 'quiet-execution-id')['execution']
+    run = store.start(d['task']['id'], d['device']['id'], run['generation'], run['run_key'])['execution']
+    original_active_progress = progress.active_progress
+
+    def active_progress_at_test_time(*args, **kwargs):
+        kwargs.setdefault('clock', lambda: now[0])
+        return original_active_progress(*args, **kwargs)
+
+    monkeypatch.setattr(progress, 'active_progress', active_progress_at_test_time)
+    task_url = f"/projects/{d['project']['slug']}/tasks/{d['task']['id']}"
+    room = repo.get_task(d['task']['id'])['conversation_id']
+    room_url = f"/projects/{d['project']['slug']}/conversations/{room}"
+    login(client)
+
+    now[0] += 120
+    store.renew(d['task']['id'], d['device']['id'], run['generation'], run['run_key'])
+    now[0] += 75
+    assert '未收到首条进展' in client.get(room_url).text
+    assert repo.connection.execute('SELECT COUNT(*) FROM hub_execution_progress').fetchone()[0] == 0
+
+    payload = {key: run[key] for key in ('generation', 'run_key')}
+    progress.write_progress(store, d['task']['id'], d['device']['id'], {
+        **payload, 'sequence': 1, 'kind': 'status', 'text': '本轮已结束，正在回传结果'})
+    now[0] += 120
+    store.renew(d['task']['id'], d['device']['id'], run['generation'], run['run_key'])
+    now[0] += 75
+    row = progress.active_progress(repo.connection, d['project']['id'], clock=lambda: now[0])[0]
+    assert row['execution_contact_valid'] and row['progress_quiet'] and row['sequence'] == 1
+    response = client.get(room_url)
+    assert 'data-ws-progress-quiet="true"' in response.text and '未收到新进展' in response.text
+    response = client.get(task_url)
+    assert '进展待更新' in response.text and '本轮已结束，正在回传结果' in response.text
+    assert repo.get_task(d['task']['id'])['status'] == 'in_progress'
+
+    progress.write_progress(store, d['task']['id'], d['device']['id'], {
+        **payload, 'sequence': 2, 'kind': 'status', 'text': '结果已保存在执行电脑，等待补传'})
+    response = client.get(room_url)
+    assert f'data-ws-progress="{d["task"]["id"]}"' in response.text
+    assert 'data-ws-progress-quiet="false"' in response.text
+    assert '结果已保存在执行电脑，等待补传' in client.get(task_url).text

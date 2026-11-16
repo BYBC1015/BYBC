@@ -128,6 +128,9 @@ def _iter_plain_files(
         except OSError as exc:
             raise MigrationError(f"Cannot read data directory: {directory}: {exc}") from exc
         for entry in entries:
+            if not relative.parts and entry.name == '.private':
+                # Provider credentials must be re-provisioned on a restored host.
+                continue
             source = Path(entry.path)
             child_relative = relative / entry.name
             if _is_reparse_or_symlink(source):

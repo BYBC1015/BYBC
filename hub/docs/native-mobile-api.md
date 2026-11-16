@@ -85,3 +85,36 @@ request succeeding. Uncached data shows an honest empty/offline state. Refresh
 never overwrites draft text/attachment selection, scroll position or local route.
 Cancel stale requests and check generation/account/room again before applying
 results. Pause foreground polling in background; compare `revision` before render.
+
+## Native settings and model connections (2.13 / Android 0.3)
+
+`GET /api/projects/{slug}/settings` returns project, members, available_devices,
+primary_device_id, agents and can_manage. The installed settings page owns its
+navigation, preserves the route on resume and never follows HTML redirects.
+
+`GET /api/projects/{slug}/model-services` returns sanitized services and execution
+devices. Owner POST creates, PUT `/{id}` updates and DELETE `/{id}` removes.
+Writes require the same session and CSRF header. Kinds are `ollama`, `lmstudio`
+and `openai_compatible`; each service supplies name, base_url, model, device_id,
+enabled, supports_images and supports_tools. API keys are write-only: a blank
+edit retains the stored value, `clear_api_key:true` removes it. Never persist
+key fields in native drafts, logs or model caches.
+
+`POST .../model-services/{id}/test` with `{}` queues a read-only model-directory
+check on the selected execution computer. Poll the sanitized services list for
+status. It is not an inference or tool-capability test; queued checks remain
+pending while the device is offline.
+
+`GET/POST /api/projects/{slug}/settings/agents/{agent_id}/model-policy` reads or
+changes the identity's model policy. GET returns policy and the device's actual
+model catalog; POST takes mode, model and reasoning_effort. User-defined services
+use `hub-service/{id}` and effort `none` (the remote service determines reasoning).
+Only compatible workers report these choices. Execution freezes the selected
+service revision; changing a setting does not mutate a running task.
+
+`POST /api/mobile/projects/{slug}/tasks/{task_id}/cancel` with `{}` asks the
+assigned worker to stop. The response includes task, cancel_requested, stopped
+and message. A cancelled task with a running/uncertain execution remains pending
+until the computer acknowledges the actual stop. GET task detail includes
+can_cancel, cancel_requested, cancel_message and execution_state. Do not turn a
+successful HTTP response into a claim that the process has already stopped.

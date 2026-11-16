@@ -56,11 +56,13 @@
     const online = connectionState() === 'online';
     const contact = node.dataset.wsProgressContact === 'live';
     const reported = node.dataset.wsProgressReport === 'true';
+    const quiet = node.dataset.wsProgressQuiet === 'true';
     const kind = node.dataset.wsProgressKind;
-    const state = !contact ? 'uncertain' : !online ? 'connection' : !reported ? 'waiting' : kind === 'assistant' ? 'reply' : 'working';
+    const state = !contact ? 'uncertain' : !online ? 'connection' : quiet ? 'quiet'
+      : !reported ? 'waiting' : kind === 'assistant' ? 'reply' : 'working';
     node.dataset.replyState = state;
     const label = node.querySelector('[data-ws-progress-label-text]');
-    const text = {uncertain:'执行状态待核对',connection:'等待连接',waiting:'等待公开进展',reply:'正在回复',working:'执行中'}[state];
+    const text = {uncertain:'执行状态待核对',connection:'等待连接',quiet:'进展待更新',waiting:'等待公开进展',reply:'正在回复',working:'执行中'}[state];
     if (label && label.textContent !== text) label.textContent = text;
     const note = node.querySelector('[data-reply-connection-note]');
     if (note) note.hidden = online || !contact;
@@ -99,7 +101,7 @@
         const observer = new MutationObserver(() => queue(node));
         observer.observe(node,{childList:true,characterData:true,subtree:true,attributes:true,
           attributeFilter:['data-ws-progress-generation','data-ws-progress-sequence','data-ws-progress-kind',
-            'data-ws-progress-body-version','data-ws-progress-contact','data-ws-progress-report']});
+            'data-ws-progress-body-version','data-ws-progress-contact','data-ws-progress-report','data-ws-progress-quiet']});
         observers.set(node,observer);
       }
       paintProgress(node,initial);

@@ -1,6 +1,18 @@
 (() => {
   "use strict";
 
+  // Upgrade retained links in older detail pages before they can leave the
+  // modern workspace. Genuine archive/file/task destinations remain explicit.
+  for (const link of document.querySelectorAll('a[href]')) {
+    try {
+      const target = new URL(link.href, location.href);
+      const tab = {members:'connections',control:'connections','codex-projects':'connections','codex-workspaces':'connections'}[target.hash.slice(1)];
+      if (target.origin === location.origin && target.searchParams.get('view') === 'archive' && tab && /\/projects\/[^/]+\/?$/.test(target.pathname)) {
+        target.searchParams.delete('view'); target.hash = 'settings=' + tab; link.href = target.href;
+      }
+    } catch (_) { /* Invalid legacy links are not settings routes. */ }
+  }
+
   const header = document.querySelector("[data-site-header]");
   const toggle = header?.querySelector("[data-nav-toggle]");
   const navigation = header?.querySelector("[data-primary-navigation]");

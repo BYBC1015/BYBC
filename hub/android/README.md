@@ -2,11 +2,32 @@
 
 Installed Android client for the private Codex Hub.
 
-Current source is **0.2.0 / code 29**, requiring JSON API 1 (Hub server 2.12.0).
+Current source is **0.3.0 / code 30**, requiring JSON API 1 plus the project
+settings/model-services and mobile task-cancellation endpoints.
 The launcher, notification, share and Open With entry points use
 NativeHubActivity. Chat, projects, agents, tasks and toolbox are Android Views
 with in-process navigation. Screens never load Hub HTML, and no route uses the
 old WebView Activity as fallback. The former Activity is not registered.
+
+Settings is an installed native screen, reachable from the header and Toolbox.
+Connection settings, account actions, reduced motion, model services and model
+assignments stay in native views. Ollama, LM Studio and compatible API services
+are tied to an execution computer; loopback addresses refer to that computer.
+The model picker uses its reported capabilities and saves an agent policy for
+future tasks; existing task/model snapshots remain unchanged. Model credentials
+are write-only fields, never stored in Android preferences or cached responses.
+
+Navigation uses a bounded native back stack, retaining the exact project,
+conversation and task when leaving Settings. Repeated selection does not stack
+duplicate pages. Route and motion preferences survive process recreation, while
+list refreshes retain scroll position. Page animation respects system animation
+settings and the local reduced-motion choice. Cached execution data is not shown
+as a live connection. Stop requests distinguish delivery from execution shutdown,
+including a separate uncertain state when a response is lost.
+Chat and task detail also consume the server's quiet-progress flag: a still-valid
+execution contact with no recent public report shows “执行电脑仍在线，暂未收到新进度”.
+Offline or expired contact takes precedence over this cached flag. Contact alone
+does not claim the model is thinking or that execution has stopped.
 
 Native login uses the JSON session API. An existing WebView cookie can be
 imported once without opening a WebView; subsequent login/logout uses a private
@@ -30,9 +51,11 @@ Cached data is identified by the connection banner; stale execution contact is
 shown as waiting for verification rather than green/live.
 
 Debug QA alone permits an explicit loopback fixture endpoint. Release resources
-allow HTTPS only. Source compilation has succeeded; actual emulator/device
-verification is recorded separately under output/hub-native-mobile-20261031/android.
-Compilation/static checks do not imply completed on-device acceptance.
+allow HTTPS only. Version 0.3.0 validation and emulator evidence are recorded in
+`T:/PrivateServer/output/hub-settings-motion-20261117/android`. This includes a
+headless Android 11 emulator with isolated synthetic data; no physical phone
+acceptance is claimed. Private distribution retains the existing debug signing
+certificate while using the release build type (`DEBUG=false`).
 
 ## Historical WebView releases (superseded)
 
@@ -206,8 +229,8 @@ Build:
 codex-hub/android/build-apk.ps1
 ```
 
-Versioned APK output:
+Versioned APK output (override with `-OutputDirectory` if needed):
 
 ```text
-codex-hub/android/dist/CodexHub-v0.1.25-debug.apk
+E:\Downloads\PrivateServer\YYYYMMDD_Android-0.3.0\CodexHub-v0.3.0-release.apk
 ```

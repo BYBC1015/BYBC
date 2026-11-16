@@ -221,7 +221,9 @@ class ExecutionStore:
                 self.db.execute("UPDATE hub_task_executions SET state='uncertain',task_version=?,detail=? WHERE id=?",
                                 (task['status_version'], detail, record['id']))
                 record = latest_execution(self.db, task_id)
-            return self._reply(task_id, record)
+            progress = self.db.execute('SELECT sequence FROM hub_execution_progress WHERE execution_id=?',
+                                       (record['id'],)).fetchone() if record else None
+            return {**self._reply(task_id, record), 'progress_sequence': progress['sequence'] if progress else 0}
 
     def complete(self, task_id, device_id, generation, run_key, *, status, summary, body, reflection, token_usage=None):
         if (status not in {'review','blocked'} or not isinstance(summary, str) or len(summary) > 1000

@@ -1,6 +1,7 @@
 param(
     [switch]$Clean,
-    [switch]$Debug
+    [switch]$Debug,
+    [string]$OutputDirectory = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,7 +18,10 @@ if (!$VersionMatch -or !$VersionMatch.Matches[0].Groups[1].Value) {
     throw "Unable to read versionName from: $GradleConfig"
 }
 $VersionName = $VersionMatch.Matches[0].Groups[1].Value
-$ApkDist = Join-Path $PSScriptRoot "dist\CodexHub-v$VersionName-$Variant.apk"
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    $OutputDirectory = Join-Path 'E:\Downloads\PrivateServer' "$(Get-Date -Format 'yyyyMMdd')_Android-$VersionName"
+}
+$ApkDist = Join-Path $OutputDirectory "CodexHub-v$VersionName-$Variant.apk"
 
 if (!(Test-Path $JavaHome)) {
     throw "JDK not found: $JavaHome"

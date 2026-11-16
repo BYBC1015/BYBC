@@ -86,6 +86,8 @@ def normalize_device_capabilities(payload: Any) -> dict[str, Any]:
         result['machine_name'] = machine
     if raw.get('runtime_kind') == 'durable-agent':
         result['runtime_kind'] = 'durable-agent'
+    if raw.get('model_services') is True:
+        result['model_services'] = True
     if raw.get("execution_mode") in {"codex-cli", "codex-desktop", "hermes-cli", "manual"}:
         result["execution_mode"] = raw["execution_mode"]
     if 'provider_health' in raw:

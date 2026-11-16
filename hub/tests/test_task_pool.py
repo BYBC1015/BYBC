@@ -215,3 +215,66 @@ def test_pool_restart_recovers_lost_result_ack_without_reexecuting(client,repo,l
     finally:pool.close()
     assert (tmp_path/f'{task_id}.started').read_text()==first_process
     assert repo.connection.execute('SELECT COUNT(*) FROM hub_task_executions WHERE task_id=?',(task_id,)).fetchone()[0]==1
+
+
+@pytest.mark.parametrize('phase', ['runner', 'metadata'])
+def test_task_preparation_failure_does_not_starve_another_task(tmp_path, monkeypatch, phase):
+    config = config_for(tmp_path)
+    completed = []
+    attempts = []
+    tasks = [{'id': i, 'project_slug': 'agent-test', 'assigned_agent_id': 7,
+              'execution_mode': 'isolated'} for i in (1, 2)]
+    blocked_path = task_config(config, tasks[0]).state_path.parent / 'task.tmp'
+    original_write = Path.write_text
+
+    def write_text(path, *args, **kwargs):
+        if phase == 'metadata' and path == blocked_path:
+            raise PermissionError('temporarily locked metadata')
+        return original_write(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'write_text', write_text)
+
+    def factory(task):
+        attempts.append(task['id'])
+        if phase == 'runner' and task['id'] == 1:
+            raise PermissionError('temporarily inaccessible task state')
+        def run():
+            completed.append(task['id'])
+            return SimpleNamespace(messages=[])
+        return SimpleNamespace(process_once=run, state=SimpleNamespace(task_deliveries={}))
+
+    pool = DurableTaskPool(config, SimpleNamespace(get_inbox=lambda: {'tasks': tasks}),
+                           runner_factory=factory)
+    try:
+        messages = pool.tick()
+        until(pool, lambda: 2 in completed)
+        assert 1 not in completed
+        assert 1 in pool.retry_after
+        assert any('任务 #1' in message for message in messages)
+        # Retrying preparation must back off rather than spin on every poll.
+        assert attempts.count(1) == 1
+        assert not task_config(config, tasks[0]).state_path.exists()
+    finally:
+        pool.close()
+
+
+@pytest.mark.parametrize('bad_metadata', [[], None, {'id': 1, 'project_slug': 23}])
+def test_invalid_task_metadata_does_not_stop_pool_restart_or_modify_receipts(tmp_path, bad_metadata):
+    config = config_for(tmp_path)
+    root = config.state_path.parent / 'task-runs' / '1'
+    root.mkdir(parents=True)
+    metadata = root / 'task.json'
+    metadata.write_text(json.dumps(bad_metadata), encoding='utf-8')
+    state = root / 'state.json'
+    original = '{"task_deliveries":{"agent-test:1":{"stage":"agent_running","run_key":"uncertain"}}}'
+    state.write_text(original, encoding='utf-8')
+    calls = []
+    pool = DurableTaskPool(config, SimpleNamespace(get_inbox=lambda: {'tasks': []}),
+                           runner_factory=lambda task: calls.append(task))
+    try:
+        assert pool.tick() == []
+        assert not calls
+        assert metadata.read_text(encoding='utf-8') == json.dumps(bad_metadata)
+        assert state.read_text(encoding='utf-8') == original
+    finally:
+        pool.close()

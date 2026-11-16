@@ -30,7 +30,7 @@ def register_model_routes(app):
         if selection is None and (task['status'] not in {'open', 'claimed'} or not agent['active']):
             raise HTTPException(409, '任务已结束、已开始或智能体暂停，不再启动模型规划')
         policy = agent_policy(repo.connection, agent['id'])
-        models = available_models(get_settings(request).data_dir, task['assigned_device_id'])
+        models = available_models(get_settings(request).data_dir, task['assigned_device_id'], repo.connection, project['id'])
         if selection is None and (policy['mode'] == 'manual' or not models or agent['kind']=='controller'):
             try:
                 with repo.connection:
@@ -82,7 +82,7 @@ def register_model_routes(app):
             from .execution_leases import latest_execution
             if task['status'] not in {'open', 'claimed'} or latest_execution(repo.connection, task_id):
                 raise ExecutionConflict('已开始的任务保留原模型，不能改变本次执行')
-            selection = select_model(repo.connection, agent, get_settings(request).data_dir, data)
+            selection = select_model(repo.connection, agent, get_settings(request).data_dir, data, task=task)
             if selection['source'] == 'controller':
                 selection['source'] = 'controller_task_plan'
             selection = freeze_choice(repo.connection, task_id, selection)
@@ -120,7 +120,7 @@ def register_model_routes(app):
                      'model': model[:100], 'reasoning_effort': reasoning_effort[:20]}
             response = render(request, 'agent_detail.html', user=user, project=project, agent=agent,
                 model_policy=draft, model_error=str(exc),
-                model_options=available_models(get_settings(request).data_dir, agent.get('device_id')),
+                model_options=available_models(get_settings(request).data_dir, agent.get('device_id'), repo.connection, project['id']),
                 experiences=store.experiences(project['id'], agent_id, history=True),
                 tasks=[t for t in repo.list_tasks(project['id']) if t.get('assigned_agent_id') == agent_id],
                 conversations=[c for c in store.conversations(project['id']) if repo.connection.execute(
@@ -142,7 +142,7 @@ def register_model_routes(app):
         except ValueError as exc:
             raise HTTPException(404, str(exc)) from None
         return {'policy': agent_policy(repo.connection, agent_id),
-                'models': available_models(get_settings(request).data_dir, agent.get('device_id'))}
+                'models': available_models(get_settings(request).data_dir, agent.get('device_id'), repo.connection, project['id'])}
 
     @app.post('/api/projects/{slug}/agents/{agent_id}/model-policy')
     async def set_controller_model(request: Request, slug: str, agent_id: int):

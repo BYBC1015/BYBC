@@ -1721,7 +1721,8 @@ def test_capabilities_report_is_cached_and_older_hub_does_not_block_inbox(tmp_pa
     runner._model_catalog.get_catalog = lambda: {"models": [{"model": "gpt-6-astra"}]}
     runner.poll_status()
     runner.poll_status()
-    assert reports == [{"execution_backend": "codex", "execution_mode": "codex-desktop", "codex": {"models": [{"model": "gpt-6-astra"}]}}]
+    assert reports == [{"execution_backend": "codex", "execution_mode": "codex-desktop", "model_services": False,
+                        "codex": {"models": [{"model": "gpt-6-astra"}]}}]
     runner._next_capability_report = 0
     client.post_device_capabilities = lambda _: (_ for _ in ()).throw(RuntimeError("404 old Hub"))
     assert runner.poll_status().device_label == "codex-device-a"

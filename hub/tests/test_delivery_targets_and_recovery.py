@@ -2,10 +2,19 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import threading
+import time
+from contextlib import closing
 
 import pytest
 
+from codex_bridge.agent_runtime import ExecutionRenewal
+from codex_bridge.client import HubClientError
 from codex_bridge.delivery_target import resolve_delivery_target
+from codex_hub.db import connect_database
+from codex_hub.execution_leases import ExecutionStore
+from codex_hub.execution_progress import write_progress
+from codex_hub.repository import Repository
 from test_agent_runtime import REFLECTION
 from test_execution_recovery import runtime, restart
 
@@ -63,6 +72,79 @@ def test_completion_retry_preserves_publication_even_if_files_are_deleted(repo, 
                                    (client.task_id,)).fetchone()[0]
     assert body == frozen
     assert restored.state.get_task_delivery('agent-test', client.task_id) is None
+
+
+@pytest.mark.parametrize('interrupted', [False, True])
+def test_upload_keeps_task_live_and_reports_stage_without_reexecuting(repo, settings, tmp_path, monkeypatch, interrupted):
+    runner, client, executor = runtime(repo, tmp_path)
+    (tmp_path / 'project' / 'report.md').write_text('verified output')
+    executor.summary = result_body(['report.md'])
+    original_reconcile = client.reconcile_task_execution
+    clock = [time.time()]
+    client.store = ExecutionStore(repo, clock=lambda: clock[0])
+    original_renew = client.renew_task_execution
+    in_upload = threading.Event()
+    renewed_during_upload = threading.Event()
+    reporting_upload = threading.Event()
+    reports = []
+    uploaded = []
+    publications = []
+
+    def renew(slug, task_id, execution):
+        during_upload = in_upload.is_set()
+        value = original_renew(slug, task_id, execution)
+        if during_upload:
+            renewed_during_upload.set()
+        return value
+
+    def report(slug, task_id, execution, sequence, kind, message):
+        with closing(connect_database(settings.database_path)) as db:
+            store = ExecutionStore(Repository(db), clock=lambda: clock[0])
+            payload = {'generation': execution['generation'], 'run_key': execution['run_key'],
+                       'sequence': sequence, 'kind': kind, 'text': message}
+            receipt = write_progress(store, task_id, client.device['id'], payload)
+        if receipt['accepted']:
+            reports.append((sequence, message))
+            if message == '本轮已结束，正在回传结果':
+                reporting_upload.set()
+
+    def upload(*args):
+        uploaded.append(args[3])
+        if interrupted and len(uploaded) == 1:
+            assert reporting_upload.wait(2)
+            raise HubClientError('temporary disconnect')
+        clock[0] += 120
+        in_upload.set()
+        try:
+            assert renewed_during_upload.wait(2), 'No task renewal while upload is active'
+            assert reporting_upload.wait(2), 'No delivery progress while upload is active'
+            clock[0] += 31
+            remote = original_reconcile('agent-test', client.task_id)
+            assert remote['execution']['state'] == 'running'
+            publications.append(remote['progress_sequence'])
+        finally:
+            in_upload.clear()
+
+    client.renew_task_execution = renew
+    client.publish_execution_progress = report
+    client.upload_task_artifact = upload
+    monkeypatch.setattr('codex_bridge.runner.ExecutionRenewal',
+                        lambda *args, **kwargs: ExecutionRenewal(*args, interval=.02, **kwargs))
+    runner.process_once()
+
+    if interrupted:
+        prior_sequence = reports[-1][0]
+        assert reports[-1][1] == '结果已保存在执行电脑，等待补传'
+        reporting_upload.clear()
+        client.hide_inbox = True
+        runner = restart(runner, client, executor)
+        runner.process_once()
+        assert publications and publications[0] > prior_sequence
+        assert uploaded[0] == uploaded[1]
+    assert len(publications) == 1
+    assert len(executor.calls) == client.start_calls == client.complete_calls == 1
+    assert repo.get_task(client.task_id)['status'] == 'review'
+    assert runner.state.get_task_delivery('agent-test', client.task_id) is None
 
 
 def test_task_delivery_directory_is_scoped_and_frozen(repo, tmp_path):
@@ -142,7 +224,6 @@ def test_unknown_upload_response_error_keeps_receipt_without_model_replay(repo, 
 
 
 def test_invalid_completion_response_is_bounded_and_retains_local_result(repo, tmp_path):
-    from codex_bridge.client import HubClientError
     runner, client, executor = runtime(repo, tmp_path)
     client.upload_task_artifact = lambda *args: None
     attempts = []

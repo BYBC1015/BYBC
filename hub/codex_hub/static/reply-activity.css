@@ -26,7 +26,7 @@
 .ws-reply-footer>.ws-message-source { flex:none; margin:0; font-size:12px; padding:2px 0; color:#a8bcb2; white-space:nowrap; }
 [data-reply-state="waiting"] .ws-reply-card { --reply-ink:#bec4cc; border-color:#bdc8d51a; }
 [data-reply-state="waiting"] .ws-reply-mark { background:transparent; border:1px solid currentColor; }
-[data-reply-state="uncertain"] .ws-reply-card { --reply-ink:#ddbd89; border-color:#c3a16b32; background:linear-gradient(135deg,#bb935609,transparent 65%),#242526; }
+[data-reply-state="uncertain"] .ws-reply-card,[data-reply-state="quiet"] .ws-reply-card { --reply-ink:#ddbd89; border-color:#c3a16b32; background:linear-gradient(135deg,#bb935609,transparent 65%),#242526; }
 [data-reply-connection="offline"] .ws-reply-label,[data-reply-connection="unknown"] .ws-reply-label { color:#c9b68e; }
 .ws-sync { display:inline-flex; align-items:center; gap:6px; }
 .ws-sync::before { content:""; width:5px; height:5px; flex:none; background:#96b0a2; border-radius:50%; }

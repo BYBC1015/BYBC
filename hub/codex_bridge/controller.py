@@ -5,7 +5,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from .client import HubClientError
+from .client import HubClient, HubClientError
 from .i18n import text
 from .network_guard import NetworkGuard
 from .runner import BridgeRunner, ProcessResult
@@ -56,6 +56,7 @@ class BridgeController:
         self._thread: threading.Thread | None = None
         self._lock = threading.RLock()
         self._network_guard_lock = threading.Lock()
+        self._model_probe_workers = {}
 
     @staticmethod
     def _runtime_configs(config: Any) -> list[Any]:
@@ -79,7 +80,18 @@ class BridgeController:
         self._threads = {}
         self._heartbeat_threads = {}
         self._worker_threads = {}
+        self._model_probe_workers = {}
         for binding_id, runner in self.runners.items():
+            client = getattr(runner, 'client', None)
+            if isinstance(client, HubClient):
+                try:
+                    from .model_service_client import ModelServiceProbeWorker
+                    probe = ModelServiceProbeWorker(client.execution_renewal_client())
+                    probe.start()
+                    self._model_probe_workers[binding_id] = probe
+                    self._threads[f'{binding_id}:model-probes'] = probe.thread
+                except Exception:
+                    self.log('模型服务连接检查暂未启动；现有任务连接继续运行。')
             if callable(getattr(runner, "poll_status", None)):
                 heartbeat = threading.Thread(
                     target=self._heartbeat_loop,
@@ -118,6 +130,10 @@ class BridgeController:
 
     def stop(self) -> None:
         self._stop_event.set()
+        # Signal every optional probe first, then use the same bounded shutdown
+        # window as the execution lanes. Never wait two seconds per binding.
+        for probe in self._model_probe_workers.values():
+            probe.stopped.set()
         deadline = time.monotonic() + 5
         for thread in list(self._threads.values()):
             remaining = max(0.0, deadline - time.monotonic())

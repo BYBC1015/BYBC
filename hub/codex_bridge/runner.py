@@ -9,16 +9,18 @@ import sys
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
 from typing import Any, Protocol
 from urllib.parse import urlencode
 
-from .client import HubClient
+from .client import HubClient, HubClientError
 from .agent_runtime import CodexAgentDecisionRunner, extract_reflection, ExecutionRenewal, read_execution_completion
 from .codex_app_submitter import CodexAppSubmitter
 from .codex_exec import CodexExecResult, CodexExecRunner
+from .codex_stream import ProgressDispatcher
 from .attachments import PreparedAttachments, AttachmentPreparationError, AttachmentPreviewCache, prepare_task_attachments
 from .token_usage import normalize_token_usage
 from .config import BridgeConfig
@@ -415,7 +417,8 @@ class BridgeRunner:
             backend = str(self.config.execution_backend or "codex")
             mode = (f"{backend}-cli" if self.config.auto_execute_codex else
                     "codex-desktop" if self.config.open_codex else "manual")
-            capabilities: dict[str, Any] = {"execution_backend": backend, "execution_mode": mode}
+            capabilities: dict[str, Any] = {"execution_backend": backend, "execution_mode": mode,
+                "model_services": backend == 'codex' and bool(self.config.auto_execute_codex)}
             if backend == "codex":
                 capabilities["codex"] = self._model_catalog.get_catalog()
                 if health_path(self.config):
@@ -700,12 +703,39 @@ class BridgeRunner:
                     else:
                         result.pending_tasks.append(task_id)
                         continue
-                self._publish_agent_result(slug, task_id, result)
+                if current['state'] == 'running':
+                    with (
+                        ExecutionRenewal(self.client, slug, task_id, current, immediate=True),
+                        self._agent_progress(slug, task_id, current, remote.get('progress_sequence')) as progress,
+                    ):
+                        self._publish_agent_result(slug, task_id, result, progress=progress)
+                else:
+                    self._publish_agent_result(slug, task_id, result)
             except Exception as exc:
                 if getattr(exc, 'status_code', None) in {403,404,409}:
                     self._reject_agent_receipt(slug, task_id, 'Hub 拒绝旧执行凭据，已保留本地收据。', result)
                 else:
+                    result.pending_tasks.append(task_id)
                     result.messages.append(f'任务 #{task_id} 的收据核对暂未完成，未重新执行。')
+
+    @contextmanager
+    def _agent_progress(self, slug, task_id, execution, sequence=0):
+        # An older Hub may not return a progress sequence during recovery.
+        publish = getattr(self.client, 'publish_execution_progress', None)
+        if not callable(publish) or sequence is None:
+            yield None
+            return
+
+        def send(kind, text):
+            nonlocal sequence
+            sequence += 1
+            publish(slug, task_id, execution, sequence, kind, text[:24000 if kind == 'assistant' else 300])
+
+        dispatcher = ProgressDispatcher(send, interval=0)
+        try:
+            yield dispatcher.publish
+        finally:
+            dispatcher.close()
 
     def _process_leased_agent_task(self, task: dict, device_label: str, result: ProcessResult) -> None:
         slug, task_id = str(task['project_slug']), int(task['id'])
@@ -716,7 +746,8 @@ class BridgeRunner:
             # A new delivery preference must not expand an already-started task.
             receipt['artifact_delivery'] = None
         if receipt and receipt.get('stage') == 'agent_result':
-            self._publish_agent_result(slug, task_id, result)
+            if task_id not in result.pending_tasks:
+                self._publish_agent_result(slug, task_id, result)
             return
         if receipt and receipt.get('stage') == 'agent_decision_blocked':
             if not receipt.get('status_reported'):
@@ -805,9 +836,13 @@ class BridgeRunner:
         if receipt.get('artifact_delivery'):
             context['artifact_delivery'] = receipt['artifact_delivery']
         prompt_path = Path(receipt['prompt_path'])
-        # The start permission already exists: keep it renewed while fetching
-        # fresh requirements and preparing large inputs, not only during CLI work.
-        with ExecutionRenewal(self.client, slug, task_id, receipt['execution']) as renewal:
+        # The same lease covers input preparation, model execution and delivery.
+        with (
+            ExecutionRenewal(self.client, slug, task_id, receipt['execution']) as renewal,
+            self._agent_progress(slug, task_id, receipt['execution']) as progress,
+        ):
+            if progress:
+                progress('status', '正在核对要求和准备附件')
             # Fetch after start is fenced: amendments to queued work cannot leave an old prompt running.
             try:
                 agent_context = self.client.get_agent_context(slug, task_id)
@@ -819,7 +854,9 @@ class BridgeRunner:
                                assigned_agent_id=(agent_context.get('agent') or {}).get('id', task.get('assigned_agent_id')),
                                device_id=current_task.get('assigned_device_id', task.get('assigned_device_id')),
                                project_path=str(self._resolve_project_path(receipt['target_project'])))
-                fresh_prompt = self.client.get_task_prompt(slug, task_id) + self._agent_tool_instructions(slug, task_id)
+                task_prompt = self.client.get_task_prompt(slug, task_id).replace('\r\n', '\n').replace('\r', '\n')
+                context['task_prompt_chars'] = len(task_prompt)
+                fresh_prompt = task_prompt + self._agent_tool_instructions(slug, task_id)
                 if renewal.cancelled.is_set():
                     raise AttachmentPreparationError('本次执行许可已撤销。')
                 prepared = prepare_task_attachments(self.client, self.config, slug, task_id, self._resolve_project_path(receipt['target_project']),
@@ -829,31 +866,24 @@ class BridgeRunner:
                 fresh_prompt += prepared.prompt()
                 prompt_path.write_text(fresh_prompt,encoding='utf-8')
                 receipt['image_paths']=[str(path) for path in prepared.images]
+                context['attachment_inputs'] = prepared.files
                 receipt['execution_context'] = context
                 self._save_state()
             except Exception:
                 detail = ('本次执行许可已撤销，未启动工作进程。' if renewal.cancelled.is_set() else
                           '执行前核对最新要求或附件失败，未启动工作进程。')
-                failure=CodexExecResult(ok=False,command=[],returncode=None,stdout='',stderr='',
+                exec_result=CodexExecResult(ok=False,command=[],returncode=None,stdout='',stderr='',
                     last_message=detail,output_path=prompt_path,error=detail)
-                self._save_agent_result(slug,task_id,failure)
-                self._publish_agent_result(slug,task_id,result)
-                return
-            publish = getattr(self.client, 'publish_execution_progress', None)
-            sequence = 0
-            def progress_callback(kind, text):
-                nonlocal sequence
-                sequence += 1
-                publish(slug, task_id, receipt['execution'], sequence, kind,
-                        text[:24000 if kind == 'assistant' else 300])
-            exec_result = self._execute_codex(receipt['target_project'], prompt_path,
-                prompt_path.read_text(encoding='utf-8'), execution_preferences=receipt.get('model_selection'),
-                image_paths=[Path(p) for p in receipt['image_paths']], execution_context=context,
-                cancel_event=renewal.cancelled,
-                progress_callback=progress_callback if callable(publish) else None)
-        result.executed_codex.append(exec_result)
-        self._save_agent_result(slug, task_id, exec_result)
-        self._publish_agent_result(slug, task_id, result)
+            else:
+                if progress:
+                    progress('status', '正在启动执行')
+                exec_result = self._execute_codex(receipt['target_project'], prompt_path,
+                    prompt_path.read_text(encoding='utf-8'), execution_preferences=receipt.get('model_selection'),
+                    image_paths=[Path(p) for p in receipt['image_paths']], execution_context=context,
+                    cancel_event=renewal.cancelled, progress_callback=progress)
+                result.executed_codex.append(exec_result)
+            self._save_agent_result(slug, task_id, exec_result)
+            self._publish_agent_result(slug, task_id, result, progress=progress)
 
     def _prepare_agent_task(self, project_slug: str, task_id: int, result: ProcessResult) -> bool:
         try:
@@ -997,13 +1027,15 @@ class BridgeRunner:
         if usage is not None:receipt['token_usage'] = usage
         self._save_state()
 
-    def _publish_agent_result(self, project_slug: str, task_id: int, result: ProcessResult) -> None:
+    def _publish_agent_result(self, project_slug: str, task_id: int, result: ProcessResult, *, progress=None) -> None:
         receipt = self.state.get_task_delivery(project_slug, task_id)
         if not receipt or receipt.get("stage") != "agent_result":
             return
         summary = str(receipt.get("result_summary") or "")
         status = receipt.get("result_status") or ("review" if receipt["ok"] else "blocked")
         if receipt.get('execution'):
+            if progress:
+                progress('status', '本轮已结束，正在回传结果')
             body = summary
             try:
                 if not receipt.get('artifact_publish_failed') and callable(getattr(self.client,'upload_task_artifact',None)):
@@ -1035,15 +1067,33 @@ class BridgeRunner:
                 published = self.client.complete_task_execution(project_slug, task_id, receipt['execution'],
                     status=status, summary=body[:1000], body=body, reflection=receipt['reflection'],
                     **({'token_usage': usage} if usage is not None else {}))
+                # A successful HTTP exchange alone is not a completion receipt.
+                # Empty, unrelated or nonterminal responses keep the saved result
+                # available for reconciliation and exact publication retry.
+                acknowledged = published.get('execution') if isinstance(published, dict) else None
+                acknowledged_task = published.get('task') if isinstance(published, dict) else None
+                if (not isinstance(published, dict) or published.get('accepted') is not True
+                        or not isinstance(acknowledged, dict) or not isinstance(acknowledged_task, dict)
+                        or type(acknowledged_task.get('id')) is not int
+                        or type(acknowledged.get('generation')) is not int
+                        or acknowledged_task.get('id') != task_id
+                        or acknowledged.get('generation') != receipt['execution']['generation']
+                        or acknowledged.get('run_key') != receipt['execution']['run_key']
+                        or acknowledged.get('state') not in {'completed', 'yielded'}):
+                    raise HubClientError('Hub 尚未返回与本次执行一致的完成回执，保留结果等待核对。')
             except Exception as exc:
                 from .artifacts import ArtifactValidationError
                 from .delivery_target import DeliveryTargetError
                 if getattr(exc,'status_code',None) in {413,415,422} and receipt.get('artifact_publication') is not None:
+                    if progress:
+                        progress('status', '回传说明未被接收，原结果已保存在执行电脑')
                     self._reject_agent_receipt(project_slug, task_id,
                         '成果上传记录已保留，但 Hub 未接受完成说明；等待核对交付回执，不重新制作或上传。', result)
                     return
                 if isinstance(exc, (ArtifactValidationError, DeliveryTargetError)) or getattr(exc,'status_code',None) in {413,415,422}:
                     if receipt.get('artifact_publish_failed'):
+                        if progress:
+                            progress('status', '回传说明未被接收，原结果已保存在执行电脑')
                         self._reject_agent_receipt(project_slug, task_id,
                             'Hub 未接受交付说明，已保留本地收据等待核对，未重新执行。', result)
                         return
@@ -1054,7 +1104,7 @@ class BridgeRunner:
                     receipt['result_summary']=re.sub(r'<hub-artifacts>.*?</hub-artifacts>','',summary,flags=re.S).strip()+'\n\n成果尚未发布：文件清单、格式或大小不符合上传要求。原执行结果已保留，需要修正交付文件后继续；不能把本地路径当作网页成果。'
                     receipt['reflection']={**receipt['reflection'],'failed':'成果文件未通过上传校验','next_time':'交付前检查清单、文件存在性和大小限制'}
                     self._save_state()
-                    return self._publish_agent_result(project_slug,task_id,result)
+                    return self._publish_agent_result(project_slug,task_id,result,progress=progress)
                 if getattr(exc, 'status_code', None) in {403,404,409}:
                     acknowledge=getattr(self.client,'acknowledge_task_stopped',None)
                     if callable(acknowledge):
@@ -1067,10 +1117,12 @@ class BridgeRunner:
                             return
                     self._reject_agent_receipt(project_slug, task_id, '任务状态或执行代际已改变，结果保留本地，未覆盖 Hub。', result)
                 else:
+                    if progress:
+                        progress('status', '结果已保存在执行电脑，等待补传')
                     result.pending_tasks.append(task_id)
                     result.messages.append(f'任务 #{task_id} 的结果已保存本地，恢复连接后核对回传，未重复执行。')
                 return
-            if isinstance(published,dict) and published.get('yielded'):
+            if acknowledged['state'] == 'yielded':
                 self.state.seen_task_ids.discard(str(task_id))
             else:
                 self.state.seen_task_ids.add(str(task_id))
@@ -1410,7 +1462,16 @@ class BridgeRunner:
                 error=f"项目 {project_slug} 未配置本地文件夹。",
             )
 
-        prompt = self._build_codex_exec_prompt(prompt_path, prompt_body)
+        model = str((execution_preferences or {}).get('model') or '')
+        executor = self.executor
+        if model.startswith('hub-service/'):
+            from .api_model import APIModelRunner
+            executor = APIModelRunner(self.config, self.client)
+            # API services receive the supplied task text directly; they have
+            # no local file/shell tool with which to open a CLI prompt path.
+            prompt = prompt_body
+        else:
+            prompt = self._build_codex_exec_prompt(prompt_path, prompt_body)
         if execution_preferences or image_paths or execution_context:
             options: dict[str, Any] = {}
             if execution_preferences:
@@ -1423,14 +1484,14 @@ class BridgeRunner:
                 options['cancel_event'] = cancel_event
             if progress_callback is not None:
                 options['progress_callback'] = progress_callback
-            return self.executor.run(
+            return executor.run(
                 project_slug,
                 project_path,
                 prompt_path,
                 prompt,
                 **options,
             )
-        return self.executor.run(project_slug, project_path, prompt_path, prompt)
+        return executor.run(project_slug, project_path, prompt_path, prompt)
 
     def _extract_project_thread_request(
         self, mention: dict[str, Any]

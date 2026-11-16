@@ -3,6 +3,7 @@ import time
 import os
 import sys
 import threading
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,9 @@ from codex_bridge.codex_exec import CodexExecRunner
 from codex_bridge.agent_runtime import ExecutionRenewal, read_execution_completion
 from codex_bridge.runner import BridgeRunner
 from codex_hub.agents import AgentStore
+from codex_hub.db import connect_database
 from codex_hub.execution_leases import ExecutionStore, ExecutionConflict
+from codex_hub.repository import Repository
 from test_agent_runtime import AgentClient, Decider, config_for, REFLECTION
 from test_codex_bridge import FakeExecutor, FakeLauncher
 from test_codex_exec import FakeProcessRunner
@@ -36,6 +39,7 @@ class StoreClient(AgentClient):
         agents.route(task['id'], {'action':'new','title':'Recovery','reason':'isolated test'}, 'codex_cli')
         self.task_id = task['id']
         self.store = ExecutionStore(repo)
+        self.database_path = Path(repo.connection.execute('PRAGMA database_list').fetchone()['file'])
         self.hide_inbox = False
         self.start_calls = self.complete_calls = 0
         self.fail_start_ack = self.fail_complete_ack = self.fail_complete_before = False
@@ -64,7 +68,10 @@ class StoreClient(AgentClient):
         return self.store.reconcile(task_id, self.device['id'])
 
     def renew_task_execution(self, slug, task_id, execution):
-        return self.store.renew(task_id, self.device['id'], execution['generation'], execution['run_key'])
+        # The production renewal request owns its own database connection.
+        with closing(connect_database(self.database_path)) as db:
+            store = ExecutionStore(Repository(db), clock=self.store.clock, lease_seconds=self.store.lease_seconds)
+            return store.renew(task_id, self.device['id'], execution['generation'], execution['run_key'])
 
     def complete_task_execution(self, slug, task_id, execution, **payload):
         self.complete_calls += 1
@@ -80,7 +87,7 @@ class StoreClient(AgentClient):
 
 
 class ReceiptExecutor(FakeExecutor):
-    def run(self, *args, execution_context=None, cancel_event=None, **kwargs):
+    def run(self, *args, execution_context=None, cancel_event=None, progress_callback=None, **kwargs):
         result = super().run(*args, **kwargs)
         path = Path(execution_context['receipt_path'])
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,6 +123,52 @@ def test_unknown_complete_ack_recovers_without_inbox_or_duplicate_work(repo, tmp
     assert repo.connection.execute("SELECT COUNT(*) FROM entries WHERE task_id=? AND kind='markdown'", (client.task_id,)).fetchone()[0] == 1
     assert repo.connection.execute("SELECT COUNT(*) FROM entries WHERE task_id=? AND metadata_json LIKE '%completion_notice%'", (client.task_id,)).fetchone()[0] == 1
     assert recovered.state.get_task_delivery('agent-test', client.task_id) is None
+
+
+@pytest.mark.parametrize('response_kind', ['empty', 'null', 'unaccepted', 'wrong_task',
+                                          'wrong_generation', 'wrong_run', 'still_running'])
+def test_unverified_complete_response_retains_receipt_and_recovers_without_work(repo, tmp_path, response_kind):
+    runner, client, executor = runtime(repo, tmp_path)
+    original_complete = client.complete_task_execution
+    sent = []
+
+    def invalid_ack(slug, task_id, execution, **payload):
+        sent.append(payload)
+        response = {'accepted': True, 'task': {'id': task_id},
+                    'execution': {**execution, 'state': 'completed'}}
+        if response_kind == 'empty':
+            return {}
+        if response_kind == 'null':
+            return None
+        if response_kind == 'unaccepted':
+            response['accepted'] = False
+        elif response_kind == 'wrong_task':
+            response['task']['id'] += 1
+        elif response_kind == 'wrong_generation':
+            response['execution']['generation'] += 1
+        elif response_kind == 'wrong_run':
+            response['execution']['run_key'] = 'another-execution'
+        elif response_kind == 'still_running':
+            response['execution']['state'] = 'running'
+        return response
+
+    client.complete_task_execution = invalid_ack
+    result = runner.process_once()
+    saved = runner.state.get_task_delivery('agent-test', client.task_id)
+    assert saved is not None and saved['stage'] == 'agent_result'
+    assert client.task_id in result.pending_tasks
+    assert repo.get_task(client.task_id)['status'] == 'in_progress'
+    assert str(client.task_id) not in runner.state.seen_task_ids
+    client.complete_task_execution = original_complete
+    client.hide_inbox = True
+    recovered = restart(runner, client, executor)
+    recovered.process_once()
+    assert repo.get_task(client.task_id)['status'] == 'review'
+    assert len(executor.calls) == client.start_calls == client.complete_calls == 1
+    assert recovered.state.get_task_delivery('agent-test', client.task_id) is None
+    stored = repo.connection.execute("SELECT body_markdown FROM entries WHERE task_id=? AND kind='markdown'",
+                                     (client.task_id,)).fetchall()
+    assert len(stored) == 1 and stored[0]['body_markdown'] == sent[0]['body']
 
 
 def test_worker_crash_after_cli_completion_uses_native_receipt_without_inbox(repo, tmp_path, monkeypatch):

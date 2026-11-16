@@ -127,6 +127,7 @@ def test_progress_age_updates_without_new_packets_and_preserves_reading(live_hub
     import time
     import codex_hub.execution_progress as progress_module
     monkeypatch.setattr(progress_module, 'ACTIVITY_CLOCK_SECONDS', 1)
+    monkeypatch.setattr(progress_module, 'PROGRESS_QUIET_SECONDS', 20)
     data = seed_workspace(repo, room_messages=70)
     task, run, headers = running_task(repo, data)
     publish(live_hub, task, run, headers, 1, 'assistant', '已收到，正在处理原有工作。')
@@ -150,6 +151,15 @@ def test_progress_age_updates_without_new_packets_and_preserves_reading(live_hub
             assert repo.connection.execute('SELECT sequence FROM hub_execution_progress WHERE task_id=?',(task['id'],)).fetchone()[0] == 2
             assert page.locator('[data-ws-input]').input_value() == '计时更新期间继续编辑的草稿'
             assert abs(scroll.evaluate('el => el.scrollTop')-original_top) < 4
+            repo.connection.execute('UPDATE hub_execution_progress SET updated_at=? WHERE task_id=?',
+                                    (time.time()-30,task['id']))
+            repo.connection.commit()
+            playwright.expect(indicator.locator('[data-ws-progress-label-text]')).to_have_text('进展待更新',timeout=8000)
+            playwright.expect(indicator.locator('[data-ws-progress-warning]')).to_contain_text('未收到新进展')
+            playwright.expect(indicator.locator('.ws-progress-status')).to_contain_text('正在执行工具')
+            publish(live_hub, task, run, headers, 3, 'status', '本轮已结束，正在回传结果')
+            playwright.expect(indicator.locator('[data-ws-progress-warning]')).to_be_hidden(timeout=8000)
+            playwright.expect(indicator.locator('.ws-progress-status')).to_contain_text('正在回传结果')
             repo.connection.execute('UPDATE hub_task_executions SET lease_until=? WHERE task_id=?',(time.time()-1,task['id']))
             repo.connection.commit()
             playwright.expect(indicator).to_contain_text('执行状态待核对',timeout=8000)

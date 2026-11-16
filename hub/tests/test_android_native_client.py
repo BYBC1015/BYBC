@@ -67,8 +67,54 @@ public final class NativeStateCheck {
             case "tabs":
                 for(NativeHubState.Screen screen:NativeHubState.Screen.values()) {
                     NativeHubState.Ticket previous=s.ticket();long tabNav=s.navigation;
-                    s.open(screen);yes(s.screen==screen&&s.navigation>tabNav,"all pages navigate without network");
-                    yes(!s.displays(previous),"old tab cannot repaint new page");
+                    boolean changed=s.open(screen);yes(s.screen==screen,"all pages navigate without network");
+                    yes(changed?s.navigation>tabNav:s.navigation==tabNav,"repeat selection preserves render generation");
+                    yes(changed?!s.displays(previous):s.displays(previous),"only changed route invalidates callback");
+                }break;
+            case "back_stack":
+                s.open(NativeHubState.Screen.TASKS);s.open(NativeHubState.Screen.HISTORY);
+                s.detail(NativeHubState.Screen.TASK,41);s.open(NativeHubState.Screen.SETTINGS);s.open(NativeHubState.Screen.MODELS);
+                yes(s.back()&&s.screen==NativeHubState.Screen.SETTINGS,"models returns to settings");
+                yes(s.back()&&s.screen==NativeHubState.Screen.TASK&&s.detailId==41,"settings returns to exact task");
+                yes(s.back()&&s.screen==NativeHubState.Screen.HISTORY,"task returns to actual source");
+                yes(s.back()&&s.screen==NativeHubState.Screen.TASKS,"history returns to board");break;
+            case "repeat_navigation":
+                s.open(NativeHubState.Screen.SETTINGS);NativeHubState.Ticket setting=s.ticket();
+                for(int i=0;i<100;i++)yes(!s.open(NativeHubState.Screen.SETTINGS),"repeat click does not rebuild page");
+                yes(s.displays(setting),"repeated click does not invalidate current read");
+                yes(s.back()&&s.screen==NativeHubState.Screen.CHAT&&s.conversation==12,"one back escapes repeated taps");break;
+            case "recreation":
+                s.detail(NativeHubState.Screen.TASK,42);s.open(NativeHubState.Screen.SETTINGS);s.open(NativeHubState.Screen.MODELS);
+                String saved=s.saveNavigation();NativeHubState recreated=new NativeHubState();recreated.identify(s.endpoint,s.userId,s.sessionKey);recreated.restoreNavigation(saved);
+                yes(recreated.screen==NativeHubState.Screen.MODELS&&recreated.project.equals("project-a"),"recreation preserves native route");
+                yes(recreated.back()&&recreated.screen==NativeHubState.Screen.SETTINGS,"recreation preserves back stack");
+                yes(recreated.back()&&recreated.detailId==42&&recreated.screen==NativeHubState.Screen.TASK,"recreation retains exact task");
+                String valid=recreated.saveNavigation();for(String invalid:new String[]{"", "WEBVIEW|x|0|0", "CHAT|x|-1|0", "MODELS|x|0|0\nUNKNOWN"}){recreated.restoreNavigation(invalid);yes(valid.equals(recreated.saveNavigation()),"bad navigation cannot create fallback route");}
+                recreated.signOut();yes(!recreated.back(),"logout removes prior account navigation");break;
+            case "history_bound":
+                for(int i=0;i<200;i++)s.detail(NativeHubState.Screen.TASK,i+1);
+                int count=0;while(s.back())count++;
+                yes(count==24,"history is bounded without looping");break;
+            case "pending_room":
+                s.room("project-a",0);s.open(NativeHubState.Screen.SETTINGS);s.open(NativeHubState.Screen.MODELS);
+                NativeHubState.Ticket pending=s.ticket();s.resolveConversation("project-a",0,99);
+                yes(s.screen==NativeHubState.Screen.MODELS&&s.conversation==99,"late receipt does not change page");
+                yes(!s.displays(pending),"receipt fences older zero-room callbacks");
+                s.back();s.back();yes(s.screen==NativeHubState.Screen.CHAT&&s.conversation==99,"back reaches confirmed room not abandoned new draft");break;
+            case "quiet_progress":
+                yes(NativeProgressDisplay.heading(true,true,true).equals("进展待更新"),"quiet heartbeat is not fresh work");
+                yes(NativeProgressDisplay.notice(true,true,true).equals("执行电脑仍在线，暂未收到新进度"),"quiet explanation is explicit");
+                yes(!NativeProgressDisplay.freshContact(true,true,true),"quiet card has no live progress highlight");
+                yes(NativeProgressDisplay.heading(true,true,false).equals("执行连接正常"),"fresh contact does not infer model thinking");
+                yes(NativeProgressDisplay.notice(true,true,false).isEmpty(),"real update clears quiet explanation");break;
+            case "quiet_truth_table":
+                for(boolean online:new boolean[]{false,true})for(boolean contact:new boolean[]{false,true})for(boolean quiet:new boolean[]{false,true}){
+                    String heading=NativeProgressDisplay.heading(online,contact,quiet),notice=NativeProgressDisplay.notice(online,contact,quiet);
+                    yes(notice.contains("仍在线")== (online&&contact&&quiet),"cached quiet status never claims online after disconnect");
+                    yes(!heading.contains("思考")&&!heading.contains("已停止")&&!notice.contains("已停止"),"progress is never a fabricated terminal state or model activity");
+                    yes(NativeProgressDisplay.freshContact(online,contact,quiet)==(online&&contact&&!quiet),"highlight requires confirmed contact and new progress state");
+                    if(!online)yes(heading.contains("待核对"),"offline takes precedence over cached contact");
+                    else if(!contact)yes(heading.equals("执行状态待核对"),"expired task contact takes precedence over quiet");
                 }break;
             case "logout":
                 s.signOut();yes(!s.accepts(old)&&!s.displays(old),"logout immediately rejects callback");
@@ -111,14 +157,14 @@ public final class NativeStateCheck {
 }
 ''', encoding='utf-8')
     compiled = subprocess.run([javac, '-encoding', 'UTF-8', '-d', str(target),
-                               str(JAVA_ROOT / 'NativeHubState.java'), str(JAVA_ROOT / 'NativeHubCookies.java'), str(harness)],
+                               str(JAVA_ROOT / 'NativeHubState.java'), str(JAVA_ROOT / 'NativeHubCookies.java'), str(JAVA_ROOT / 'NativeProgressDisplay.java'), str(harness)],
                               capture_output=True, text=True, timeout=60, **hidden_subprocess_kwargs())
     assert compiled.returncode == 0, compiled.stderr
     return java, target
 
 
 @pytest.mark.parametrize('case', ['same_identity', 'account', 'session', 'endpoint', 'room',
-                                  'project', 'tabs', 'logout', 'scope', 'keys',
+                                  'project', 'tabs', 'back_stack', 'repeat_navigation', 'recreation', 'history_bound', 'pending_room', 'quiet_progress', 'quiet_truth_table', 'logout', 'scope', 'keys',
                                   'cookie_rotation', 'cookie_delete', 'cookie_scope'])
 def test_native_state_behaviour(native_state_harness, case):
     java, target = native_state_harness

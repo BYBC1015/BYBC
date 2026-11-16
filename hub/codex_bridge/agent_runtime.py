@@ -21,7 +21,8 @@ class AgentDecisionError(RuntimeError):
 
 
 class ExecutionRenewal:
-    def __init__(self, client, slug: str, task_id: int, execution: dict, interval: float = 40):
+    def __init__(self, client, slug: str, task_id: int, execution: dict, interval: float = 40,
+                 *, immediate: bool = False):
         factory = getattr(client, 'execution_renewal_client', None)
         self.client = factory() if callable(factory) else client
         self.slug, self.task_id, self.execution, self.interval = slug, task_id, execution, interval
@@ -29,6 +30,7 @@ class ExecutionRenewal:
         self.thread = threading.Thread(target=self._run, name='hub-task-lease', daemon=True)
         self.rejected = False
         self.cancelled = threading.Event()
+        self.immediate = immediate
 
     def __enter__(self):
         self.thread.start()
@@ -39,7 +41,9 @@ class ExecutionRenewal:
         self.thread.join(timeout=min(15, getattr(self.client, 'timeout_seconds', 12) + 1))
 
     def _run(self):
-        while not self.stopped.wait(self.interval):
+        delay = 0 if self.immediate else self.interval
+        while not self.stopped.wait(delay):
+            delay = self.interval
             try:
                 self.client.renew_task_execution(self.slug, self.task_id, self.execution)
             except Exception as exc:

@@ -109,6 +109,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_model_routes(app)
     from .mobile_routes import register_mobile_routes
     register_mobile_routes(app)
+    from .settings_routes import register_settings_routes
+    register_settings_routes(app)
+    from .model_service_routes import register_model_service_routes
+    register_model_service_routes(app)
     return app
 
 
@@ -1818,7 +1822,7 @@ def mobile_notification_payload(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def wants_html(request: Request) -> bool:
-    if request.url.path.startswith('/api/mobile/'):
+    if request.url.path.startswith('/api/'):
         return False
     accept = request.headers.get("accept", "")
     return "text/html" in accept
@@ -2538,17 +2542,21 @@ def render_task_detail(
     project: dict[str, Any],
     task: dict[str, Any],
 ):
+    from .execution_progress import active_progress
+
     repo = get_repo(request)
     files_root = get_settings(request).files_dir
     entries = entries_with_attachments(
         repo, project["id"], files_root, task_id=task["id"]
     )
+    activity = active_progress(repo.connection, project["id"], task_ids=[task["id"]], include_expired=True)
     return render(
         request,
         "task_detail.html",
         user=user,
         project=project,
         task=task,
+        execution_activity=activity[0] if activity else None,
         assigned_agent=(AgentStore(repo.connection).get(project["id"], task["assigned_agent_id"])
                         if task.get("assigned_agent_id") else None),
         control=repo.get_latest_project_control(project["id"]),

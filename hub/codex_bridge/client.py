@@ -6,7 +6,7 @@ import hashlib
 import re
 import uuid
 from pathlib import Path
-from http.client import HTTPConnection, HTTPSConnection
+from http.client import HTTPConnection, HTTPSConnection, HTTPException
 from collections.abc import Callable
 from typing import Any
 from urllib.error import HTTPError
@@ -109,9 +109,17 @@ class HubClient:
             headers={**self._headers(),'Content-Type':'multipart/form-data; boundary='+boundary},method='POST')
         opener=build_opener(ProxyHandler({}),_NoAttachmentRedirect(),_SourceBoundHTTPHandler(self.source_ip),_SourceBoundHTTPSHandler(self.source_ip)) if self.source_ip else build_opener(_NoAttachmentRedirect())
         try:
-            with opener.open(request,timeout=max(30,self.timeout_seconds)) as response: return json.loads(response.read().decode('utf-8'))
+            with opener.open(request,timeout=max(30,self.timeout_seconds)) as response:
+                receipt = json.loads(response.read().decode('utf-8'))
+            attachment_id = receipt.get('attachment_id') if isinstance(receipt, dict) else None
+            url = receipt.get('url') if isinstance(receipt, dict) else None
+            if type(attachment_id) is not int or attachment_id <= 0 or not isinstance(url, str) or not url:
+                raise HubClientError('成果上传未返回有效回执，保留本地文件等待核对；未确认已发布。')
+            return receipt
         except HTTPError as exc:
             raise HubClientError(f'成果上传失败（HTTP {exc.code}），保留本地文件等待重试',status_code=exc.code) from None
+        except (OSError, ValueError, HTTPException):
+            raise HubClientError('成果上传结果尚未确认，保留本地文件等待核对；未自动重复发送。') from None
 
     def acquire_task_execution(self, slug: str, task_id: int, run_key: str) -> dict:
         return self._json('POST', f'/api/projects/{slug}/tasks/{task_id}/execution/acquire', {'run_key':run_key})

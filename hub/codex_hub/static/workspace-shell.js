@@ -530,6 +530,7 @@
     shell.querySelector("[data-ws-no-rooms]").hidden = !term || found > 0;
   }
   function selectPanel(kind, id) {
+    const previousPanel = inspector.querySelector('[data-ws-agent-panel]:not([hidden]),[data-ws-task-panel]:not([hidden])');
     if (kind === "agent") selectedAgent = String(id || selectedAgent || "");
     else selectedTask = String(id || selectedTask || "");
     activeTab = kind;
@@ -552,10 +553,14 @@
     shell.querySelectorAll("[data-ws-agent]").forEach((button) => button.setAttribute("aria-pressed", String(kind === "agent" && button.dataset.wsAgent === selectedAgent)));
     updateFeedbackLinks();
     saveUi();
+    const currentPanel = inspector.querySelector(`[data-ws-${kind}-panel]:not([hidden])`);
+    if (currentPanel !== previousPanel) { window.HubMotion?.cancel(previousPanel); window.HubMotion?.enter(currentPanel, {distance:3, duration:160}); }
   }
   function syncDrawers() {
     const rightVisible = inspectorOpen && (!narrow.matches || drawer === "inspector");
     const leftVisible = !small.matches || drawer === "sidebar";
+    const rightWasVisible = inspector.getAttribute('aria-hidden') !== 'true';
+    const leftWasVisible = sidebar.getAttribute('aria-hidden') !== 'true';
     shell.classList.toggle("is-inspector-hidden", !rightVisible && !narrow.matches);
     shell.classList.toggle("is-inspector-open", narrow.matches && drawer === "inspector");
     shell.classList.toggle("is-sidebar-open", small.matches && drawer === "sidebar");
@@ -576,6 +581,10 @@
     } else {
       [sidebar, inspector].forEach((surface) => { surface.removeAttribute("role"); surface.removeAttribute("aria-modal"); });
     }
+    if (rightVisible && !rightWasVisible) window.HubMotion?.enter(inspector, {distance:5});
+    else if (!rightVisible) window.HubMotion?.cancel(inspector);
+    if (leftVisible && !leftWasVisible) window.HubMotion?.enter(sidebar, {distance:5});
+    else if (!leftVisible) window.HubMotion?.cancel(sidebar);
   }
   function openInspector(opener) {
     if (drawer) closeDrawer(false, false);
@@ -597,8 +606,9 @@
     drawerOpener = null;
   }
 
-  // Old project bookmarks retain their original archive destination.
-  const oldAnchors = new Set(["members","files","tasks","project-memory","memory","control","codex-projects","codex-workspaces"]);
+  // Historical records retain their destination; settings bookmarks belong to
+  // the local settings surface and must never route back into archive HTML.
+  const oldAnchors = new Set(["files","tasks","project-memory","memory"]);
   if (shell.dataset.conversation === "new" && oldAnchors.has(location.hash.slice(1))) {
     location.replace(shell.dataset.projectUrl + "?view=archive" + location.hash);
     return;

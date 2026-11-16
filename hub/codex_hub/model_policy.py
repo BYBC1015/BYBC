@@ -32,10 +32,15 @@ def agent_policy(db, agent_id):
         'reasoning_effort': '', 'reason': '', 'revision': 0}
 
 
-def available_models(data_dir, device_id):
+def available_models(data_dir, device_id, db=None, project_id=None):
     if not device_id:
         return []
-    return load_device_capabilities(data_dir, [device_id]).get(device_id, {}).get('codex', {}).get('models', [])
+    caps = load_device_capabilities(data_dir, [device_id]).get(device_id, {})
+    models = caps.get('codex', {}).get('models', [])
+    if caps.get('model_services') is True and db is not None and project_id:
+        from .model_services import service_models
+        models = models + service_models(db, project_id, device_id)
+    return models
 
 
 def validate_choice(value, models):
@@ -51,7 +56,10 @@ def validate_choice(value, models):
         raise ValueError('执行设备尚未上报此模型，请先核验该设备的模型能力')
     if effort not in {row['reasoningEffort'] for row in match['supportedReasoningEfforts']}:
         raise ValueError('所选模型不支持这个思考档位')
-    return {'model': model, 'reasoning_effort': effort, 'reason': reason}
+    choice = {'model': model, 'reasoning_effort': effort, 'reason': reason}
+    if model.startswith('hub-service/'):
+        choice.update({key: match[key] for key in ('service_revision', 'supports_tools', 'supports_images')})
+    return choice
 
 
 def save_policy(db, agent, data_dir, *, mode, model='', reasoning_effort='', reason='', actor='user'):
@@ -63,7 +71,10 @@ def save_policy(db, agent, data_dir, *, mode, model='', reasoning_effort='', rea
     choice = {'model': '', 'reasoning_effort': '', 'reason': ''}
     if model:
         choice = validate_choice({'model': model, 'reasoning_effort': reasoning_effort, 'reason': reason},
-                                 available_models(data_dir, agent.get('device_id')))
+                                 available_models(data_dir, agent.get('device_id'), db, agent.get('project_id')))
+        if model.startswith('hub-service/') and agent.get('kind') == 'controller' and not choice['supports_tools']:
+            raise ValueError('总控需要支持工具调用的模型服务，才能安排和调整工作')
+        choice = {key: choice[key] for key in ('model', 'reasoning_effort', 'reason')}
     elif mode == 'manual':
         raise ValueError('手动指定需要选择模型')
     at = datetime.now(timezone.utc).isoformat()
@@ -86,17 +97,25 @@ def task_choice(db, task_id):
 
 def select_model(db, agent, data_dir, requested=None, *, task=None):
     policy = agent_policy(db, agent['id'])
-    models = available_models(data_dir, agent.get('device_id'))
+    models = available_models(data_dir, agent.get('device_id'), db, agent.get('project_id'))
+    def checked(value):
+        choice = validate_choice(value, models)
+        if choice['model'].startswith('hub-service/'):
+            if (task or {}).get('execution_route') == 'project':
+                raise ValueError('本地工程任务需要 Codex CLI；请为此身份恢复总控分配或选择 CLI 模型')
+            if agent.get('kind') == 'controller' and not choice['supports_tools']:
+                raise ValueError('总控模型需支持工具调用，才能安排工作')
+        return choice
     if policy['mode'] == 'manual':
-        choice = validate_choice(policy, models)
+        choice = checked(policy)
         return {**choice, 'source': 'user', 'policy_revision': policy['revision']}
     if requested:
-        choice = validate_choice(requested, models)
+        choice = checked(requested)
         if not choice['reason']:
             raise ValueError('总控分配模型时需要说明选择原因')
         return {**choice, 'source': 'controller', 'policy_revision': policy['revision']}
     if policy['model']:
-        return {**validate_choice(policy, models), 'source': 'controller', 'policy_revision': policy['revision']}
+        return {**checked(policy), 'source': 'controller', 'policy_revision': policy['revision']}
     # This default is an explicit preference rule, not a claim that an LLM evaluated this task.
     preferences = [('gpt-6.1-sol', 'medium'), ('gpt-6-sol', 'medium'), ('gpt-5.6-sol', 'high'), ('gpt-6-astra', 'medium')]
     reason = '默认偏好策略；总控可按工作需要调整，用户可手动指定。'
@@ -118,8 +137,9 @@ def select_model(db, agent, data_dir, requested=None, *, task=None):
             return {**choice, 'source': 'default_policy', 'policy_revision': policy['revision']}
         except ValueError:
             continue
-    if models:
-        item = next((m for m in models if m.get('isDefault')), models[0])
+    cli_models = [m for m in models if not m['model'].startswith('hub-service/')]
+    if cli_models:
+        item = next((m for m in cli_models if m.get('isDefault')), cli_models[0])
         effort = item.get('defaultReasoningEffort') or next((e['reasoningEffort'] for e in item['supportedReasoningEfforts']), '')
         if effort:
             return {'model': item['model'], 'reasoning_effort': effort, 'source': 'device_catalog',

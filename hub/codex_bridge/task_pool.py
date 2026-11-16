@@ -75,7 +75,10 @@ class DurableTaskPool:
         for path in root.glob('*/task.json'):
             try:
                 task=json.loads(path.read_text(encoding='utf-8'))
-                if type(task.get('id')) is not int or str(task['id'])!=path.parent.name or not re.fullmatch(r'[A-Za-z0-9_-]+',task.get('project_slug','')):
+                if (not isinstance(task, dict) or type(task.get('id')) is not int
+                        or task['id'] <= 0 or str(task['id']) != path.parent.name
+                        or not isinstance(task.get('project_slug'), str)
+                        or not re.fullmatch(r'[A-Za-z0-9_-]+', task['project_slug'])):
                     continue
                 if task.get('assigned_agent_kind','worker')!=lane:continue
                 state=BridgeState.load(path.parent/'state.json')
@@ -135,17 +138,25 @@ class DurableTaskPool:
                 same_kind=sum(bool(self.metadata[active_id].get('controller_read_only'))==read_only for active_id in self.active)
                 if same_kind >= (1 if read_only else self.capacity):continue
             elif len(self.active)>=self.capacity:break
-            keys=resource_keys(self.config,task)
-            if any(keys & held for _,held in self.active.values()):continue
-            runner=self.runners.get(task_id)
-            if runner is None:
-                runner=self.runner_factory(task);self.runners[task_id]=runner
-            self.metadata[task_id]=task
-            path=task_config(self.config,task).state_path.parent/'task.json'
-            path.parent.mkdir(parents=True,exist_ok=True)
-            saved={key:task[key] for key in ('id','project_id','project_slug','assigned_agent_id','assigned_agent_kind','assigned_device_id','conversation_id','execution_mode','resource_keys_json','execution_route','execution_route_reason','controller_read_only') if key in task}
-            temp=path.with_suffix('.tmp');temp.write_text(json.dumps(saved),encoding='utf-8');temp.replace(path)
-            future=self.executor.submit(runner.process_once)
+            try:
+                keys=resource_keys(self.config,task)
+                if any(keys & held for _,held in self.active.values()):continue
+                runner=self.runners.get(task_id)
+                if runner is None:
+                    runner=self.runner_factory(task);self.runners[task_id]=runner
+                self.metadata[task_id]=task
+                path=task_config(self.config,task).state_path.parent/'task.json'
+                path.parent.mkdir(parents=True,exist_ok=True)
+                saved={key:task[key] for key in ('id','project_id','project_slug','assigned_agent_id','assigned_agent_kind','assigned_device_id','conversation_id','execution_mode','resource_keys_json','execution_route','execution_route_reason','controller_read_only') if key in task}
+                temp=path.with_suffix('.tmp');temp.write_text(json.dumps(saved),encoding='utf-8');temp.replace(path)
+                future=self.executor.submit(runner.process_once)
+            except Exception as exc:
+                # Preparation happens before the future exists. A locked state
+                # file or invalid local task must not starve independent work.
+                # Keep all receipts and require metadata persistence before run.
+                self.retry_after[task_id]=time.monotonic()+15
+                messages.append(f'任务 #{task_id} 准备暂未完成（{type(exc).__name__}），保留收据；其他任务继续。')
+                continue
             self.active[task_id]=(future,keys)
             future.add_done_callback(lambda _:self.wakeup.set())
         return messages

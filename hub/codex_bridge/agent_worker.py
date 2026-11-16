@@ -192,6 +192,10 @@ def main(argv: list[str] | None = None, *, stop_event=None, status_callback=None
             heartbeat = AgentWorkerHeartbeat(HubClient(config.hub, config.token,
                 timeout_seconds=min(12, config.hub_request_timeout_seconds),
                 get_retry_attempts=1, source_ip=config.hub_source_ip), on_success=status_callback)
+            from .model_service_client import ModelServiceProbeWorker
+            model_probes = ModelServiceProbeWorker(HubClient(config.hub, config.token,
+                timeout_seconds=min(12, config.hub_request_timeout_seconds),
+                get_retry_attempts=1, source_ip=config.hub_source_ip))
             controller=controller_config(config)
             controller_client=AgentOnlyHubClient(config.hub,config.token,timeout_seconds=config.hub_request_timeout_seconds,
                 get_retry_attempts=config.hub_get_retry_attempts,retry_backoff_seconds=config.hub_retry_backoff_seconds,source_ip=config.hub_source_ip)
@@ -238,6 +242,7 @@ def main(argv: list[str] | None = None, *, stop_event=None, status_callback=None
                 if stop_event is not None and stop_event.is_set():
                     return 0
                 heartbeat.start()
+                model_probes.start()
                 controller_thread.start()
                 recovery_thread.start()
                 for thread in poll_threads:thread.start()
@@ -266,6 +271,7 @@ def main(argv: list[str] | None = None, *, stop_event=None, status_callback=None
                         if recovery_thread.ident is not None: recovery_thread.join()
                 finally:
                     heartbeat.close()
+                    model_probes.close()
                 emit('Hub 智能体后台已完成收尾并停止。')
         finally:
             instance.close()

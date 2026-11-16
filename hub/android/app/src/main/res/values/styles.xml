@@ -1,13 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowActionBar">false</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:navigationBarColor">#fffefa</item>
-        <item name="android:statusBarColor">#fffefa</item>
-        <item name="android:windowBackground">#fffefa</item>
-        <item name="android:colorAccent">#a58b21</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">#15191d</item>
+        <item name="android:statusBarColor">#15191d</item>
+        <item name="android:windowBackground">#15191d</item>
+        <item name="android:colorAccent">#d3c2a7</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:alertDialogTheme">@style/NativeDialogTheme</item>
+    </style>
+    <style name="NativeDialogTheme" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/native_dialog_background</item>
+        <item name="android:windowMinWidthMajor">90%</item>
+        <item name="android:windowMinWidthMinor">90%</item>
+        <item name="android:colorBackground">#20272c</item>
+        <item name="android:colorAccent">#d3c2a7</item>
+        <item name="android:textColorPrimary">#e8eceb</item>
+        <item name="android:textColorSecondary">#9eafb7</item>
+        <item name="android:windowSoftInputMode">adjustResize</item>
         <item name="android:fontFamily">sans</item>
     </style>
 </resources>

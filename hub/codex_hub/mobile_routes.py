@@ -94,6 +94,7 @@ def task_data(row):
     data['status_label'] = row.get('board_label') or STATUS_LABELS.get(row['status'], row['status'])
     data['in_history'] = bool(row.get('in_history'))
     data['archive_eligible'] = bool(row.get('archive_eligible'))
+    data['can_cancel'] = row['status'] in {'open', 'claimed', 'in_progress', 'blocked'}
     return data
 
 
@@ -249,9 +250,42 @@ def register_mobile_routes(app):
             row['attachments'] = [item for item in attachments if item['entry_id'] == row['id']][:12]
         from .execution_progress import active_progress
         messages = [message_data(request, slug, row) for row in reversed(rows)]
-        return {'task': task_data(task), 'entries': messages, 'messages': messages,
+        from .execution_leases import latest_execution
+        execution = latest_execution(repo.connection, task_id)
+        view = task_data(task)
+        waiting = bool(task['status'] == 'cancelled' and execution and execution['state'] in {'running', 'uncertain'})
+        view.update(cancel_requested=waiting, execution_state=execution['state'] if execution else None,
+                    cancel_message='停止请求已送达，等待执行电脑确认。' if waiting else '')
+        if waiting:
+            view['status_label'] = '正在停止 · 等待执行电脑确认'
+        return {'task': view, 'entries': messages, 'messages': messages,
                 'progress': active_progress(repo.connection, project['id'], task_ids=[task_id], include_expired=True),
                 'older_entries_before': older}
+
+    @app.post('/api/mobile/projects/{slug}/tasks/{task_id}/cancel')
+    async def mobile_cancel(request: Request, slug: str, task_id: int):
+        user, repo, project = scope(request, slug)
+        if user.get('role') != 'owner':
+            raise HTTPException(403, '只有管理员可以停止任务')
+        data = await object_body(request)
+        csrf(request, data)
+        from .execution_leases import latest_execution
+        with repo.connection:
+            repo.connection.execute('BEGIN IMMEDIATE')
+            task = require_project_task(repo, project, task_id)
+            if task['status'] in {'review', 'done'}:
+                raise HTTPException(409, '任务已经交付，无需停止')
+            if task['status'] != 'cancelled':
+                repo.update_task_status(task_id, 'cancelled')
+            execution = latest_execution(repo.connection, task_id)
+        waiting = bool(execution and execution['state'] in {'running', 'uncertain'})
+        view = task_data(repo.get_task(task_id))
+        message = '停止请求已送达，等待执行电脑确认。' if waiting else '任务已取消，不会再次执行。'
+        view.update(can_cancel=False, cancel_requested=waiting, cancel_message=message,
+                    execution_state=execution['state'] if execution else None)
+        if waiting:
+            view['status_label'] = '正在停止 · 等待执行电脑确认'
+        return {'task': view, 'cancel_requested': waiting, 'stopped': not waiting, 'message': message}
 
     @app.get('/api/mobile/projects/{slug}/devices')
     def mobile_devices(request: Request, slug: str):

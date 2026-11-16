@@ -178,3 +178,31 @@ def test_post_project_entry_rejects_question_mark_encoding_loss(monkeypatch):
         client.post_project_entry("private-server-buildout", damaged)
 
     assert called is False
+
+
+@pytest.mark.parametrize('raw', [b'{}', b'null', b'{bad', b'{"attachment_id":true,"url":"/file"}',
+                                b'{"attachment_id":1,"url":""}'])
+def test_unverified_upload_reply_is_not_reported_as_published_or_retried(monkeypatch, raw):
+    calls = []
+    class Opener:
+        def open(self, request, timeout):
+            calls.append(request)
+            return FakeResponse(raw)
+    monkeypatch.setattr(client_module, 'build_opener', lambda *args: Opener())
+    client = HubClient('https://hub.example', 'synthetic-token')
+    with pytest.raises(HubClientError, match='核对'):
+        client.upload_task_artifact('project-one', 9, {'generation': 1, 'run_key': 'stable'},
+            'artifact-key', 'report.md', 'report.md', 'text/markdown', b'content')
+    assert len(calls) == 1
+
+
+def test_verified_upload_reply_retains_download_identity(monkeypatch):
+    expected = {'attachment_id': 7, 'url': '/projects/project-one/attachments/7', 'replayed': True}
+    class Opener:
+        def open(self, request, timeout):
+            return FakeResponse(json.dumps(expected).encode())
+    monkeypatch.setattr(client_module, 'build_opener', lambda *args: Opener())
+    result = HubClient('https://hub.example', 'synthetic-token').upload_task_artifact(
+        'project-one', 9, {'generation': 1, 'run_key': 'stable'},
+        'artifact-key', 'report.md', 'report.md', 'text/markdown', b'content')
+    assert result == expected
