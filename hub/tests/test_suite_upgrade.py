@@ -192,12 +192,11 @@ def test_directory_link_cannot_escape_cleanup_root(isolated):
     link = old / 'linked'
     try: link.symlink_to(outside, target_is_directory=True)
     except OSError:
-        quote = lambda p: "'" + str(p).replace("'", "''") + "'"
+        import _winapi
         assert link.absolute().is_relative_to(isolated.absolute())
         assert outside.absolute().is_relative_to(isolated.absolute())
-        subprocess.run(['powershell.exe','-NoProfile','-Command',
-                        'New-Item -ItemType Junction -Path ' + quote(link) + ' -Target ' + quote(outside) + ' | Out-Null'],
-                       check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        _winapi.CreateJunction(str(outside), str(link))
+    assert link.is_symlink() or link.is_junction(), 'The safety fixture must contain a real reparse point'
     with pytest.raises(ValueError): u.safe_child(old,'linked/work.txt')
     assert (outside/'work.txt').read_text() == 'keep'
     link.rmdir()  # Remove only the junction, never the target directory.

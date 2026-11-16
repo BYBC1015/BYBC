@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path, PurePosixPath
 import shutil
 import sys
@@ -97,7 +98,7 @@ def prepare(stage_root: Path, video_archive: Path, kling_archive: Path) -> None:
     print(json.dumps({'prepared': str(stage), 'files': len(prepared['files']), 'components': COMPONENTS}, ensure_ascii=False))
 
 
-def package_prepared(stage_root: Path, binaries_dir: Path) -> Path:
+def package_prepared(stage_root: Path, binaries_dir: Path, *, installer_core: Path | None = None) -> Path:
     stage = stage_root / 'payload'
     prepared = json.loads((stage_root / 'prepared-public-files.json').read_text(encoding='utf-8'))
     if prepared['version'] != build.__version__ or prepared['components'] != COMPONENTS:
@@ -112,7 +113,7 @@ def package_prepared(stage_root: Path, binaries_dir: Path) -> Path:
         raise ValueError('Unmanifested files in staging: ' + ', '.join(sorted(extras)))
     executables = []
     for name in BINARIES:
-        source = binaries_dir / name
+        source = binaries_dir / Path(name).stem / name if installer_core is not None else binaries_dir / name
         with source.open('rb') as incoming:
             if incoming.read(2) != b'MZ' or source.stat().st_size < 100_000:
                 raise ValueError('Missing/invalid built executable: ' + name)
@@ -121,25 +122,50 @@ def package_prepared(stage_root: Path, binaries_dir: Path) -> Path:
         if build.sha(source) != before or build.sha(stage / name) != before:
             raise ValueError('Executable changed during staging: ' + name)
         executables.append({'name': name, 'bytes': source.stat().st_size, 'sha256': before})
+        if installer_core is not None:
+            from build_directory_release import RUNTIMES
+            runtime = RUNTIMES[name]
+            runtime_source = source.parent / runtime
+            if not runtime_source.is_dir() or runtime_source.is_symlink() or runtime_source.is_junction():
+                raise ValueError('Missing/unsafe directory runtime: ' + runtime)
+            for directory, folders, filenames in os.walk(runtime_source, followlinks=False):
+                parent = Path(directory)
+                for item in [parent / entry for entry in folders + filenames]:
+                    if item.is_symlink() or item.is_junction():
+                        raise ValueError('Directory runtime contains a link: ' + str(item))
+                for filename in filenames:
+                    item = parent / filename
+                    target = safe_target(stage, runtime + '/' + item.relative_to(runtime_source).as_posix())
+                    if build.system_runtime_file(target, stage):
+                        continue
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    original_hash = build.sha(item)
+                    shutil.copy2(item, target)
+                    if build.sha(item) != original_hash or build.sha(target) != original_hash:
+                        raise ValueError('Directory runtime changed during staging')
     (stage_root / 'native-inputs.json').write_text(json.dumps(executables, indent=2), encoding='utf-8')
     # The established installer retains upgrade, rollback, configuration
     # inheritance, verified-file cleanup and uninstall behavior unchanged.
-    return build.package(stage, components=COMPONENTS, release_dir=stage_root / 'release')
+    return build.package(stage, components=COMPONENTS, release_dir=stage_root / 'release', native_core=installer_core)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--stage-root', type=Path, default=OUTPUT / ('package-v' + build.__version__))
+    parser.add_argument('--staging-parent', type=Path, default=OUTPUT,
+                        help='Explicit parent for a dedicated build stage, e.g. a separate QA drive')
     parser.add_argument('--binaries-dir', type=Path, default=ROOT / 'dist')
     parser.add_argument('--video-archive', type=Path,
         default=ROOT.parent / 'tools/bybc-video-freeze/release/BYBC_视频末帧延长工具_Portable_v1.1.1.zip')
     parser.add_argument('--kling-archive', type=Path)
     parser.add_argument('--prepare-only', action='store_true')
     parser.add_argument('--package-prepared', action='store_true')
+    parser.add_argument('--installer-core', type=Path, help='Use native setup and directory binaries from build_directory_release.py')
     args = parser.parse_args()
     stage_root = args.stage_root.resolve()
-    if not stage_root.is_relative_to(OUTPUT.resolve()) or stage_root == OUTPUT.resolve():
-        parser.error('staging must be a dedicated child of ' + str(OUTPUT))
+    staging_parent = args.staging_parent.resolve()
+    if not stage_root.is_relative_to(staging_parent) or stage_root == staging_parent:
+        parser.error('staging must be a dedicated child of ' + str(staging_parent))
     if args.prepare_only and args.package_prepared:
         parser.error('--prepare-only and --package-prepared are mutually exclusive')
     if not args.package_prepared:
@@ -147,7 +173,7 @@ def main():
             parser.error('--kling-archive is required when preparing public files')
         prepare(stage_root, args.video_archive, args.kling_archive)
     if not args.prepare_only:
-        package_prepared(stage_root, args.binaries_dir)
+        package_prepared(stage_root, args.binaries_dir, installer_core=args.installer_core)
 
 
 if __name__ == '__main__':

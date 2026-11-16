@@ -1,4 +1,6 @@
-# BYBC Hub 1.2.0
+# BYBC Hub 1.3.0
+
+本版与 Hub 2.13.0 配套，设置在当前工作区内打开；支持绑定执行电脑的 Ollama、LM Studio 和 OpenAI 兼容模型服务，保留默认 Codex CLI 执行方式。更新任务恢复、完成回执和附件校验；结果不明的外部请求不会自动重放。
 
 本版新增独立桌面工作区：同一窗口使用 Hub 聊天、智能体、附件和成果预览。启动后直接进入工作区；原控制台从系统托盘“连接与设置”打开。桌面窗口使用独立、持久化的网页登录状态，首次登录一次；关闭窗口后，后台工作继续运行，需要完全停止时选择托盘“安全退出”。
 
@@ -10,7 +12,9 @@
 
 本版加入节拍工坊的逐轨曲线编辑：管弦乐、钢琴、吉他等可用曲线调整曲调、节奏疏密与音符长短，曲调吸附音阶，段落长度支持 1–16 小节。保留 1.0.27 对新版 Codex 模型菜单和自动发送的兼容修复。
 
-Windows 10/11 64 位统一安装包。Bridge 是主入口，安装后默认随 Windows 登录自动启动并连接；桌面和开始菜单入口均为 **Codex Bridge**。可在主页面取消“开机自启”。新设备需先配置本设备的 Hub Token。
+Windows 10/11 x64 统一安装包。Bridge 是主入口，安装后默认随 Windows 登录自动启动并连接；桌面和开始菜单入口均为 **Codex Bridge**。可在主页面取消“开机自启”。新设备需先配置本设备的 Hub Token。
+
+安装包使用 Windows 提供的 API-set 和通用 C 运行库。安装前会只读检查固定系统目录中的 Visual C++ v14 x64 运行库，包括 VC 与 MFC 文件的版本、架构及本版需要的接口；缺失或不满足时会在提取前停止，并提供[微软官方组件页面](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)和[微软 x64 下载入口](https://aka.ms/vc14/vc_redist.x64.exe)，由用户安装或修复后重试。Hub 不自动下载、安装或修改系统运行库。
 
 安装器启动后自动检测旧软件，也可点击“检测旧软件”重新检查，或“添加旧程序位置”检查其他目录。检测范围包括当前用户的软件注册、桌面与开始菜单入口、自启和运行中的 Bridge、常见安装位置、下载目录中的可灵版本文件夹，以及目标目录旁的旧安装暂存。不会遍历全盘。
 
@@ -19,6 +23,8 @@ Windows 10/11 64 位统一安装包。Bridge 是主入口，安装后默认随 W
 安装后逐文件校验通过，才按已发布版本的文件指纹清理旧程序。配置、作品、历史、被修改和不认识的文件始终保留；旧可灵任务快捷方式会指向新版并保留批次参数。正在运行的 Bridge 需先从托盘退出；其他正在使用的旧工具会暂时保留，关闭后重新运行安装器即可再次检测。达芬奇运行环境不清理。
 
 升级记录保存在 `%APPDATA%/CodexBridge/upgrade-report.json`。默认清理完成后只保留新版程序；可取消清理以保留旧程序。安装目录里的额外个人文件也会保留在原路径。此功能只管理已识别程序，不删除下载压缩包或开发源代码。
+
+新版安装完成和旧程序清理分别记录。若新版已完成校验，但清理旧程序时中断，会明确提示“旧程序清理未完成”，保留残余文件，不影响新版使用，详情见升级记录；不会将清理中断显示为全部完成。卸载程序已启动也不等于文件已经移除，最终以卸载完成记录为准。
 
 主页面保留 AI 绑定、网络与系统、运行日志，点击 **打开工具箱** 按需打开以下独立窗口：
 
@@ -37,8 +43,8 @@ Windows 10/11 64 位统一安装包。Bridge 是主入口，安装后默认随 W
 
 调色程序也需要 Resolve Studio 21.1 的完整运行环境，换电脑会重新检测安装位置，不依赖原设备盘符。用户配方和历史在 `%APPDATA%/HubColorWorkshop`，LUT 应用时安装在本机 Resolve LUT 目录；升级不覆盖已有 LUT。Windows x64 已实测，macOS／Linux 未适配。
 
-桌面版构建：先将本版本 `CodexBridge.exe`、`HubAgentRuntime.exe`、`HubDesktop.exe` 构建到 `dist`，再运行 `uv run --extra desktop --with pyinstaller --with psutil python tools/hub-suite/build_desktop.py --kling-archive <可灵1.2.1已发布ZIP>`。脚本固定验证视频 1.1.1 与可灵 1.2.1 发布包的 SHA-256；音乐使用 `music-files.json`、调色使用 `color-files.json` 验证公开源码和资源，只复制清单内文件。不会读取已安装软件的用户配置、历史或未列入清单的文件。
+Windows 1.3.0 的默认发布格式是目录运行环境加原生安装启动器。维护者先用 `tools/hub-suite/build_directory_release.py --stage all` 构建三个程序与安装核心，再用 `build_desktop.py --prepare-only` 准备公开组件，最后用 `build_desktop.py --package-prepared --binaries-dir <directory-dist> --installer-core <directory-dist/InstallerCore>` 组合安装包。完整命令和依赖边界见源码仓库的 `deploy/BRIDGE-1.3.0.md`。旧 `onefile` 命令不作为本版发布入口。
 
-可先用 `--prepare-only` 准备公开组件，等本版三个 EXE 完成后再用 `--package-prepared` 打包。构建暂存及最终安装器位于项目 `output/hub-local-first-20261029/package-v1.2.0`，发布文件在其中 `release` 子目录；`prepared-public-files.json` 和 `native-inputs.json` 记录构建输入，`release.json` 与 `SHA256SUMS.txt` 记录交付校验。原生构建前自动生成静态资源路径、查询版本与 SHA-256 清单；不匹配的资源仍走服务器，防止旧桌面覆盖新版网页脚本。旧 `build.py` 保留历史构建支持，桌面版不能用其旧工具版本默认值重新发布。
+脚本固定验证视频 1.1.1 与可灵 1.2.1 发布包的 SHA-256；音乐使用 `music-files.json`、调色使用 `color-files.json` 验证公开源码和资源，只复制清单内文件。不会读取已安装软件的用户配置、历史或未列入清单的文件。构建须使用新的独立暂存目录；`prepared-public-files.json` 和 `native-inputs.json` 记录构建输入，`release.json` 与 `SHA256SUMS.txt` 记录交付校验。原生构建前自动生成静态资源路径、查询版本与 SHA-256 清单；不匹配的资源仍走服务器，防止旧桌面覆盖新版网页脚本。
 
-隔离验证：运行 `python tools/hub-suite/verify_desktop_package.py <安装器> --validation-dir <output/hub-local-first-20261029 下的新报告目录>`。报告保存在指定目录，配置、安装和解包都使用 Windows 临时目录下唯一的 `hub-installer-qa-*` 隔离目录，以免工作区继承权限影响原生安装程序。测试不创建系统快捷方式、注册或自启，不扫描现有安装，不修改任何目录权限；验证逐文件校验、配置继承、重装升级、个人文件保留和真实卸载程序。测试不会启动智能体或使用模型 API。
+隔离验证包括外壳合成测试和真实完整包验收，两者分别记录。配置、安装和解包使用 Windows 临时目录下唯一的 `hub-installer-qa-*` 隔离目录。测试不创建系统快捷方式、注册或自启，不扫描现有安装，不修改任何目录权限；验证逐文件校验、配置继承、重装升级、个人文件保留和真实卸载程序。测试不会启动智能体或使用模型 API。本轮完整包验收使用 x64 VC/MFC 14.50 环境，各项结果以发布记录为准；不能据此声称所有 Windows 10/11 版本均经过实机验证，也不能用前置检查通过代替功能验收。

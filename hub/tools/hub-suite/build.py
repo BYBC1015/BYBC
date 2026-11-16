@@ -17,10 +17,39 @@ from codex_bridge import __version__
 KLING_SHA256 = "92cd829331cf6e0c4bd3ceb64a5461ebc1f5fa52eca40c76bfc15fe594e99657"
 
 
+def load_system_runtime_names():
+    profile = json.loads(Path(__file__).with_name('system-runtime-profile.json').read_text(encoding='utf-8'))
+    names = profile['files']
+    if profile.get('schema_version') != 1 or not isinstance(names, list) or not names:
+        raise ValueError('Invalid system runtime profile')
+    if any(not isinstance(name, str) or name != name.lower() or not name.endswith('.dll')
+           or '/' in name or '\\' in name or ':' in name for name in names):
+        raise ValueError('System runtime profile requires exact DLL basenames')
+    if len(set(names)) != len(names):
+        raise ValueError('Duplicate system runtime profile name')
+    return frozenset(names)
+
+
+SYSTEM_RUNTIME_NAMES = load_system_runtime_names()
+
+
 def system_runtime_file(path, stage):
     relative = path.relative_to(stage).as_posix()
-    return relative.startswith("tools/video-freeze/_internal/") and (
-        path.name.lower() == "ucrtbase.dll" or path.name.lower().startswith("api-ms-win-crt-"))
+    system_runtime_root = relative.split('/')[0] in {
+        'runtime-agent', 'runtime-bridge', 'runtime-desktop', 'runtime-installer'}
+    if not (system_runtime_root or relative.startswith('tools/video-freeze/_internal/')):
+        return False
+    # Only the audited profile is supplied by Windows. New API-set-looking
+    # names remain app-local until their actual dependency contract is reviewed.
+    return path.name.lower() in SYSTEM_RUNTIME_NAMES
+
+
+def excluded_public_payload_file(path, stage):
+    # The unmodified download is a development cache. Its 28 extracted files,
+    # licenses and source provenance remain in the public payload. Historical
+    # ownership manifests are not altered by this new-package selection rule.
+    return (path.relative_to(stage).as_posix() == 'tools/beat-workshop/assets/fluidsynth.zip'
+            or system_runtime_file(path, stage))
 
 
 def sha(path):
@@ -134,7 +163,10 @@ def copy_color(stage):
         shutil.copy2(source / relative, target)
 
 
-def package(stage, *, components=None, release_dir=None):
+def package(stage, *, components=None, release_dir=None, native_core=None):
+    if native_core is not None:
+        from build_directory_release import package_native
+        return package_native(stage, native_core, components, release_dir or ROOT / 'dist/suite')
     installer = Path(__file__).with_name("installer.py")
     common = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--windowed",
               "--icon", str(ROOT / "codex_bridge/assets/codex-owl.ico"), "--hidden-import", "win32com.client",
@@ -144,7 +176,7 @@ def package(stage, *, components=None, release_dir=None):
     subprocess.run(common + ["--name", "Uninstall", "--distpath", str(stage), "--workpath", str(stage.parent / "uninstall-build"), str(installer)], check=True)
     shutil.copy2(Path(__file__).with_name("README.md"), stage / "使用说明.md")
     files = [{"path": p.relative_to(stage).as_posix(), "bytes": p.stat().st_size, "sha256": sha(p)}
-             for p in sorted(stage.rglob("*")) if p.is_file() and p.name != "bundle-manifest.json" and not system_runtime_file(p, stage)]
+             for p in sorted(stage.rglob("*")) if p.is_file() and p.name != "bundle-manifest.json" and not excluded_public_payload_file(p, stage)]
     component_versions = components or {"bridge": __version__, "video-freeze": "1.0.1", "kling-batch": "1.1.1", "beat-workshop": "0.5.0", "color-workshop": "1.0.1"}
     if (stage / 'HubDesktop.exe').is_file():
         component_versions = {**component_versions, 'desktop': __version__}

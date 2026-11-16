@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -51,6 +52,59 @@ def test_corrupt_payload_cannot_replace_install(tmp_path, monkeypatch):
     assert not root.exists()
 
 
+@pytest.mark.parametrize('name', ['../escape.txt', 'nested\\escape.txt', 'NUL.txt', 'extra.txt.', 'CON/data.txt'])
+def test_native_extraction_validates_windows_paths_before_process_start(tmp_path, monkeypatch, name):
+    stage = tmp_path / 'stage'; stage.mkdir()
+    archive = tmp_path / 'bad.zip'
+    manifest = {'files': [{'path': name, 'sha256': hashlib.sha256(b'payload').hexdigest()}]}
+    with zipfile.ZipFile(archive, 'w') as output:
+        output.writestr('bundle-manifest.json', json.dumps(manifest))
+        output.writestr(name, b'payload')
+    monkeypatch.setattr(installer, 'system_tar', lambda: pytest.fail('Unsafe archive reached native extractor'))
+    with pytest.raises(ValueError): installer.extract_verified_payload(archive, stage)
+    assert list(stage.iterdir()) == []
+
+
+def test_native_extraction_rejects_symlink_and_case_collisions(tmp_path, monkeypatch):
+    monkeypatch.setattr(installer, 'system_tar', lambda: pytest.fail('Unsafe archive reached native extractor'))
+    for kind in ('link', 'case'):
+        stage = tmp_path / kind; stage.mkdir()
+        archive = tmp_path / (kind + '.zip')
+        members = ['link'] if kind == 'link' else ['App.exe', 'app.exe']
+        manifest = {'files': [{'path': n, 'sha256': hashlib.sha256(b'payload').hexdigest()} for n in members]}
+        with zipfile.ZipFile(archive, 'w') as output:
+            output.writestr('bundle-manifest.json', json.dumps(manifest))
+            for name in members:
+                info = zipfile.ZipInfo(name)
+                if kind == 'link': info.external_attr = (0o120777 << 16)
+                output.writestr(info, b'payload')
+        with pytest.raises(ValueError): installer.extract_verified_payload(archive, stage)
+        assert list(stage.iterdir()) == []
+
+
+def test_native_extractor_failure_keeps_existing_installation(tmp_path, monkeypatch):
+    root = old_and_new_payload(tmp_path, monkeypatch)
+    import types
+    monkeypatch.setattr(installer.subprocess, 'run', lambda *a, **kw: types.SimpleNamespace(returncode=1, stderr=b'controlled extraction failure'))
+    with pytest.raises(RuntimeError, match='现有安装未改动'):
+        installer.install(root, shortcuts=False, registration=False, startup=False, scan_system=False)
+    assert (root / 'CodexBridge.exe').read_bytes() == b'old bridge'
+
+
+def test_native_extractor_unexpected_file_never_becomes_installation(tmp_path, monkeypatch):
+    payload(tmp_path, monkeypatch)
+    import types
+    def altered_extract(command, **kwargs):
+        with zipfile.ZipFile(command[2]) as source: source.extractall(command[4])
+        (Path(command[4]) / 'unregistered.txt').write_bytes(b'extra')
+        return types.SimpleNamespace(returncode=0)
+    monkeypatch.setattr(installer.subprocess, 'run', altered_extract)
+    target = tmp_path / 'installed'
+    with pytest.raises(ValueError, match='清单不一致'):
+        installer.install(target, shortcuts=False, registration=False, startup=False)
+    assert not target.exists()
+
+
 def test_non_app_directory_rejected(tmp_path, monkeypatch):
     root = tmp_path / "personal"
     root.mkdir()
@@ -58,6 +112,23 @@ def test_non_app_directory_rejected(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="其他文件"):
         installer.install(root, shortcuts=False, registration=False)
     assert (root / "important.txt").read_text() == "keep"
+
+
+@pytest.mark.parametrize('quiet', [False, True])
+def test_uninstall_handoff_preserves_quiet_mode_and_copies_complete_launcher(tmp_path, monkeypatch, quiet):
+    wrapper = tmp_path / 'Uninstall.exe'; wrapper.write_bytes(b'complete native wrapper')
+    helper = tmp_path / 'helper'; helper.mkdir()
+    target = tmp_path / '安装 space'
+    monkeypatch.setattr(sys, 'executable', str(wrapper))
+    monkeypatch.setattr(sys, 'argv', [str(wrapper), '--uninstall', str(target)] + (['--quiet'] if quiet else []))
+    monkeypatch.setattr(installer.tempfile, 'mkdtemp', lambda **kw: str(helper))
+    monkeypatch.setattr(installer.messagebox, 'askyesno', lambda *a: True)
+    calls = []
+    monkeypatch.setattr(installer.subprocess, 'Popen', lambda *a, **kw: calls.append((a, kw)))
+    assert installer.main() == 0
+    assert (helper / 'Uninstall.exe').read_bytes() == wrapper.read_bytes()
+    assert calls[0][0][0] == [str(helper / 'Uninstall.exe'), '--remove', str(target.resolve())] + (['--quiet'] if quiet else [])
+    assert calls[0][1]['env']['PYINSTALLER_RESET_ENVIRONMENT'] == '1'
 
 
 @pytest.mark.parametrize("name", ["../outside.txt", "C:/outside.txt"])
@@ -193,6 +264,65 @@ def test_cleanup_can_be_disabled(tmp_path,monkeypatch):
     assert state['cleanup'] == []
 
 
+def receipt_environment(tmp_path, monkeypatch, operation='install'):
+    path = tmp_path / 'completion.json'
+    monkeypatch.setenv('CODEX_HUB_INSTALLER_RECEIPT_PATH', str(path))
+    monkeypatch.setenv('CODEX_HUB_INSTALLER_NONCE', 'a' * 32)
+    monkeypatch.setenv('CODEX_HUB_INSTALLER_OPERATION', operation)
+    return path
+
+
+def test_native_cleanup_interruption_leaves_verified_commit_and_pending_receipt(tmp_path, monkeypatch):
+    root = old_and_new_payload(tmp_path, monkeypatch)
+    receipt = receipt_environment(tmp_path, monkeypatch)
+    class NativeInterruption(BaseException): pass
+    def interrupted(*args, **kwargs): raise NativeInterruption()
+    monkeypatch.setattr(installer.upgrade, 'cleanup', interrupted)
+    with pytest.raises(NativeInterruption):
+        installer.install(root, shortcuts=False, registration=False, startup=False, scan_system=False)
+    state = json.loads((root / installer.MARKER).read_text(encoding='utf-8'))
+    result = json.loads(receipt.read_text(encoding='utf-8'))
+    assert state['installation_committed'] is True
+    assert state['status'] == result['status'] == 'installed_cleanup_pending'
+    assert state['cleanup_status'] == 'pending'
+    assert state['operation_nonce'] == result['nonce'] == 'a' * 32
+    assert result['target'] == str(root.resolve()) and result['version'] == installer.VERSION
+    assert '尚未完成' in state['completion']
+    assert (root / 'CodexBridge.exe').read_bytes() == b'new bridge'
+    assert (Path(state['previous_installation']) / 'CodexBridge.exe').read_bytes() == b'old bridge'
+    assert json.loads((installer.upgrade.default_config_path().parent / 'upgrade-report.json').read_text(encoding='utf-8'))['cleanup_status'] == 'pending'
+
+
+def test_successful_cleanup_advances_receipt_only_after_owned_files_removed(tmp_path, monkeypatch):
+    root = old_and_new_payload(tmp_path, monkeypatch)
+    receipt = receipt_environment(tmp_path, monkeypatch)
+    state = installer.install(root, shortcuts=False, registration=False, startup=False, scan_system=False)
+    result = json.loads(receipt.read_text(encoding='utf-8'))
+    assert result['status'] == state['status'] == 'installed'
+    assert state['cleanup_status'] == 'complete'
+    assert not (Path(state['previous_installation']) / 'CodexBridge.exe').exists()
+
+
+def test_interrupted_uninstall_never_writes_removed_receipt(tmp_path, monkeypatch):
+    payload(tmp_path, monkeypatch)
+    root = tmp_path / 'installed'
+    installer.install(root, shortcuts=False, registration=False, startup=False, scan_system=False)
+    receipt = receipt_environment(tmp_path, monkeypatch, 'remove')
+    class NativeInterruption(BaseException): pass
+    unlink = Path.unlink
+    def interrupted(path, *args, **kwargs):
+        if path == root / 'app.exe': raise NativeInterruption()
+        return unlink(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'unlink', interrupted)
+    with pytest.raises(NativeInterruption): installer.uninstall(root)
+    assert json.loads(receipt.read_text(encoding='utf-8'))['status'] == 'uninstall_pending'
+    assert json.loads((root / installer.MARKER).read_text(encoding='utf-8'))['uninstall_status'] == 'pending'
+    assert (root / 'app.exe').exists()
+    monkeypatch.setattr(Path, 'unlink', unlink)
+    installer.uninstall(root)
+    assert json.loads(receipt.read_text(encoding='utf-8'))['status'] == 'removed'
+
+
 def preference_payload(tmp_path, monkeypatch):
     """Both release manifests own a default; the user edits their old copy."""
     root = old_and_new_payload(tmp_path, monkeypatch)
@@ -275,12 +405,10 @@ def test_linked_local_preferences_rejected_before_install_without_reading_target
     except OSError:
         if link_kind=='file':
             pytest.skip('Windows file symlink permission unavailable; directory junction is exercised separately')
-        import subprocess
-        quote=lambda path: "'"+str(path).replace("'","''")+"'"
+        import _winapi
         assert link.absolute().is_relative_to(tmp_path.absolute()) and outside.absolute().is_relative_to(tmp_path.absolute())
-        subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-Command',
-            'New-Item -ItemType Junction -Path '+quote(link)+' -Target '+quote(outside)+' | Out-Null'],
-            check=True,capture_output=True,creationflags=subprocess.CREATE_NO_WINDOW)
+        _winapi.CreateJunction(str(outside), str(link))
+    assert link.is_symlink() or link.is_junction(), 'The safety fixture must contain a real reparse point'
     original_read=Path.read_bytes
     def guarded_read(path):
         assert not path.resolve().is_relative_to(outside.resolve()), 'Linked preference must not be read'

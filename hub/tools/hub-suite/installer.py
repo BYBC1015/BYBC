@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 from contextlib import contextmanager
 import hashlib
 import json
@@ -35,6 +36,44 @@ MARKER = ".hub-suite-install.json"
 # This runtime document contains a user's Resolve installation path. Package
 # defaults are verified as shipped, but an existing local document is user data.
 LOCAL_PREFERENCES = ("tools/beat-workshop/runtime.json",)
+
+
+def atomic_json(path: Path, value: dict) -> None:
+    temporary = path.with_name(path.name + '.writing-' + uuid.uuid4().hex)
+    try:
+        with temporary.open('x', encoding='utf-8') as stream:
+            json.dump(value, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def operation_receipt(target: Path, status: str, message: str) -> None:
+    """A native exit code alone cannot prove an installation reached its commit."""
+    value = os.environ.get('CODEX_HUB_INSTALLER_RECEIPT_PATH')
+    if not value:
+        return  # Source-only callers do not have an outer launcher.
+    nonce = os.environ.get('CODEX_HUB_INSTALLER_NONCE', '')
+    operation = os.environ.get('CODEX_HUB_INSTALLER_OPERATION', '')
+    receipt = Path(value)
+    if not nonce or not operation or not receipt.is_absolute():
+        raise ValueError('安装完成回执契约无效')
+    atomic_json(receipt, {'schema': 1, 'nonce': nonce, 'version': VERSION,
+        'operation': operation, 'target': str(target.resolve()),
+        'status': status, 'message': message[:4096]})
+
+
+def persist_install_state(root: Path, state: dict, *, receipt: bool = True) -> None:
+    atomic_json(root / MARKER, state)
+    report_path = upgrade.default_config_path().parent / 'upgrade-report.json'
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_json(report_path, {key: state[key] for key in (
+        'version', 'configuration', 'cleanup', 'cleanup_status', 'completion',
+        'installation_committed', 'operation_nonce', 'status')})
+    if receipt:
+        operation_receipt(root, state['status'], state['completion'])
 
 
 def inside(root: Path, relative: str) -> Path:
@@ -157,6 +196,116 @@ def shortcut_target(path):
             link = shell = None
 
 
+def system_tar() -> Path:
+    """Resolve the OS-owned extractor without consulting PATH or environment."""
+    directory = ctypes.create_unicode_buffer(32768)
+    count = ctypes.windll.kernel32.GetSystemDirectoryW(directory, len(directory))
+    if not count or count >= len(directory):
+        raise RuntimeError("无法读取 Windows 系统目录。")
+    tool = Path(directory.value) / 'tar.exe'
+    if not tool.is_file():
+        raise RuntimeError("此安装包需要 Windows 10 1803 或更新版本的系统解压组件，请先更新 Windows。")
+    return tool
+
+
+@contextmanager
+def payload_read_lock(path):
+    # Keep the exact reviewed ZIP immutable until the system extractor exits.
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32,
+                                  ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+    kernel.CreateFileW.restype = ctypes.c_void_p
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    handle = kernel.CreateFileW(str(path), 0x80000000, 1, None, 3, 0x80, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        yield
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def extract_verified_payload(archive_path, stage):
+    """Validate before extraction and after it, before touching an old install."""
+    if stage.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT or any(stage.iterdir()):
+        raise ValueError('安装暂存目录必须是全新的普通空目录')
+    with payload_read_lock(archive_path), zipfile.ZipFile(archive_path) as archive:
+        members = archive.infolist()
+        if len(members) > 20_000 or sum(item.file_size for item in members) > 16 * 1024 ** 3:
+            raise ValueError('安装包大小或文件数超出限制')
+        if archive.getinfo('bundle-manifest.json').file_size > 8 * 1024 ** 2:
+            raise ValueError('安装包清单过大')
+        manifest = json.loads(archive.read('bundle-manifest.json'))
+        expected = {item['path']: item for item in manifest['files']}
+        names = [item.filename for item in members]
+        if (len(expected) != len(manifest['files']) or len(names) != len({name.casefold() for name in names})
+                or set(names) != set(expected) | {'bundle-manifest.json'}):
+            raise ValueError('安装包清单校验失败')
+        directories = set()
+        for item in members:
+            name = item.filename
+            if ('\\' in name or ':' in name or name.startswith('/')
+                    or any(part in ('', '.', '..') for part in name.split('/'))):
+                raise ValueError('安装包包含无效路径')
+            reserved = {'CON', 'PRN', 'AUX', 'NUL', 'CONIN$', 'CONOUT$'} | {
+                prefix + number for prefix in ('COM', 'LPT') for number in '123456789¹²³'}
+            if any(part.endswith((' ', '.')) or any(ord(ch) < 32 or ch in '<>"|?*' for ch in part)
+                   or part.split('.')[0].upper() in reserved for part in name.split('/')):
+                raise ValueError('安装包包含 Windows 保留路径')
+            # Reject path-bearing/nonstandard ZIP metadata before asking tar to
+            # interpret it. Our release writer emits only optional ZIP64 sizes.
+            extra = item.extra
+            while extra:
+                if len(extra) < 4:
+                    raise ValueError('安装包扩展信息无效')
+                kind, length = int.from_bytes(extra[:2], 'little'), int.from_bytes(extra[2:4], 'little')
+                if kind not in (0x0001, 0x5455) or len(extra) < length + 4:
+                    raise ValueError('安装包包含不支持的路径扩展信息')
+                extra = extra[length + 4:]
+            inside(stage, name)
+            if (item.is_dir() or ((item.external_attr >> 16) & 0o170000) not in (0, stat.S_IFREG)
+                    or item.external_attr & 0x400):
+                raise ValueError('安装包包含链接或特殊文件')
+            for parent in Path(name).parents:
+                if str(parent) != '.': directories.add(parent.as_posix())
+            if name in expected:
+                record = expected[name]
+                if ('bytes' in record and (type(record['bytes']) is not int or record['bytes'] != item.file_size)):
+                    raise ValueError('安装包文件长度不符：' + name)
+                with archive.open(item) as content:
+                    if hashlib.file_digest(content, 'sha256').hexdigest() != record['sha256']:
+                        raise ValueError('安装包校验失败：' + name)
+        if {name.casefold() for name in names} & {name.casefold() for name in directories}:
+            raise ValueError('安装包路径发生文件与目录冲突')
+        result = subprocess.run([str(system_tar()), '-xf', str(archive_path), '-C', str(stage)],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if result.returncode:
+            failure = RuntimeError('Windows 标准解压未完成；现有安装未改动。')
+            failure.add_note('System extractor diagnostics: ' + result.stderr[-16_000:].decode('utf-8', errors='replace'))
+            raise failure
+        if stage.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            raise ValueError('解压暂存目录成为链接')
+        actual = set()
+        for directory, folders, files in os.walk(stage, followlinks=False):
+            parent = Path(directory)
+            for name in folders + files:
+                path = parent / name
+                if path.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                    raise ValueError('解压结果包含链接')
+            if parent != stage and parent.relative_to(stage).as_posix() not in directories:
+                raise ValueError('解压结果包含未登记目录')
+            actual.update((parent / name).relative_to(stage).as_posix() for name in files)
+        if actual != set(names):
+            raise ValueError('解压结果与安装包清单不一致')
+        for name, record in expected.items():
+            if digest(stage / name) != record['sha256']:
+                raise ValueError('解压后的文件校验失败：' + name)
+        if (stage / 'bundle-manifest.json').read_bytes() != archive.read('bundle-manifest.json'):
+            raise ValueError('解压后的清单发生变化')
+        return manifest, expected
+
+
 def install(root, report=lambda text: None, shortcuts=True, registration=True, startup=True,
             inherit=True, cleanup_old=True, legacy_dirs=(), inherit_config=None, scan_system=True):
     if sys.getwindowsversion().major < 10:
@@ -180,18 +329,7 @@ def install(root, report=lambda text: None, shortcuts=True, registration=True, s
     stage.mkdir()
     archive_path = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "payload.zip"
     report("正在安装内置工具…")
-    with zipfile.ZipFile(archive_path) as archive:
-        manifest = json.loads(archive.read("bundle-manifest.json"))
-        expected = {item["path"]: item for item in manifest["files"]}
-        if len(expected) != len(manifest["files"]) or len(archive.namelist()) != len(set(archive.namelist())) or set(archive.namelist()) != set(expected) | {"bundle-manifest.json"}:
-            raise ValueError("安装包清单校验失败")
-        for relative in archive.namelist():
-            target = inside(stage, relative)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with archive.open(relative) as source, target.open("wb") as dest:
-                shutil.copyfileobj(source, dest)
-            if relative in expected and digest(target) != expected[relative]["sha256"]:
-                raise ValueError("安装包校验失败：" + relative)
+    manifest, expected = extract_verified_payload(archive_path, stage)
     original_candidate = next((c for c in detected.candidates if c.root.resolve() == root), None)
     upgrade.carry_user_files(root, stage, original_candidate)
     # The payload and pristine manifest have already been verified above. Keep
@@ -257,6 +395,19 @@ def install(root, report=lambda text: None, shortcuts=True, registration=True, s
         if digest(root / relative) != preserved.get(relative, item['sha256']):
             raise ValueError("安装后校验失败，旧版本已保留。")
     state['cleanup'] = []
+    state['installation_committed'] = True
+    state['operation_nonce'] = os.environ.get('CODEX_HUB_INSTALLER_NONCE', '')
+    state['cleanup_status'] = 'pending' if cleanup_old and detected.candidates else ('complete' if cleanup_old else 'skipped')
+    state['status'] = 'installed_cleanup_pending' if state['cleanup_status'] == 'pending' else 'installed'
+    state['completion'] = f"安装完成。{state['configuration']['status']}。"
+    if state['cleanup_status'] == 'pending':
+        state['completion'] += ' 旧文件清理尚未完成，残余已保留；详见升级记录。'
+    elif not cleanup_old:
+        state['completion'] += ' 已按选择保留旧程序。'
+    # Persist commit BEFORE optional cleanup. A native interruption during an
+    # unlink must never erase proof that the new installation was verified, or
+    # falsely claim the remaining old files were removed.
+    persist_install_state(root, state)
     if cleanup_old:
         report("新版已验证，正在清理旧程序并保留个人数据…")
         cleaned_entries = set()
@@ -265,8 +416,14 @@ def install(root, report=lambda text: None, shortcuts=True, registration=True, s
             if candidate.root.resolve() == root:
                 if previous is None: continue
                 candidate = replace(candidate, root=previous, entry=previous / candidate.entry.name)
-            outcome = upgrade.cleanup(candidate, protected_root=root, check_idle=check_idle)
+            try:
+                outcome = upgrade.cleanup(candidate, protected_root=root, check_idle=check_idle)
+            except (OSError, ValueError, RuntimeError) as error:
+                outcome = {'path': str(candidate.root), 'can_clean': False,
+                    'removed_files': 0, 'remaining_files': len(candidate.owned),
+                    'status': '旧文件清理未完成，残余已保留：' + type(error).__name__}
             state['cleanup'].append(outcome)
+            persist_install_state(root, state)
             if candidate.safe and not candidate.entry.exists():
                 if original_entry.resolve() != (root / 'CodexBridge.exe').resolve():
                     cleaned_entries.add(original_entry)
@@ -278,12 +435,11 @@ def install(root, report=lambda text: None, shortcuts=True, registration=True, s
                 state['shortcut_cleanup'] = ['部分旧快捷方式被占用，已保留']
     removed = sum(item['removed_files'] for item in state['cleanup'])
     pending = sum(bool(not item['can_clean'] or item['remaining_files'] or '占用' in item['status']) for item in state['cleanup'])
+    state['cleanup_status'] = ('pending' if pending else 'complete') if cleanup_old else 'skipped'
+    state['status'] = 'installed_cleanup_pending' if pending else 'installed'
     state['completion'] = f"安装完成。{state['configuration']['status']}；清理 {removed} 个旧程序文件。"
     if pending: state['completion'] += f" {pending} 个占用、变化或未识别的旧程序已保留，详见升级记录。"
-    (root / MARKER).write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    report_path = upgrade.default_config_path().parent / 'upgrade-report.json'
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(json.dumps({'version':VERSION,'configuration':state['configuration'],'cleanup':state['cleanup'],'completion':state['completion']}, ensure_ascii=False, indent=2), encoding='utf-8')
+    persist_install_state(root, state)
     report(state['completion'])
     return state
 
@@ -295,6 +451,10 @@ def uninstall(root):
         raise ValueError("安装目录与记录不一致")
     check_idle(root)
     targets = [inside(root, name) for name in state["files"]]
+    state['uninstall_status'] = 'pending'
+    state['uninstall_nonce'] = os.environ.get('CODEX_HUB_INSTALLER_NONCE', '')
+    atomic_json(root / MARKER, state)
+    operation_receipt(root, 'uninstall_pending', '卸载未完成，剩余程序文件已保留；配置与个人数据未删除。')
     StartupManager().remove_if_owned(root / "CodexBridge.exe")
     # Resolve and validate all paths before deleting any owned file.
     for path in targets:
@@ -324,9 +484,12 @@ def uninstall(root):
             if folder == root:
                 break
             folder = folder.parent
+    operation_receipt(root, 'removed', '卸载完成；本机配置、个人文件和作品已保留。')
 
 
 def main():
+    if '--help' in sys.argv[1:] or '-h' in sys.argv[1:]:
+        operation_receipt(Path(os.environ.get('CODEX_HUB_INSTALLER_TARGET') or '.'), 'help', '已显示安装器帮助。')
     parser = argparse.ArgumentParser()
     parser.add_argument("--install-dir", type=Path, default=Path(os.environ["LOCALAPPDATA"]) / "Programs/CodexHub")
     parser.add_argument("--quiet", action="store_true")
@@ -349,16 +512,22 @@ def main():
         except ValueError as exc:
             configuration = {'status':str(exc)}
         args.scan_only.write_text(json.dumps({'programs':[c.summary() for c in found.candidates],'configuration':configuration}, ensure_ascii=False, indent=2), encoding='utf-8')
+        operation_receipt(args.scan_only, 'scanned', '检测报告已保存。')
         return 0
     if args.uninstall:
         if not args.quiet and not messagebox.askyesno(NAME, "卸载 Bridge 和附属工具？本机配置、历史任务和成片将保留。"):
+            operation_receipt(args.uninstall, 'cancelled', '已取消卸载。')
             return 0
         helper_dir = Path(tempfile.mkdtemp(prefix="codex-hub-uninstall-"))
         helper = helper_dir / "Uninstall.exe"
         shutil.copy2(sys.executable, helper)
         env = os.environ.copy()
         env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-        subprocess.Popen([str(helper), "--remove", str(args.uninstall.resolve())], env=env, cwd=helper_dir)
+        command = [str(helper), "--remove", str(args.uninstall.resolve())]
+        if args.quiet:
+            command.append("--quiet")
+        subprocess.Popen(command, env=env, cwd=helper_dir)
+        operation_receipt(args.uninstall, 'launched', '卸载进程已启动，尚未确认清理完成。')
         return 0
     if args.remove:
         # Let the original one-file uninstaller finish before checking locks.
@@ -497,6 +666,9 @@ def main():
     poll()
     scan_now()
     window.mainloop()
+    receipt_path = os.environ.get('CODEX_HUB_INSTALLER_RECEIPT_PATH')
+    if not receipt_path or not Path(receipt_path).is_file():
+        operation_receipt(Path(location.get()), 'cancelled', '已关闭安装器，未完成安装。')
     return 0
 
 

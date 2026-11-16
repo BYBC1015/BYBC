@@ -71,6 +71,8 @@ def verify(release: Path, validation: Path) -> dict:
     if config.read_bytes() != config_before:
         raise AssertionError('Existing isolated configuration was changed')
     state = json.loads((install_root / '.hub-suite-install.json').read_text(encoding='utf-8'))
+    if not state.get('installation_committed') or state.get('status') != 'installed' or state.get('cleanup_status') != 'complete':
+        raise AssertionError('Fresh install lacks its verified completion record')
     if state['startup'] or state['registration'] or state['shortcuts']:
         raise AssertionError('Isolation flags were not respected')
 
@@ -100,6 +102,14 @@ def verify(release: Path, validation: Path) -> dict:
         raise AssertionError('Upgrade rollback directory not recorded inside isolation')
     if upgraded['cleanup'] and any(row['status'].startswith('失败') for row in upgraded['cleanup']):
         raise AssertionError('Verified old-file cleanup failed')
+    if not upgraded.get('installation_committed') or upgraded.get('status') not in {'installed', 'installed_cleanup_pending'}:
+        raise AssertionError('Upgrade lacks its verified commit record')
+    cleanup_pending = upgraded['status'] == 'installed_cleanup_pending'
+    if cleanup_pending:
+        if upgraded.get('cleanup_status') != 'pending' or '清理' not in upgraded['completion']:
+            raise AssertionError('Interrupted cleanup must remain explicit in the installation record')
+        if '清理' not in (validation / 'upgrade.log').read_text(encoding='utf-8-sig'):
+            raise AssertionError('Quiet installation hid its pending cleanup warning')
 
     # Exercise the actual frozen uninstaller from outside the target directory,
     # as its normal self-copying launcher does before removing owned files.
@@ -118,6 +128,8 @@ def verify(release: Path, validation: Path) -> dict:
         'temporary_directory': str(temporary),
         'isolated_state_directory': str(state_root),
         'preserved_local_preferences': preserved,
+        'old_cleanup_status': upgraded['cleanup_status'],
+        'old_cleanup_pending': cleanup_pending,
         'checks': ['fresh install in Chinese/spaced directory', 'all installed hashes',
                    'desktop/bridge/runtime companions', 'same-version upgrade and rollback record',
                    'existing configuration byte preservation', 'user file retention',
