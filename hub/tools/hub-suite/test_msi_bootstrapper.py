@@ -35,6 +35,7 @@ if(args[0]=="parse") {B.Parse(new string[]{"ALLUSERS=1"});throw new Exception("A
 if(args[0]=="parsecache") {B.Parse(new string[]{"--cache-dir",args[1]});Console.WriteLine("CACHE_OPTION");return 0;}
 if(args[0]=="cache") {var options=B.Parse(new string[]{"--cache-dir",args[2]});string target=B.CachedMsiPath(options);using(var input=File.OpenRead(args[1]))B.CacheMsi(input,target,MsiBootstrapBuild.MsiBytes,MsiBootstrapBuild.MsiHash);Console.WriteLine("CACHE "+Convert.ToBase64String(Encoding.UTF8.GetBytes(target)));return 0;}
 if(args[0]=="arguments") {var o=new B.Options{Quiet=true,NoShortcuts=true,InstallDirectory=args[4]};int result=B.RunEngine(args[1],B.EngineArguments(args[2],args[3],o),true);Console.WriteLine("CODE "+result);return 0;}
+if(args[0]=="rawarguments") {var o=new B.Options{Quiet=true,NoShortcuts=true,InstallDirectory=args[3]};Console.WriteLine(Convert.ToBase64String(Encoding.UTF8.GetBytes(B.EngineArguments(args[1],args[2],o))));return 0;}
 if(args[0]=="build") {B.ValidateWindowsBuild(new WindowsRuntimePrerequisites.SystemFact{WindowsMajor=10,WindowsBuild=UInt32.Parse(args[1])});Console.WriteLine("SUPPORTED_BUILD");return 0;}
 if(args[0]=="basicui") {Console.WriteLine(B.EngineArguments("package.msi","log.txt",new B.Options()));return 0;}
 if(args[0]=="run") {var watch=Stopwatch.StartNew();int code=B.RunEngine(args[1],B.Quote("synthetic spaced argument"),true);Console.WriteLine("CODE "+code+" MS "+watch.ElapsedMilliseconds);return 0;}
@@ -108,9 +109,19 @@ class MsiBootstrapperTests(unittest.TestCase):
         self.assertEqual(args, ['/i', str(msi), '/qn', '/norestart', 'REBOOT=ReallySuppress', 'MSIRESTARTMANAGERCONTROL=Disable', '/Lwe', str(log), 'INSTALLDIR=' + target, 'HUB_SHORTCUTS=0'])
         self.assertIn(b'CODE 3010', result.stdout)
         basic, _ = self.invoke('basicui')
-        self.assertIn(b'"/qb"', basic.stdout)
+        self.assertIn(b' /qb ', basic.stdout)
+        self.assertNotIn(b'"/qb"', basic.stdout)
         self.assertNotIn(b'/qb!', basic.stdout)
         self.assertNotIn(b'HUB_SHORTCUTS=0', basic.stdout)
+
+    def test_native_msi_command_syntax_quotes_only_paths_and_property_values(self):
+        # Managed argv round trips alone cannot detect msiexec's switch grammar.
+        msi, log, target = (str(self.work / name) for name in ('中文 package.msi', '日志 output.log', '目标 folder'))
+        result, _ = self.invoke('rawarguments', msi, log, target)
+        self.assertEqual(result.returncode, 0)
+        command = base64.b64decode(result.stdout.strip()).decode('utf-8')
+        self.assertEqual(command, '/i "' + msi + '" /qn /norestart REBOOT=ReallySuppress '
+                         'MSIRESTARTMANAGERCONTROL=Disable /Lwe "' + log + '" INSTALLDIR="' + target + '" HUB_SHORTCUTS=0')
 
     def test_real_windows_build_floor_matches_msi(self):
         before, _ = self.invoke('build', 17133)

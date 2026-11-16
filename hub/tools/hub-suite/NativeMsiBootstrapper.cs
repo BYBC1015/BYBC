@@ -73,11 +73,15 @@ internal static class NativeMsiBootstrapper
 
     internal static string EngineArguments(string msi, string log, Options options)
     {
-        List<string> values = new List<string> { "/i", msi, options.Quiet ? "/qn" : "/qb", "/norestart",
-            "REBOOT=ReallySuppress", "MSIRESTARTMANAGERCONTROL=Disable", "/Lwe", log };
-        if (options.InstallDirectory != null) values.Add("INSTALLDIR=" + options.InstallDirectory);
-        if (options.NoShortcuts) values.Add("HUB_SHORTCUTS=0");
-        return String.Join(" ", values.ConvertAll(Quote).ToArray());
+        // msiexec parses switches itself: quoting every argument produces 1639,
+        // even though a managed child accepts that same command line.
+        StringBuilder command = new StringBuilder("/i ").Append(Quote(msi));
+        command.Append(options.Quiet ? " /qn" : " /qb");
+        command.Append(" /norestart REBOOT=ReallySuppress MSIRESTARTMANAGERCONTROL=Disable /Lwe ");
+        command.Append(Quote(log));
+        if (options.InstallDirectory != null) command.Append(" INSTALLDIR=").Append(Quote(options.InstallDirectory));
+        if (options.NoShortcuts) command.Append(" HUB_SHORTCUTS=0");
+        return command.ToString();
     }
 
     internal static Outcome Classify(int code)
