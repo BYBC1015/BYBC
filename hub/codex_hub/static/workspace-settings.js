@@ -36,7 +36,7 @@
   // Current packaged resources also run against older authenticated snapshots.
   // Repair the real entry and create the same local surface without fetching HTML.
   const entries = [...shell.querySelectorAll('[data-ws-settings],.ws-sidebar-bottom a')].filter(link =>
-    link.hasAttribute('data-ws-settings') || /(?:\?|&)view=archive#members$/.test(link.getAttribute('href') || ''));
+    link.hasAttribute('data-ws-settings') || Boolean(window.HubNavigation?.settingsTab(new URL(link.href, location.href).hash)));
   for (const link of shell.querySelectorAll('.ws-model-settings')) link.href = '#settings=models';
   for (const link of entries) {
     link.href = '#settings=project'; link.dataset.wsSettings = '';
@@ -64,7 +64,7 @@
         <div class="ws-settings-actions"><button type="button" data-settings-reload="connections">刷新连接</button></div>
       </section>
       <section class="ws-settings-panel" id="ws-settings-models" role="tabpanel" aria-labelledby="ws-settings-tab-models" data-settings-panel="models" hidden><h3>模型服务</h3><p>连接本地模型或其他模型 API。密钥只在保存时发送，不会显示在服务列表中。</p><p class="ws-settings-status" data-settings-model-status role="status"></p><div data-settings-services></div>
-        <details class="ws-settings-card" data-settings-agent-policy><summary>身份的模型分配</summary><p class="ws-settings-hint">可以交由总控按任务安排，也可以为指定身份固定模型。执行中的工作保持原安排。</p><label>智能体<select data-settings-policy-agent aria-label="模型分配身份"></select></label><p class="ws-settings-status" data-settings-policy-status role="status"></p><form data-settings-policy-form hidden><div class="ws-settings-grid"><label>分配方式<select name="mode"><option value="controller">由总控按任务分配</option><option value="manual">手动指定</option></select></label><label>模型<select name="model"></select></label></div><label>思考档位<select name="reasoning_effort"></select></label><div class="ws-settings-actions"><button type="submit">保存身份模型设置</button></div></form></details><div class="ws-settings-actions"><button type="button" data-settings-add-service class="ws-settings-primary">添加模型服务</button><button type="button" data-settings-reload="models">刷新列表</button></div>
+        <details class="ws-settings-card" data-settings-agent-policy><summary>身份的模型分配</summary><p class="ws-settings-hint">可以交由总控按任务安排，也可以为指定身份固定模型。执行中的工作保持原安排。</p><label>智能体<select data-settings-policy-agent aria-label="模型分配身份"></select></label><p class="ws-settings-status" data-settings-policy-status role="status"></p><form data-settings-policy-form hidden><div class="ws-settings-grid"><label>分配方式<select name="mode"><option value="controller">由总控按任务分配</option><option value="manual">手动指定</option></select></label><label>模型<select name="model"></select></label></div><label>思考档位<select name="reasoning_effort"></select></label><label data-settings-reserve hidden>Codex 额度不足时<select name="reserve" aria-label="总控额度备用模型"></select><span class="ws-settings-hint">可使用本机或已接入的 API 模型。备用服务只接手尚未执行、能力匹配的对话任务。</span></label><div class="ws-settings-actions"><button type="submit">保存身份模型设置</button></div></form></details><div class="ws-settings-actions"><button type="button" data-settings-add-service class="ws-settings-primary">添加模型服务</button><button type="button" data-settings-reload="models">刷新列表</button></div>
         <form data-settings-service-form hidden autocomplete="off"><h4 data-settings-service-heading>添加模型服务</h4><input type="hidden" name="id"><div class="ws-settings-grid"><label>服务名称<input name="name" maxlength="80" placeholder="例如：工作电脑 Ollama" required></label><label>服务类型<select name="kind"><option value="openai_compatible">OpenAI 兼容 API</option><option value="ollama">Ollama 本地模型</option><option value="lmstudio">LM Studio 本地模型</option></select></label></div><label>执行电脑<select name="device_id" required aria-label="模型服务执行电脑"></select></label><label>接口地址<input name="base_url" type="url" maxlength="2048" placeholder="https://api.example.com/v1" required></label><p class="ws-settings-hint" data-settings-endpoint-hint></p><div class="ws-settings-grid"><label>模型名称<input name="model" maxlength="200" placeholder="服务中的模型名称" list="ws-settings-discovered-models" required><datalist id="ws-settings-discovered-models"></datalist></label><label>API 密钥<input name="api_key" type="password" autocomplete="new-password" maxlength="4096" placeholder="本地服务可留空"></label></div><div class="ws-settings-grid"><label><input name="supports_images" type="checkbox">此模型支持图片输入</label><label><input name="supports_tools" type="checkbox">此模型支持工具调用</label></div><label><input name="clear_api_key" type="checkbox">清除已保存的 API 密钥</label><label><input name="enabled" type="checkbox" checked>允许本项目使用此服务</label><div class="ws-settings-actions"><button type="submit" class="ws-settings-primary">保存服务</button><button type="button" data-settings-cancel-service>取消编辑</button></div></form>
       </section>
       <section class="ws-settings-panel" id="ws-settings-appearance" role="tabpanel" aria-labelledby="ws-settings-tab-appearance" data-settings-panel="appearance" hidden><h3>界面与动效</h3><p>让界面变化清楚、轻快。此偏好保存在当前设备。</p><div class="ws-settings-card"><label>界面动效<select data-settings-motion aria-label="界面动效"><option value="system">跟随系统</option><option value="reduce">减少动态效果</option></select></label><p data-settings-motion-hint></p></div><div class="ws-settings-card"><h4>保持阅读位置</h4><p>消息更新不播放位移动画。打开设置和切换分类不会改变对话的阅读位置。</p></div><p class="ws-settings-status" data-settings-appearance-status role="status"></p></section>
@@ -92,8 +92,7 @@
   let loadRevision = 0;
   let mutationBusy = false;
   const tabs = ['project', 'connections', 'models', 'appearance'];
-  const legacyTabs = {members:'connections', control:'connections', 'codex-projects':'connections', 'codex-workspaces':'connections', settings:'project'};
-  function hashTab() { return legacyTabs[location.hash.slice(1)] || (location.hash.startsWith('#settings=') ? location.hash.slice(10) : ''); }
+  function hashTab() { return window.HubNavigation?.settingsTab(location.hash) || ''; }
   function status(kind, text, state = '') { const node = find(`[data-settings-${kind}-status]`); node.textContent = text; node.dataset.state = state; }
   function syncMotionForm() {
     find('[data-settings-motion]').value = preference;
@@ -275,6 +274,17 @@
       const data = await jsonRequest('/settings/agents/' + id + '/model-policy', {signal:controller.signal});
       if (revision !== policyRevision || agentPicker.value !== String(id) || !dialog.open) return;
       policyModels = data.models || []; const policy = data.policy || {};
+      const reserve = policyForm.elements.reserve;
+      const reserveValue = data.reserve ? data.reserve.model + '@' + data.reserve.service_revision : '';
+      find('[data-settings-reserve]').hidden = !data.is_controller;
+      reserve.disabled = !data.is_controller;
+      const reserves = policyModels.filter(item => item.model.startsWith('hub-service/') && item.supports_tools)
+        .map(item => ({key:item.model + '@' + item.service_revision, name:item.displayName || item.model}));
+      if (reserveValue && !reserves.some(item => item.key === reserveValue)) {
+        reserves.push({key:reserveValue, name:'原备用服务已变更或不可用 · 等待 Codex 恢复'});
+      }
+      fillOptions(reserve, [{key:'',name:'保留任务，等待 Codex 恢复'}, ...reserves], item => item.key, item => item.name, reserveValue);
+      reserve.dataset.original = reserveValue;
       const unavailable = policy.model && !policyModels.some(item => item.model === policy.model);
       const options = [{model:'',displayName:'选择模型'}, ...policyModels];
       if (unavailable) options.push({model:policy.model,displayName:policy.model + ' · 当前不可用'});
@@ -291,6 +301,8 @@
   policyForm.addEventListener('submit', async event => {
     event.preventDefault(); const id = agentPicker.value;
     const body = {mode:policyForm.elements.mode.value, model:policyForm.elements.model.value, reasoning_effort:policyForm.elements.reasoning_effort.value, reason:'用户在工作区设置中指定'};
+    const reserve = policyForm.elements.reserve;
+    if (!reserve.disabled && reserve.value !== reserve.dataset.original) body.reserve = reserve.value;
     const saved = await mutate('/settings/agents/' + id + '/model-policy', {method:'POST', body}, 'policy', () => {});
     if (saved && dialog.open && agentPicker.value === id) loadPolicy(id);
   });

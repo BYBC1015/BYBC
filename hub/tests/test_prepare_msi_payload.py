@@ -18,7 +18,9 @@ def fixture(tmp_path):
     files = []
     for name, body in {'tools/source.zip': b'keep source', 'tools/beat-workshop/runtime.json': b'{}',
                        'tools/beat-workshop/assets/fluidsynth.zip': b'duplicate cache',
-                       'Uninstall.exe': b'legacy uninstall', '使用说明.md': b'old installation guide'}.items():
+                       'Uninstall.exe': b'legacy uninstall', '使用说明.md': b'old installation guide',
+                       'tools/video-freeze/_internal/VCRUNTIME140.dll': b'audited system prerequisite',
+                       'tools/video-freeze/_internal/api-ms-future-unknown.dll': b'unknown private dependency'}.items():
         p = public / name; p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(body)
         files.append({'path': name, 'bytes': len(body), 'sha256': stage.build.sha(p)})
     (public / 'bundle-manifest.json').write_text(json.dumps({'version': stage.build.__version__, 'components': stage.COMPONENTS, 'files': files}), encoding='utf-8')
@@ -40,6 +42,8 @@ def test_msi_staging_retains_required_archives_unknown_dlls_and_exact_new_produc
     names = {item['path'] for item in result['files']}
     assert not names & stage.EXCLUDED
     assert (target / 'tools/source.zip').read_bytes() == b'keep source'
+    assert not (target / 'tools/video-freeze/_internal/VCRUNTIME140.dll').exists()
+    assert (target / 'tools/video-freeze/_internal/api-ms-future-unknown.dll').read_bytes() == b'unknown private dependency'
     assert (target / '使用说明.md').read_bytes() == guide.read_bytes()
     for name in stage.BINARIES:
         assert (target / name).read_bytes() == (products / Path(name).stem / name).read_bytes()
@@ -92,3 +96,30 @@ def test_current_cli_never_silently_builds_historical_installer(tmp_path, monkey
     monkeypatch.setattr(sys, 'argv', ['build_directory_release.py', '--stage', 'all', '--stage-root', str(tmp_path / 'modern')])
     build_directory_release.main()
     assert built == ['CodexBridge', 'HubAgentRuntime', 'HubDesktop']
+
+
+def test_desktop_build_rejects_assets_edited_after_manifest_generation(tmp_path, monkeypatch):
+    import build_directory_release
+    from codex_bridge.desktop_assets import write_asset_manifest
+    static = tmp_path / 'codex_hub/static'
+    templates = tmp_path / 'codex_hub/templates'
+    static.mkdir(parents=True)
+    templates.mkdir(parents=True)
+    (static / 'workspace.css').write_text('body{color:black}', encoding='utf-8')
+    (templates / 'project_workspace.html').write_text(
+        '<link href="{{ asset_path(\'/static/workspace.css\') }}">', encoding='utf-8')
+    write_asset_manifest(static, templates)
+    build_directory_release.verify_desktop_assets(tmp_path)
+    (static / 'workspace.css').write_text('body{color:blue}', encoding='utf-8')
+    monkeypatch.setattr(build_directory_release.build, 'ROOT', tmp_path)
+    invoked = []
+    monkeypatch.setattr(build_directory_release, 'invoke', invoked.append)
+    with pytest.raises(ValueError, match='stale'):
+        build_directory_release.build_binary('HubDesktop', tmp_path / 'products')
+    assert not invoked
+
+
+def test_desktop_build_requires_explicit_asset_manifest(tmp_path):
+    import build_directory_release
+    with pytest.raises(ValueError, match='Regenerate desktop-assets'):
+        build_directory_release.verify_desktop_assets(tmp_path)

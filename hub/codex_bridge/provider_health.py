@@ -8,10 +8,89 @@ import re
 import threading
 import time
 import uuid
+import hashlib
 
 from codex_hub.model_catalog import MODEL_ID_RE, normalize_provider_health
+from codex_hub.provider_rejections import (CLI_QUOTA_CODES as _QUOTA_CODES,
+    normalize_rejection, rejection_sequence as _rejection_sequence)
 
 _lock = threading.Lock()
+
+def _quota_code(error):
+    if not isinstance(error, dict):
+        return None
+    code = str(error.get('code') or '').lower()
+    if code in _QUOTA_CODES:
+        return code
+    # Known provider rejection wording, only inside protocol error events.
+    # A generic HTTP 429/transport failure cannot establish what ran beforehand.
+    message = str(error.get('message') or '').strip().lower()
+    if re.match(r"^(?:you(?:'ve| have) hit your usage limit|usage limit (?:has been )?(?:reached|exceeded)|"
+                r"(?:you have )?exceeded your current quota|insufficient quota|quota exceeded|rate limit exceeded)\b", message):
+        return 'usage_limit_reached' if 'usage limit' in message else 'insufficient_quota'
+    return None
+
+
+def before_work_rejection(result):
+    """Prove one complete invocation was rejected before any model/tool output.
+
+    This is intentionally narrower than passive provider health. Unknown or
+    truncated streams, any item (including reasoning), and transport failures
+    retain the normal uncertain/failed receipt and never authorize a replay.
+    """
+    if (result.ok or type(result.returncode) is not int or result.returncode <= 0
+            or getattr(result, 'protocol_complete', False) is not True or result.last_message
+            or '--json' not in result.command):
+        return None
+    raw = result.stdout
+    if isinstance(raw, bytes):
+        try:
+            raw = raw.decode('utf-8')
+        except UnicodeError:
+            return None
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        raw_bytes = raw.encode('utf-8')
+    except UnicodeError:
+        return None
+    if len(raw_bytes) > 65536:
+        return None
+    events = []
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            return None
+        if not isinstance(event, dict):
+            return None
+        events.append(event)
+    types = [event.get('type') for event in events]
+    if not _rejection_sequence(types):
+        return None
+    terminal_code = _quota_code(events[-1].get('error'))
+    if not terminal_code:
+        return None
+    for event in events:
+        kind = event['type']
+        allowed = ({'type', 'thread_id'} if kind == 'thread.started' else {'type'} if kind == 'turn.started'
+                   else {'type', 'message', 'code'} if kind == 'error' else {'type', 'error'})
+        if set(event) - allowed:
+            return None
+        if kind == 'thread.started':
+            try:
+                uuid.UUID(event.get('thread_id', ''))
+            except (TypeError, ValueError, AttributeError):
+                return None
+        if kind == 'error' and not _quota_code(event):
+            return None
+        if kind == 'turn.failed' and set(event['error']) - {'code', 'message'}:
+            return None
+    return {'schema_version': 1, 'reason': 'quota_exhausted', 'code': terminal_code,
+            'event_types': types, 'stream_sha256': hashlib.sha256(raw_bytes).hexdigest(),
+            'returncode': result.returncode, 'no_work_observed': True}
 
 
 def health_path(config):
@@ -78,7 +157,7 @@ def outcome(result):
         if code in {'unauthorized', 'invalid_api_key', 'authentication_error'} or re.search(
                 r'\b(?:401|unauthorized)\b|authentication (?:failed|required)|invalid api key', message):
             return 'auth_required', 'authentication_error'
-        if code in {'rate_limit_exceeded', 'insufficient_quota'} or re.search(
+        if code in _QUOTA_CODES or re.search(
                 r'\b429\b|rate limit|quota exceeded|usage limit', message):
             return 'rate_limited', 'rate_limit'
         if code in {'connection_error', 'network_error'} or re.search(

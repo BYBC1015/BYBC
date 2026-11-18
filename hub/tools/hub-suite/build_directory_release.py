@@ -36,8 +36,22 @@ def system_prerequisites_metadata():
             'official_page': profile['official_page']}
 
 
+def verify_desktop_assets(root):
+    """Do not freeze a stale manifest while another task edits the web UI."""
+    from codex_bridge.desktop_assets import build_asset_manifest
+    static = Path(root) / 'codex_hub/static'
+    try:
+        declared = json.loads((static / 'desktop-assets.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError) as exc:
+        raise ValueError('Regenerate desktop-assets.json after the UI source freeze before building HubDesktop') from exc
+    if declared != build_asset_manifest(static, Path(root) / 'codex_hub/templates'):
+        raise ValueError('Desktop asset manifest is stale; regenerate it after the UI source freeze')
+
+
 def build_binary(name, stage_root):
     root = build.ROOT
+    if name == 'HubDesktop':
+        verify_desktop_assets(root)
     assets = root / 'codex_bridge/assets'
     core = name == 'InstallerCore'
     runtime = 'runtime-installer' if core else RUNTIMES[name + '.exe']

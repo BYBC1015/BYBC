@@ -25,6 +25,7 @@ from .agent_runtime import read_execution_completion
 from .client import HubClientError
 from .codex_exec import CodexExecResult, CodexExecRunner
 from .token_usage import FIELDS, normalize_token_usage
+from codex_hub.provider_rejections import HTTP_QUOTA_CODES, normalize_rejection
 
 
 MAX_ROUNDS = 12
@@ -36,6 +37,41 @@ MAX_CONTEXT_CHARS = 180_000
 
 class APIModelError(RuntimeError):
     pass
+
+
+class _ProviderRejection(APIModelError):
+    def __init__(self, message, evidence):
+        super().__init__(message)
+        self.evidence = evidence
+
+
+def _http_quota_rejection(status, raw):
+    """A complete error-only response, never a message-content heuristic."""
+    if type(status) is not int or status not in {402, 429}:
+        return None
+    try:
+        data = json.loads(raw.decode('utf-8'))
+    except (ValueError, UnicodeError):
+        return None
+    if not isinstance(data, dict) or set(data) != {'error'} or not isinstance(data['error'], dict):
+        return None
+    error = data['error']
+    if set(error) - {'message', 'code', 'type', 'param'}:
+        return None
+    code = None
+    for field in ('code', 'type'):
+        value = error.get(field)
+        if isinstance(value, str):
+            canonical = value.strip().lower().replace(' ', '_').replace('-', '_')
+            if canonical in HTTP_QUOTA_CODES:
+                code = canonical
+                break
+    # HTTP 402 is itself an explicit payment refusal. Providers often attach a
+    # generic error code; the complete error-only envelope still has no answer.
+    if not code and status == 402:
+        code = 'payment_required'
+    return normalize_rejection({'schema_version': 2, 'reason': 'quota_exhausted',
+        'http_status': status, 'code': code, 'request_index': 1, 'no_work_observed': True})
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -149,11 +185,31 @@ class APIModelRunner:
                 results.append((data, None))
             except HTTPError as exc:
                 code = exc.code
-                exc.close()
+                evidence = None
+                try:
+                    if code in {402, 429}:
+                        chunks, size = [], 0
+                        while not abandoned.is_set() and time.monotonic() < deadline:
+                            chunk = exc.read1(min(65536, 65537 - size))
+                            if not chunk:
+                                raw = b''.join(chunks)
+                                declared = exc.headers.get('Content-Length')
+                                if declared is None or (declared.isdecimal() and int(declared) == len(raw)):
+                                    evidence = _http_quota_rejection(code, raw)
+                                break
+                            chunks.append(chunk)
+                            size += len(chunk)
+                            if size > 65536:
+                                break
+                except Exception:
+                    evidence = None  # Incomplete/unknown error bodies never authorize replay.
+                finally:
+                    exc.close()
                 reason = ('认证失败，请核对服务密钥' if code in {401, 403} else
-                          '达到限额或请求频率限制' if code == 429 else
+                          '余额或付款不足' if code == 402 else '达到限额或请求频率限制' if code == 429 else
                           '服务暂时不可用' if code >= 500 else '请求未被服务接受')
-                results.append((None, APIModelError(f'模型接口 {reason}（HTTP {code}）；未自动重复请求。')))
+                message = f'模型接口 {reason}（HTTP {code}）；未自动重复请求。'
+                results.append((None, _ProviderRejection(message, evidence) if evidence else APIModelError(message)))
             except APIModelError as exc:
                 results.append((None, exc))
             except Exception:
@@ -357,7 +413,8 @@ class APIModelRunner:
                 raise APIModelError('现有完成收据与所选模型服务不一致，已保留原记录。')
             return CodexExecResult(ok=cached['ok'], command=[], returncode=cached['returncode'], stdout='', stderr='',
                 last_message=cached['last_message'], error=cached['error'], output_path=Path(cached.get('output_path') or output_path),
-                token_usage=normalize_token_usage(cached.get('token_usage')))
+                token_usage=normalize_token_usage(cached.get('token_usage')),
+                provider_rejection=normalize_rejection(cached.get('provider_rejection')))
         if completion_path.exists():
             raise APIModelError('现有完成收据无法核验，已保留原文件并停止自动重放。')
         if journal_path.exists():
@@ -367,6 +424,7 @@ class APIModelRunner:
         journal = {key: context[key] for key in ('generation', 'run_key', 'task_id', 'project_slug')}
         journal.update(backend='hub-model-service', model=preferences.get('model'), service_revision=preferences.get('service_revision'), steps=[])
         message = error = ''
+        rejection = None
         journal_owned = False
         usage = dict.fromkeys(FIELDS, 0)
         measured = True
@@ -418,7 +476,18 @@ class APIModelRunner:
                         progress_callback('status', '正在通过模型服务处理本轮任务')
                     except Exception:
                         pass  # Progress delivery is not permission to discard work.
-                response = self._request(endpoint, payload, timeout, cancel_event)
+                try:
+                    response = self._request(endpoint, payload, timeout, cancel_event)
+                except _ProviderRejection as exc:
+                    # No earlier response, assistant, tool, or mutation is
+                    # permitted. Existing journals were rejected before entry.
+                    if (round_number == 0 and len(messages) == 2 and not tool_count
+                            and journal['steps'] == [{'kind':'model', 'round':1, 'state':'pending'}]):
+                        rejection = normalize_rejection(exc.evidence)
+                        if rejection:
+                            journal['steps'][-1]['state'] = 'rejected_before_work'
+                            journal['provider_rejection'] = rejection
+                    raise
                 journal['steps'][-1]['state'] = 'received'
                 _write(journal_path, journal)
                 raw_usage = response.get('usage') or {}
@@ -519,12 +588,14 @@ class APIModelRunner:
         output_path.write_text(message or error, encoding='utf-8')
         result = CodexExecResult(ok=ok, command=[], returncode=0 if ok else 1, stdout='', stderr='',
             last_message=message, error=error, output_path=output_path,
-            token_usage=normalize_token_usage(usage) if measured else None)
+            token_usage=normalize_token_usage(usage) if measured else None, provider_rejection=rejection)
         payload = {key: context[key] for key in ('generation', 'run_key')}
         payload.update(ok=result.ok, returncode=result.returncode, last_message=message,
                        error=error, output_path=str(output_path), backend='hub-model-service',
                        service_revision=preferences.get('service_revision'))
         if result.token_usage is not None:
             payload['token_usage'] = result.token_usage
+        if rejection is not None:
+            payload['provider_rejection'] = rejection
         _write(completion_path, payload)
         return result

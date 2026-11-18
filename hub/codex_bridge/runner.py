@@ -698,7 +698,8 @@ class BridgeRunner:
                             returncode=completion['returncode'], stdout='', stderr='',
                             last_message=completion['last_message'], error=completion['error'],
                             output_path=Path(completion.get('output_path') or receipt['completion_path']),
-                            token_usage=normalize_token_usage(completion.get('token_usage')))
+                            token_usage=normalize_token_usage(completion.get('token_usage')),
+                            provider_rejection=completion.get('provider_rejection'))
                         self._save_agent_result(slug, task_id, recovered)
                     else:
                         result.pending_tasks.append(task_id)
@@ -1012,11 +1013,21 @@ class BridgeRunner:
         )
 
     def _save_agent_result(self, project_slug: str, task_id: int, execution: CodexExecResult) -> None:
+        from .provider_health import normalize_rejection
+        rejection = normalize_rejection(execution.provider_rejection)
+        if execution.ok or (rejection and execution.returncode != rejection.get('returncode', 1)):
+            rejection = None
         body, reflection, complete = extract_reflection(execution.last_message or execution.summary, ok=execution.ok)
         summary = body or (reflection["summary"] if complete else "") or "执行已结束，暂未提供可展示的结果。"
         if not execution.ok:
             error_body, _, _ = extract_reflection(execution.summary, ok=False)
             summary = "自动执行失败：" + (body or error_body or "执行未完成。")
+        if rejection:
+            summary = '模型额度暂时不可用；本轮在产生任何回复或工具活动前被服务方明确拒绝。拒绝收据已保存，等待可用模型或额度恢复，未重复执行。'
+            reflection = {'outcome':'blocked', 'summary':summary, 'worked':'',
+                          'failed':'服务方在工作开始前明确拒绝额度；没有模型输出或工具活动。',
+                          'next_time':'仅按原执行拒绝凭据和显式备用配置恢复，原执行编号不得重复运行。'}
+            complete = True
         receipt = self.state.set_task_delivery(project_slug, task_id, "agent_result",
                                                detail="执行已结束，正在回传结果与经验。")
         receipt.update({"result_summary": summary[:MAX_HUB_RESULT_CHARS], "reflection": reflection,
@@ -1025,6 +1036,10 @@ class BridgeRunner:
                         "entry_attempted": False, "reflection_complete": complete})
         usage = normalize_token_usage(execution.token_usage)
         if usage is not None:receipt['token_usage'] = usage
+        if rejection is not None:
+            receipt['provider_rejection'] = rejection
+        else:
+            receipt.pop('provider_rejection', None)
         self._save_state()
 
     def _publish_agent_result(self, project_slug: str, task_id: int, result: ProcessResult, *, progress=None) -> None:
@@ -1038,7 +1053,8 @@ class BridgeRunner:
                 progress('status', '本轮已结束，正在回传结果')
             body = summary
             try:
-                if not receipt.get('artifact_publish_failed') and callable(getattr(self.client,'upload_task_artifact',None)):
+                if (not receipt.get('provider_rejection') and not receipt.get('artifact_publish_failed')
+                        and callable(getattr(self.client,'upload_task_artifact',None))):
                     publication = receipt.get('artifact_publication')
                     if publication is None:
                         from .artifacts import publish_artifacts_partial
@@ -1066,7 +1082,8 @@ class BridgeRunner:
                 usage = normalize_token_usage(receipt.get('token_usage'))
                 published = self.client.complete_task_execution(project_slug, task_id, receipt['execution'],
                     status=status, summary=body[:1000], body=body, reflection=receipt['reflection'],
-                    **({'token_usage': usage} if usage is not None else {}))
+                    **({'token_usage': usage} if usage is not None else {}),
+                    **({'provider_rejection': receipt['provider_rejection']} if receipt.get('provider_rejection') else {}))
                 # A successful HTTP exchange alone is not a completion receipt.
                 # Empty, unrelated or nonterminal responses keep the saved result
                 # available for reconciliation and exact publication retry.

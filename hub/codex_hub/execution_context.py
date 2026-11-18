@@ -73,6 +73,10 @@ def annotate_execution(agents: list[dict], tasks: list[dict], members: list[dict
             label, hint = '执行连接中断', '保留已有进度；恢复前需核对执行收据，不会仅因另一连接在线就重复运行。'
         else:
             label, hint = '执行连接已接入', '保留当前执行者；新设备在线不会抢走进行中的工作。'
+        from .controller_capacity import capacity_label
+        capacity = capacity_label(task['status'], task.get('result_summary'))
+        if capacity:
+            label, hint = capacity, task['result_summary']
         selected = task.get('model_selection') or {}
         if member.get('is_agent_online') and selected.get('model'):
             observation = provider_observation(capabilities.get(task.get('assigned_device_id'), {}), selected['model'])

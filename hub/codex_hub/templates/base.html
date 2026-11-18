@@ -4,10 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Codex Hub{% endblock %}</title>
-    <script>
-      // Old settings bookmarks are upgraded before any archive content paints.
-      (()=>{const u=new URL(location.href);const tab={members:'connections',control:'connections','codex-projects':'connections','codex-workspaces':'connections'}[u.hash.slice(1)];if(tab&&u.searchParams.get('view')==='archive'&&/\/projects\/[^/]+\/?$/.test(u.pathname)){u.searchParams.delete('view');u.hash='settings='+tab;location.replace(u.href);}})();
-    </script>
+    <script src="{{ asset_path('/static/workspace-navigation.js') }}"></script>
   <link rel="icon" href="{{ asset_path('/static/assets/codex-owl-logo-lite-20260708.png') }}">
   <link rel="stylesheet" href="{{ asset_path('/static/app.css') }}">
   {% block extra_head %}{% endblock %}

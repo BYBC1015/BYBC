@@ -63,7 +63,9 @@ def prepare(public_payload: Path, binaries_dir: Path, target: Path, readme: Path
     target.mkdir(parents=True)
     for item in source_rows:
         relative = item['path']
-        if relative in EXCLUDED | set(BINARIES) | {'使用说明.md'} or relative.split('/')[0] in set(RUNTIMES.values()):
+        if (relative in EXCLUDED | set(BINARIES) | {'使用说明.md'}
+                or relative.split('/')[0] in set(RUNTIMES.values())
+                or build.system_runtime_file(safe_target(target, relative), target)):
             continue
         copy_verified(safe_target(public_payload, relative), safe_target(target, relative), item['sha256'])
     products = []

@@ -576,7 +576,7 @@ def test_web_group_dispatch_requires_csrf_and_reuses_existing_conversation(clien
     assert len(store.conversations(project["id"])) == 1
 
 
-def test_deepseek_fallback_requires_configuration_and_commits_one_model_decision(client, repo, team, settings, monkeypatch):
+def test_fallback_uses_rules_without_provider_and_commits_one_configured_model_decision(client, repo, team, settings, monkeypatch):
     project, device, _, store, _, designer, _ = team
     task = repo.create_task(project["id"], "备用决策测试", assigned_agent_id=designer["id"])
     path = f"/api/projects/{project['slug']}/tasks/{task['id']}/agent-route/fallback"
@@ -590,9 +590,13 @@ def test_deepseek_fallback_requires_configuration_and_commits_one_model_decision
                                 model="mock-deepseek", usage={})
 
     monkeypatch.setattr(OpenAICompatibleCompletionClient, "complete", complete)
-    assert client.post(path, headers=headers, json={}).status_code == 503
+    rules = client.post(path, headers=headers, json={})
+    assert rules.status_code == 200 and rules.json()['task']['route_engine'] == 'rule_fallback'
     assert calls == []
-    assert repo.get_task(task["id"])["conversation_id"] is None
+    assert repo.get_task(task["id"])["conversation_id"] is not None
+    assert client.post(path, headers=headers, json={}).json()['task']['conversation_id'] == rules.json()['task']['conversation_id']
+    task = repo.create_task(project['id'], '已配置备用决策测试', assigned_agent_id=designer['id'])
+    path = f"/api/projects/{project['slug']}/tasks/{task['id']}/agent-route/fallback"
     monkeypatch.setattr(settings, "server_ai_enabled", True)
     monkeypatch.setattr(settings, "deepseek_api_key", "test-only-not-a-real-key")
     first = client.post(path, headers=headers, json={})
@@ -603,7 +607,7 @@ def test_deepseek_fallback_requires_configuration_and_commits_one_model_decision
     assert retry.status_code == 200
     assert retry.json()["task"]["conversation_id"] == first.json()["task"]["conversation_id"]
     assert len(calls) == 1
-    assert len(store.conversations(project["id"])) == 1
+    assert len(store.conversations(project["id"])) == 2
 
 
 @pytest.mark.parametrize("result_kind", ["invalid_json", "foreign_conversation"])
@@ -624,7 +628,37 @@ def test_deepseek_invalid_or_foreign_decision_never_commits_a_wrong_conversation
     before = dispatch_counts(repo)
     response = client.post(f"/api/projects/{project['slug']}/tasks/{task['id']}/agent-route/fallback",
                            headers=token_headers(repo, device), json={})
-    assert response.status_code == (503 if result_kind == "invalid_json" else 422)
-    assert repo.get_task(task["id"])["conversation_id"] is None
-    assert repo.get_task(task["id"])["route_engine"] == ""
-    assert dispatch_counts(repo) == before
+    assert response.status_code == 200
+    routed = repo.get_task(task['id'])
+    assert routed['conversation_id'] != room['conversation_id']
+    assert routed['route_engine'] == 'rule_fallback' and routed['status'] == 'open'
+    assert store.conversations(project['id'])[0]['id'] == routed['conversation_id']
+    after = dispatch_counts(repo)
+    assert after['tasks'] == before['tasks']
+
+
+def test_rule_fallback_preserves_execution_and_device_fences(client, repo, team):
+    from codex_hub.execution_leases import ExecutionStore
+    project, device, spare, store, _, designer, _ = team
+    task = repo.create_task(project['id'], '尚无工作对话', assigned_agent_id=designer['id'])
+    endpoint = f"/api/projects/{project['slug']}/tasks/{task['id']}/agent-route/fallback"
+    assert client.post(endpoint, headers=token_headers(repo, spare), json={}).status_code == 403
+    ExecutionStore(repo).acquire(task['id'], device['id'], 'prepared-route-fence-123')
+    assert client.post(endpoint, headers=token_headers(repo, device), json={}).status_code == 409
+    assert repo.get_task(task['id'])['conversation_id'] is None
+    assert store.conversations(project['id']) == []
+
+
+def test_fallback_rechecks_cancellation_after_failed_provider(client, repo, team, settings, monkeypatch):
+    project, device, _, store, _, designer, _ = team
+    task = repo.create_task(project['id'], '决策期间取消', assigned_agent_id=designer['id'])
+    monkeypatch.setattr(settings, 'server_ai_enabled', True)
+    monkeypatch.setattr(settings, 'deepseek_api_key', 'fixture-only')
+    def fail(self, messages):
+        repo.update_task_status(task['id'], 'cancelled', 'isolated cancellation')
+        raise ValueError('invalid decision')
+    monkeypatch.setattr(OpenAICompatibleCompletionClient, 'complete', fail)
+    endpoint = f"/api/projects/{project['slug']}/tasks/{task['id']}/agent-route/fallback"
+    assert client.post(endpoint, headers=token_headers(repo, device), json={}).status_code == 409
+    assert repo.get_task(task['id'])['conversation_id'] is None
+    assert store.conversations(project['id']) == []

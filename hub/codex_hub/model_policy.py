@@ -22,6 +22,19 @@ def initialize_model_policy_schema(db):
       CREATE TABLE IF NOT EXISTS hub_model_policy_events (
         id INTEGER PRIMARY KEY, agent_id INTEGER NOT NULL REFERENCES hub_agents(id) ON DELETE CASCADE,
         revision INTEGER NOT NULL, policy_json TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS hub_controller_reserves (
+        agent_id INTEGER PRIMARY KEY REFERENCES hub_agents(id) ON DELETE CASCADE,
+        model TEXT NOT NULL, service_revision INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS hub_controller_cooldowns (
+        device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE, provider_scope TEXT NOT NULL,
+        rejected_at REAL NOT NULL, retry_at REAL NOT NULL, failures INTEGER NOT NULL,
+        PRIMARY KEY(device_id,provider_scope));
+      CREATE TABLE IF NOT EXISTS hub_controller_capacity_tasks (
+        task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+        primary_json TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS hub_execution_capacity_rejections (
+        execution_id INTEGER PRIMARY KEY REFERENCES hub_task_executions(id) ON DELETE CASCADE,
+        reason_code TEXT NOT NULL);
     ''')
     db.commit()
 
@@ -62,7 +75,13 @@ def validate_choice(value, models):
     return choice
 
 
-def save_policy(db, agent, data_dir, *, mode, model='', reasoning_effort='', reason='', actor='user'):
+def reserve_policy(db, agent_id):
+    row = db.execute('SELECT model,service_revision FROM hub_controller_reserves WHERE agent_id=?',
+                     (agent_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def save_policy(db, agent, data_dir, *, mode, model='', reasoning_effort='', reason='', actor='user', reserve=None):
     if mode not in {'controller', 'manual'}:
         raise ValueError('请选择总控分配或手动指定')
     previous = agent_policy(db, agent['id'])
@@ -77,6 +96,17 @@ def save_policy(db, agent, data_dir, *, mode, model='', reasoning_effort='', rea
         choice = {key: choice[key] for key in ('model', 'reasoning_effort', 'reason')}
     elif mode == 'manual':
         raise ValueError('手动指定需要选择模型')
+    selected_reserve = None
+    if reserve is not None:
+        if agent.get('kind') != 'controller' or actor != 'user' or not isinstance(reserve, str):
+            raise ValueError('总控备用模型由用户设置')
+        if reserve:
+            candidates = available_models(data_dir, agent.get('device_id'), db, agent.get('project_id'))
+            selected_reserve = next((item for item in candidates if item.get('supports_tools')
+                and item['model'].startswith('hub-service/')
+                and reserve == f"{item['model']}@{item['service_revision']}"), None)
+            if selected_reserve is None:
+                raise ValueError('备用服务配置已变更或无法在此设备调用工具，请刷新后重新选择')
     at = datetime.now(timezone.utc).isoformat()
     policy = {'agent_id': agent['id'], 'mode': mode, **choice,
               'revision': previous['revision'] + 1, 'updated_at': at}
@@ -87,6 +117,11 @@ def save_policy(db, agent, data_dir, *, mode, model='', reasoning_effort='', rea
             revision=excluded.revision,updated_at=excluded.updated_at''', tuple(policy.values()))
         db.execute('INSERT INTO hub_model_policy_events(agent_id,revision,policy_json,actor,created_at) VALUES (?,?,?,?,?)',
                    (agent['id'], policy['revision'], json.dumps(policy, ensure_ascii=False), actor, at))
+        if reserve is not None:
+            db.execute('DELETE FROM hub_controller_reserves WHERE agent_id=?', (agent['id'],))
+            if selected_reserve:
+                db.execute('INSERT INTO hub_controller_reserves VALUES (?,?,?)',
+                           (agent['id'], selected_reserve['model'], selected_reserve['service_revision']))
     return policy
 
 

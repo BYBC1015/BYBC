@@ -71,9 +71,10 @@ def require_execution_fence(db, task: dict, device_id: int, execution: dict | No
 
 
 class ExecutionStore:
-    def __init__(self, repo, *, clock=time.time, lease_seconds: int = 150, files_root=None):
+    def __init__(self, repo, *, clock=time.time, lease_seconds: int = 150, files_root=None, data_dir=None):
         self.repo, self.db, self.clock = repo, repo.connection, clock
         self.files_root=files_root
+        self.data_dir=data_dir
         self.lease_seconds = max(30, min(600, lease_seconds))
 
     @contextmanager
@@ -142,12 +143,10 @@ class ExecutionStore:
             agent = self.db.execute('SELECT active FROM hub_agents WHERE id=?', (task['assigned_agent_id'],)).fetchone()
             if not agent or not agent['active']:
                 raise ExecutionConflict('智能体已暂停，不能开始新执行。')
-            if latest:
-                if latest['state'] == 'prepared' and latest['lease_until'] <= self.clock():
-                    self.db.execute("UPDATE hub_task_executions SET state='superseded',detail=? WHERE id=?",
-                                    ('执行前凭据到期；没有发出开始执行许可。', latest['id']))
-                elif latest['state'] == 'yielded':
-                    pass  # A real handoff answer resumes the same task with a new generation.
+            expired_preparation = latest and latest['state'] == 'prepared' and latest['lease_until'] <= self.clock()
+            if latest and not expired_preparation:
+                if latest['state'] == 'yielded':
+                    pass  # A confirmed exit permits the same task to acquire a new generation.
                 elif latest['state'] == 'completed' and task['status_version'] > latest['task_version']:
                     pass  # A later explicit task reopen permits a new generation.
                 else:
@@ -155,6 +154,13 @@ class ExecutionStore:
             generation = (latest['generation'] if latest else 0) + 1
             from .execution_resources import resource_conflict
             resource_conflict(self.db,task,self.clock())
+            from .controller_capacity import gate_acquisition
+            waiting = gate_acquisition(self, task)
+            if waiting:
+                return waiting
+            if expired_preparation:
+                self.db.execute("UPDATE hub_task_executions SET state='superseded',detail=? WHERE id=?",
+                                ('执行前凭据到期；没有发出开始执行许可。', latest['id']))
             from .work_delivery import inherit_dependency_artifacts
             inherit_dependency_artifacts(self.db,task)
             from .revision_inputs import task_input_manifest
@@ -225,26 +231,53 @@ class ExecutionStore:
                                        (record['id'],)).fetchone() if record else None
             return {**self._reply(task_id, record), 'progress_sequence': progress['sequence'] if progress else 0}
 
-    def complete(self, task_id, device_id, generation, run_key, *, status, summary, body, reflection, token_usage=None):
+    def complete(self, task_id, device_id, generation, run_key, *, status, summary, body, reflection, token_usage=None,
+                 provider_rejection=None):
         if (status not in {'review','blocked'} or not isinstance(summary, str) or len(summary) > 1000
                 or not isinstance(body, str) or len(body) > 24000 or not isinstance(reflection, dict)
                 or len(json.dumps(reflection, ensure_ascii=False)) > 20000):
             raise ValueError('执行结果格式无效或过长。')
-        digest = hashlib.sha256(json.dumps([status,summary,body,reflection], ensure_ascii=False,
+        from .provider_rejections import normalize_rejection
+        proof = normalize_rejection(provider_rejection) if status == 'blocked' else None
+        fields = [status,summary,body,reflection]
+        if proof:
+            fields.append(proof)
+        digest = hashlib.sha256(json.dumps(fields, ensure_ascii=False,
                                            sort_keys=True).encode()).hexdigest()
         with self.transaction():
+            # A second worker can acquire a new generation before this worker
+            # receives its HTTP acknowledgement. A matching committed receipt
+            # can be acknowledged without mutating or inspecting the new work.
+            if proof and type(generation) is int:
+                prior = self.db.execute('''SELECT x.* FROM hub_task_executions x
+                    JOIN hub_execution_capacity_rejections q ON q.execution_id=x.id
+                    WHERE x.task_id=? AND x.device_id=? AND x.generation=? AND x.run_key=?
+                    AND x.result_digest=? AND x.state='yielded' ''',
+                    (task_id, device_id, generation, run_key, digest)).fetchone()
+                if prior:
+                    return {'task': self._task(task_id, device_id), 'execution': self._public(dict(prior)),
+                            'accepted': True, 'replayed': True, 'yielded': True, 'capacity_deferred': True}
             task, record = self._fenced(task_id, device_id, generation, run_key)
             from .execution_usage import record_execution_usage
             if record['state'] in {'completed','yielded'}:
                 if record['result_digest'] != digest:
                     raise ExecutionConflict('同一执行不能回传不同结果。')
                 record_execution_usage(self.db,record['id'],token_usage,self.clock())
-                return {**self._reply(task_id, record), 'accepted': True, 'replayed': True,'yielded':record['state']=='yielded'}
+                return {**self._reply(task_id, record), 'accepted': True, 'replayed': True,'yielded':record['state']=='yielded',
+                        'capacity_deferred': False}
             if (record['state'] not in {'running','uncertain'} or task['status_version'] != record['task_version']
                     or task['status'] not in {'in_progress','blocked'}):
                 raise ExecutionConflict('任务已取消、结束或被更新；迟到结果保留本地，不覆盖当前状态。')
             from .execution_progress import clear_progress
+            from .controller_capacity import may_defer, defer_rejection, successful_run
             record_execution_usage(self.db,record['id'],token_usage,self.clock())
+            if may_defer(self.db, task, record, proof, token_usage):
+                defer_rejection(self, task, record, digest, proof)
+                clear_progress(self.db, task_id)
+                return {**self._reply(task_id,latest_execution(self.db, task_id)), 'accepted':True,
+                        'capacity_deferred':True, 'yielded':True, 'replayed':False}
+            if status == 'review':
+                successful_run(self.db, task, record)
             clear_progress(self.db,task_id)
             handoff=self.db.execute('SELECT * FROM hub_task_handoffs WHERE task_id=? AND generation=?',(task_id,generation)).fetchone()
             if handoff:

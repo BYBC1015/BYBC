@@ -22,7 +22,8 @@ def register_execution_routes(app: FastAPI) -> None:
         project = require_project(repo, slug)
         require_device_write(repo, project, device)
         require_project_task(repo, project, task_id)
-        return ExecutionStore(repo,files_root=get_settings(request).files_dir), device['id']
+        settings = get_settings(request)
+        return ExecutionStore(repo,files_root=settings.files_dir,data_dir=settings.data_dir), device['id']
 
     def checked(call):
         try:
@@ -113,4 +114,4 @@ def register_execution_routes(app: FastAPI) -> None:
         data = await json_object(request)
         return checked(lambda: store.complete(task_id, device_id, data.get('generation'), data.get('run_key'),
             status=data.get('status'), summary=data.get('summary'), body=data.get('body'), reflection=data.get('reflection'),
-            token_usage=data.get('token_usage')))
+            token_usage=data.get('token_usage'), provider_rejection=data.get('provider_rejection')))

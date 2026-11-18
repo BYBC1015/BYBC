@@ -487,6 +487,9 @@ class AgentStore:
                 if inherited:
                     repo.bind_task_attachments(project_id, task_ids, [item['id'] for item in inherited],
                                                 source_task_id=source_task_id)
+                if user_id is not None and model_data_dir is not None:
+                    from .controller_capacity import note_new_messages
+                    note_new_messages(repo, task_ids, model_data_dir)
                 if managed and source_task_id is not None:
                     self.db.execute('''INSERT INTO hub_work_assignments
                         (project_id,conversation_id,work_key,content_hash,work_type,agent_id,task_id,fallback_reason)
@@ -505,7 +508,7 @@ class AgentStore:
 
     def route(self, task_id: int, decision: dict, engine: str) -> dict:
         decision = parse_decision(json.dumps(decision, ensure_ascii=False))
-        if engine not in {'codex_cli','deepseek','user'}:
+        if engine not in {'codex_cli','deepseek','user','rule_fallback'}:
             raise ValueError('无效决策来源')
         with self.db:
             # Serialize the read/create/update to make retry safe.

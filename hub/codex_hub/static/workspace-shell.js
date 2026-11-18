@@ -606,13 +606,7 @@
     drawerOpener = null;
   }
 
-  // Historical records retain their destination; settings bookmarks belong to
-  // the local settings surface and must never route back into archive HTML.
-  const oldAnchors = new Set(["files","tasks","project-memory","memory"]);
-  if (shell.dataset.conversation === "new" && oldAnchors.has(location.hash.slice(1))) {
-    location.replace(shell.dataset.projectUrl + "?view=archive" + location.hash);
-    return;
-  }
+  // Destination compatibility is handled before rendering by HubNavigation.
   await restoreDraft(); autosize(); syncSubmissionControls(); formatTimes();
   if (inputEditedBeforeInit && !pendingSubmission) contentChanged();
   // Durable queued messages resume only after the entire page is initialized.

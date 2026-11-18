@@ -32,6 +32,8 @@ class CodexExecResult:
     output_path: Path
     error: str = ""
     token_usage: dict[str, int] | None = None
+    protocol_complete: bool = False
+    provider_rejection: dict | None = None
 
     @property
     def summary(self) -> str:
@@ -65,6 +67,8 @@ class CodexExecRunner:
             result = self._run(project_slug, project_path, prompt_path, prompt,
                                execution_preferences, image_paths, execution_context, cancel_event,
                                progress_callback=progress_callback)
+        from .provider_health import before_work_rejection, normalize_rejection
+        result.provider_rejection = normalize_rejection(result.provider_rejection) or before_work_rejection(result)
         # Diagnostics must never change a successful result or execution receipt.
         try:
             from .provider_health import record_outcome
@@ -85,6 +89,8 @@ class CodexExecRunner:
                            error=self._redact(result.error)[:4000], output_path=str(result.output_path))
             usage = normalize_token_usage(result.token_usage)
             if usage is not None:payload['token_usage'] = usage
+            if result.provider_rejection is not None:
+                payload['provider_rejection'] = result.provider_rejection
             temporary = receipt_path.with_suffix('.tmp')
             temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
             temporary.replace(receipt_path)
@@ -109,7 +115,8 @@ class CodexExecRunner:
                     return CodexExecResult(ok=cached['ok'], command=[], returncode=cached['returncode'],
                         stdout='', stderr='', last_message=cached.get('last_message') or '',
                         output_path=Path(cached.get('output_path') or self._output_path(project_slug, prompt_path)),
-                        error=cached.get('error') or '', token_usage=normalize_token_usage(cached.get('token_usage')))
+                        error=cached.get('error') or '', token_usage=normalize_token_usage(cached.get('token_usage')),
+                        provider_rejection=cached.get('provider_rejection'))
                 result = self._run(project_slug, project_path, prompt_path, prompt,
                     execution_preferences, image_paths, execution_context, cancel_event,
                     project_session=session, progress_callback=progress_callback)
@@ -118,10 +125,13 @@ class CodexExecRunner:
                     result.token_usage = session.turn_usage(cumulative_usage)
                     output = result.stdout.decode('utf-8', errors='replace') if isinstance(result.stdout, bytes) else result.stdout
                     session.observe_jsonl(output)
+                    from .provider_health import before_work_rejection
+                    result.provider_rejection = before_work_rejection(result)
                     session.complete(ok=result.ok, returncode=result.returncode,
                         last_message=self._redact(result.last_message)[:262144],
                         error=self._redact(result.error)[:65536], output_path=result.output_path,
-                        token_usage=result.token_usage, thread_token_usage=cumulative_usage)
+                        token_usage=result.token_usage, thread_token_usage=cumulative_usage,
+                        provider_rejection=result.provider_rejection)
                 return result
         except ProjectSessionError as exc:
             label = '总控对话' if execution_context.get('execution_route') == 'chat' else '本地工程会话'
@@ -306,6 +316,7 @@ class CodexExecRunner:
             output_path=output_path,
             error=error,
             token_usage=usage_from_jsonl(completed.stdout),
+            protocol_complete=bool(getattr(completed, 'hub_protocol_complete', True)),
         )
 
     @staticmethod
@@ -363,8 +374,10 @@ class CodexExecRunner:
                         raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr)
                     detail = ('本次 CLI 及其子进程已停止。' if tree_stopped else
                               '本次 CLI 已停止，子进程状态需核对；不会重跑任务。')
-                    return subprocess.CompletedProcess(command, process.returncode or -1, stdout,
+                    completed = subprocess.CompletedProcess(command, process.returncode or -1, stdout,
                         (stderr or '') + '\nERROR: Hub 已明确撤销本次执行许可，' + detail)
+                    completed.hub_protocol_complete = False
+                    return completed
                 try:
                     stdout, stderr = process.communicate(input=first_input,
                         timeout=min(1.0, max(.01, deadline - time.monotonic())))
@@ -395,6 +408,7 @@ class CodexExecRunner:
         progress = VisibleCodexProgress(dispatcher.publish, self._redact)
         stdout_parts, stderr_parts = [], []
         event_errors = []
+        read_errors = []
 
         def read_stdout():
             try:
@@ -411,6 +425,8 @@ class CodexExecRunner:
                         # Malformed/unknown progress must not lose the raw JSONL
                         # needed to validate the project session receipt later.
                         pass
+            except Exception as exc:
+                read_errors.append(exc)
             finally:
                 process.stdout.close()
 
@@ -421,6 +437,8 @@ class CodexExecRunner:
                     if not chunk:
                         return
                     stderr_parts.append(chunk)
+            except Exception as exc:
+                read_errors.append(exc)
             finally:
                 process.stderr.close()
 
@@ -465,8 +483,12 @@ class CodexExecRunner:
                 detail = ('本次 CLI 及其子进程已停止。' if tree_stopped else
                           '本次 CLI 已停止，子进程状态需核对；不会重跑任务。')
                 stderr += '\nERROR: Hub 已明确撤销本次执行许可，' + detail
-                return subprocess.CompletedProcess(command, process.returncode or -1, stdout, stderr)
-            return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+                completed = subprocess.CompletedProcess(command, process.returncode or -1, stdout, stderr)
+                completed.hub_protocol_complete = False
+                return completed
+            completed = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+            completed.hub_protocol_complete = not read_errors and not any(thread.is_alive() for thread in readers)
+            return completed
         finally:
             dispatcher.close()
 

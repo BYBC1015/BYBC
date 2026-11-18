@@ -198,7 +198,7 @@ def register_agent_routes(app: FastAPI) -> None:
                     title=effective_title, description=clean_description,
                     request_key='web:' + key, conversation_id=room_id, user_id=user['id'],
                     attachments=stored_attachments, execution_route=execution_route,
-                    execution_route_reason=execution_route_reason)
+                    execution_route_reason=execution_route_reason, model_data_dir=get_settings(request).data_dir)
                 keep_files = result['created']
         except (ValueError, TypeError, HTTPException) as exc:
             if isinstance(exc, HTTPException) and exc.status_code != 413:
@@ -253,7 +253,7 @@ def register_agent_routes(app: FastAPI) -> None:
             agent_ids=[parse_optional_int(i) for i in form.getlist('agent_ids')],
             title=str(form.get('title','继续协作')), description=str(form.get('description','')),
             request_key='web:'+str(form.get('request_key','')), conversation_id=conversation_id,user_id=user['id'],
-            execution_route=form.get('execution_route') or None,
+            model_data_dir=get_settings(request).data_dir, execution_route=form.get('execution_route') or None,
             execution_route_reason=form.get('execution_route_reason','')))
         return redirect_to(request, f"/projects/{slug}/conversations/{result['conversation_id']}")
 
@@ -366,10 +366,21 @@ def register_agent_routes(app: FastAPI) -> None:
             return {'task': task}
         if not task.get('assigned_agent_id'):
             raise HTTPException(422, '任务没有智能体负责人')
+
+        def rule_route():
+            # Conversation placement is metadata, not execution. Reuse only an
+            # already explicit binding; never guess a different person's room.
+            repo, project, store, current = runtime_task(request, slug, task_id)
+            if current.get('conversation_id'):
+                return {'task': current}
+            decision = {'action':'new', 'title':str(current.get('title') or '智能体工作')[:160],
+                        'reason':'模型暂未提供有效的工作对话选择；为当前任务建立独立对话，尚未执行工作。'}
+            return {'task': checked(lambda: store.route(task_id, decision, 'rule_fallback'))}
+
         settings = get_settings(request)
         config = provider_configs(settings)['deepseek']
         if not settings.server_ai_enabled or not config.configured:
-            raise HTTPException(503, 'DeepSeek 备用决策尚未就绪')
+            return rule_route()
         context = store.context(task)
         messages = [
             {'role':'system', 'content': '你是智能体的备用决策引擎。根据职责、任务及历史对话选择工作场所，不执行任务。'
@@ -380,7 +391,11 @@ def register_agent_routes(app: FastAPI) -> None:
             completion = await run_in_threadpool(OpenAICompatibleCompletionClient(config, settings).complete, messages)
             decision = parse_decision(completion.content)
         except (ProviderConfigurationError, ProviderRequestError, ValueError, TypeError):
-            raise HTTPException(503, 'DeepSeek 未返回有效的对话决策，请稍后重试') from None
+            return rule_route()
         # Recheck authorization and task state after the external call.
         repo, project, store, task = runtime_task(request, slug, task_id)
+        if decision.get('action') == 'reuse':
+            allowed = {room['id'] for room in store.conversations(project['id']) if room['status'] == 'active'}
+            if decision.get('conversation_id') not in allowed:
+                return rule_route()
         return {'task': checked(lambda: store.route(task_id, decision, 'deepseek'))}

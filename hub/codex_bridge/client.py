@@ -147,10 +147,16 @@ class HubClient:
 
     def complete_task_execution(self, slug: str, task_id: int, execution: dict, *,
                                 status: str, summary: str, body: str, reflection: dict,
-                                token_usage: dict | None = None) -> dict:
+                                token_usage: dict | None = None, provider_rejection: dict | None = None) -> dict:
         from .token_usage import normalize_token_usage
         usage = normalize_token_usage(token_usage)
         extra = {'token_usage': usage} if usage is not None else {}
+        if provider_rejection is not None:
+            from .provider_health import normalize_rejection
+            rejection = normalize_rejection(provider_rejection)
+            if rejection is None:
+                raise HubClientError('无效的执行前额度拒绝证据，未回传恢复请求。')
+            extra['provider_rejection'] = rejection
         return self._json('POST', f'/api/projects/{slug}/tasks/{task_id}/execution/complete',
                           {key:execution[key] for key in ('generation','run_key')} |
                           {'status':status,'summary':summary,'body':body,'reflection':reflection} | extra)

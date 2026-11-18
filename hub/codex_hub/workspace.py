@@ -135,7 +135,7 @@ def _entry_views(request: Request, repo, project: dict, conversation_id: int, be
         e.id,e.project_id,e.task_id,e.author_type,e.author_user_id,e.author_device_id,
         e.source_label,e.kind,e.created_at,e.updated_at,
         substr(e.body_markdown,1,{ENTRY_BODY_LIMIT}) AS body_markdown,
-        length(e.body_markdown) AS body_length,t.title AS task_title,
+        length(e.body_markdown) AS body_length,t.title AS task_title,substr(t.result_summary,1,150) AS receipt_summary,
         t.assigned_agent_id,t.status AS task_status,t.wait_for_task_id,t.coordination_state,a.kind AS agent_kind,a.name AS agent_name,a.name AS assigned_agent_name
         FROM entries e JOIN tasks t ON t.id=e.task_id
         LEFT JOIN hub_agents a ON a.id=t.assigned_agent_id
@@ -174,13 +174,17 @@ def _entry_views(request: Request, repo, project: dict, conversation_id: int, be
                     if PurePosixPath(attachment['original_filename']).suffix.lower()=='.pdf' or
                     (PurePosixPath(attachment['original_filename']).suffix.lower() in {'.md','.txt','.csv','.json','.log'} and attachment['byte_size']<=1024*1024) else '',
             })
+    from .controller_capacity import capacity_label
     for row in rows:
-        row['view_version']=hashlib.sha256(json.dumps([row['body_markdown'],row['attachments'],row['task_status'],row['coordination_state']],sort_keys=True).encode()).hexdigest()[:16]
+        capacity = capacity_label(row['task_status'], row.pop('receipt_summary'))
+        row['view_version']=hashlib.sha256(json.dumps([row['body_markdown'],row['attachments'],row['task_status'],row['coordination_state'],capacity],sort_keys=True).encode()).hexdigest()[:16]
         row['receipt_label']={'open':'已收到 · 等待总控回应' if row['agent_kind']=='controller' else '已收到 · 等待执行',
             'claimed':'已收到 · 准备处理','in_progress':'已收到 · 正在处理','review':'已回复 · 可查看结果',
             'blocked':'已收到 · 当前遇阻','done':'已完成','cancelled':'已取消'}.get(row['task_status'],'已收到')
         if row['coordination_state']=='waiting' and row['task_status'] not in {'done','cancelled'}:
             row['receipt_label']='正在交接 · 等待总控答复'
+        elif capacity:
+            row['receipt_label'] = '已收到 · ' + capacity
     oldest_id = rows[-1]['id'] if rows else None
     return list(reversed(rows)), oldest_id if has_older else None
 

@@ -91,7 +91,8 @@ def task_data(row):
     data = pick(row, 'id title description status priority conversation_id assigned_agent_id assigned_agent_name '
                 'assigned_device_id assigned_device_label result_summary board_label execution_label execution_hint '
                 'execution_route execution_progress created_at updated_at in_history archive_eligible')
-    data['status_label'] = row.get('board_label') or STATUS_LABELS.get(row['status'], row['status'])
+    from .controller_capacity import capacity_label
+    data['status_label'] = capacity_label(row['status'], row.get('result_summary')) or row.get('board_label') or STATUS_LABELS.get(row['status'], row['status'])
     data['in_history'] = bool(row.get('in_history'))
     data['archive_eligible'] = bool(row.get('archive_eligible'))
     data['can_cancel'] = row['status'] in {'open', 'claimed', 'in_progress', 'blocked'}
@@ -386,7 +387,8 @@ def register_mobile_routes(app):
                         raise HTTPException(401, '登录已改变，请保留草稿后重新登录')
                     csrf(request, data)
                 result = store.dispatch(repo, project['id'], agent_ids=ids, title=title, description=description,
-                                        request_key=full_key, conversation_id=room_id, user_id=user['id'], attachments=stored)
+                                        request_key=full_key, conversation_id=room_id, user_id=user['id'], attachments=stored,
+                                        model_data_dir=get_settings(request).data_dir)
                 keep = result['created']
             return {'created': result['created'], 'request_key': key, 'conversation_id': result['conversation_id'],
                     'task_ids': [task['id'] for task in result['tasks']]}

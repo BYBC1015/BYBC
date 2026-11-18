@@ -728,6 +728,7 @@ def register_routes(app: FastAPI) -> None:
         slug: str,
         file: UploadFile = File(...),
         csrf: str = Form("", alias="_csrf"),
+        request_key: str = Form(""),
     ):
         user = require_user(request)
         verify_csrf_token(request, csrf)
@@ -739,16 +740,25 @@ def register_routes(app: FastAPI) -> None:
             file=file,
         )
         try:
-            repo.create_attachment_entry(
-                project_id=project["id"],
-                source_label=user["username"],
-                created_by_user_id=user["id"],
-                **stored,
-            )
+            if request_key:
+                from .library_uploads import save_library_upload
+                attachment, replayed = save_library_upload(repo, project, user, stored, request_key)
+                if replayed:
+                    remove_stored_attachment(request, stored)
+            else:
+                _, attachment = repo.create_attachment_entry(
+                    project_id=project["id"], source_label=user["username"],
+                    created_by_user_id=user["id"], **stored)
+        except ValueError as exc:
+            remove_stored_attachment(request, stored)
+            raise HTTPException(409, str(exc)) from None
         except Exception:
             remove_stored_attachment(request, stored)
             raise
-        return redirect_to(request, f"/projects/{slug}?view=archive#files")
+        if "application/json" in request.headers.get("accept", ""):
+            from .mobile_routes import attachment_data
+            return JSONResponse({"attachment": attachment_data(request, slug, attachment)}, status_code=201)
+        return redirect_to(request, f"/projects/{slug}#files")
 
     @app.get("/projects/{slug}/attachments/{attachment_id}")
     def download_attachment_web(
@@ -1129,6 +1139,10 @@ def register_routes(app: FastAPI) -> None:
     def inbox_api(request: Request):
         device = require_api_device(request)
         repo = get_repo(request)
+        from .controller_capacity import runnable_inbox
+        from time import time
+        tasks = runnable_inbox(repo, device["id"], get_settings(request).data_dir,
+                               repo.list_inbox_tasks_for_device(device["id"]), time())
         return {
             "device": {
                 "id": device["id"],
@@ -1136,7 +1150,7 @@ def register_routes(app: FastAPI) -> None:
                 "group_id": device["group_id"],
                 "group_name": device.get("group_name"),
             },
-            "tasks": repo.list_inbox_tasks_for_device(device["id"]),
+            "tasks": tasks,
             "mentions": repo.list_mentions_for_device(device["id"]),
         }
 

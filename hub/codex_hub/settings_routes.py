@@ -9,7 +9,7 @@ from fastapi import HTTPException, Request
 
 from .agents import AgentStore
 from .mobile_routes import object_body, positive
-from .model_policy import agent_policy, available_models, save_policy
+from .model_policy import agent_policy, available_models, reserve_policy, save_policy
 
 
 def register_settings_routes(app):
@@ -55,6 +55,7 @@ def register_settings_routes(app):
 
     def policy_data(request, repo, project, agent):
         return {'agent_id': agent['id'], 'policy': agent_policy(repo.connection, agent['id']),
+                'is_controller': agent['kind'] == 'controller', 'reserve': reserve_policy(repo.connection, agent['id']),
                 'models': available_models(get_settings(request).data_dir, agent.get('device_id'),
                                            db=repo.connection, project_id=project['id'])}
 
@@ -126,7 +127,7 @@ def register_settings_routes(app):
         authorize_write(request, data)
         _, repo, project = context(request, slug)
         agent = get_agent(repo, project, agent_id)
-        for key in ('mode', 'model', 'reasoning_effort', 'reason'):
+        for key in ('mode', 'model', 'reasoning_effort', 'reason', 'reserve'):
             if key in data and not isinstance(data[key], str):
                 raise HTTPException(422, '模型设置格式无效')
         mode = data.get('mode', 'controller')
@@ -134,7 +135,8 @@ def register_settings_routes(app):
             save_policy(repo.connection, agent, get_settings(request).data_dir, mode=mode,
                         model=data.get('model', '') if mode == 'manual' else '',
                         reasoning_effort=data.get('reasoning_effort', ''),
-                        reason=data.get('reason', '')[:600] if mode == 'manual' else '', actor='user')
+                        reason=data.get('reason', '')[:600] if mode == 'manual' else '', actor='user',
+                        reserve=data.get('reserve'))
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
         return policy_data(request, repo, project, agent)

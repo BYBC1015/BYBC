@@ -357,7 +357,8 @@ class ProjectSessionLease:
     def complete(self, *, ok: bool, returncode: int | None, last_message: str = "",
                  error: str | None = None, output_path: str | Path | None = None,
                  token_usage: dict[str, int] | None = None,
-                 thread_token_usage: dict[str, int] | None = None) -> dict[str, Any]:
+                 thread_token_usage: dict[str, int] | None = None,
+                 provider_rejection: dict | None = None) -> dict[str, Any]:
         self._check_open()
         if not self._started or self._completed:
             raise ProjectSessionError("项目对话尚未启动或已经结束。")
@@ -365,7 +366,12 @@ class ProjectSessionLease:
             raise ProjectSessionError("项目对话返回了无效的执行结果。")
         if self._record.get("blocked_reason"):
             raise ProjectSessionRecoveryRequired(str(self._record["blocked_reason"]))
-        if self.session_id is None:
+        from .provider_health import normalize_rejection
+        rejection = normalize_rejection(provider_rejection)
+        if rejection and (rejection['schema_version'] != 1 or ok or returncode != rejection['returncode']
+                          or not self._turn_failed or self._turn_completed):
+            raise ProjectSessionRecoveryRequired('额度拒绝证据与本轮退出结果不一致，保留执行记录。')
+        if self.session_id is None and rejection is None:
             raise ProjectSessionRecoveryRequired("未确认 Codex 项目对话编号，已保留本轮记录，不能自动新建重试。")
         if ok and (returncode != 0 or not self._observed_session or not self._turn_completed or self._turn_failed):
             raise ProjectSessionRecoveryRequired("项目执行缺少完整的成功事件，暂不作为已完成任务交付。")
@@ -383,6 +389,7 @@ class ProjectSessionLease:
         from .token_usage import normalize_token_usage
         usage = normalize_token_usage(token_usage)
         if usage is not None:receipt['token_usage'] = usage
+        if rejection is not None:receipt['provider_rejection'] = rejection
         cumulative = normalize_token_usage(thread_token_usage)
         receipt['thread_token_usage'] = cumulative
         # Receipt precedes clearing pending: a crash between writes is recovered
